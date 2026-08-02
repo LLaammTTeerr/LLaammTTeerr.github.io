@@ -245,20 +245,41 @@ The original post page then displays "Amended in block #N", linking to the
 amendment. The amendment is placed in the pending block regardless of the date
 it carries, per the membership rule in §3.6.
 
-An amendment is a transaction and so needs its own canonical form, distinct from
-`tx/1` in §3.2:
+Detection compares the **full canonical transaction hash**, not just the body
+hash — otherwise an edit to a post's title, tags, series, or research hours would
+change the transaction hash while leaving the content hash untouched, and would
+be silently discarded.
+
+An amendment therefore carries the post's full metadata, in its own canonical
+form, versioned `tx/2` (the post form in §3.2 stays `tx/1`):
 
 ```
-tx/1
+tx/2
 type:amendment
-date:<YYYY-MM-DD of the amended post>
 amends:<original txHash>
+date:<YYYY-MM-DD of the amended post>
+title:<new title>
+tags:<comma-joined, sorted, lowercased slugs>
+series:<slug, or empty string>
+research:<hours, always exactly one decimal place>
 from:<author address>
 body:<hex sha256 of the new normalized body>
 ```
 
-An amendment carries `gasUsed: 0` and `value: 0`; the word count already belongs
-to the transaction it amends, and counting it twice would inflate chain totals.
+An amendment carries `gasUsed: 0` and `value: 0`; the word count and research
+hours already belong to the transaction it amends, and counting them twice would
+inflate chain totals. Its declared hours live in a separate `research` field,
+serialized only for amendments — a reader wanting a post's current effort figure
+reads `research` from the newest amendment, falling back to `value` on the
+original transaction.
+
+An amendment's `to` stays empty even when tags change, so the tag address graph
+reflects original publication. Consumers wanting current tags read the `tags`
+field of the newest amendment.
+
+A live post whose slug matches a sealed slug but whose `date` differs is a
+different post reusing a filename, not an edit, and is a build error.
+
 Amendments are listed in block transaction tables but excluded from post lists,
 RSS, and the search index — they are ledger entries, not new writing.
 
@@ -350,7 +371,17 @@ and readability owns the body. Code blocks and LaTeX render normally.
 
 `/verify` fetches `chain.json` and recomputes the chain in the reader's browser
 via Web Crypto, streaming results per block: block hash from header, Merkle root
-from transaction hashes, previous-hash linkage, and proof-of-work difficulty.
+from transaction hashes, **each transaction's own hash recomputed from its
+fields**, the `gasUsed` and `value` sums, previous-hash linkage, and proof-of-work
+difficulty.
+
+Recomputing transaction hashes is not optional. Verifying only the Merkle root
+proves the recorded hashes are consistent with each other, not that they match
+the content displayed beside them — a forged title would still verify clean.
+
+Proof-of-work is checked against each block's own committed `difficulty`, with
+the chain-level `difficulty` as a floor, so raising or lowering the setting later
+leaves existing blocks valid.
 
 Each post page additionally offers **"Verify this transaction"**, which fetches
 that post's canonical source and hashes it live — closing the loop from raw text
