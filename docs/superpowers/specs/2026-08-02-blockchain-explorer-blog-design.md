@@ -33,6 +33,10 @@ Comments, analytics, newsletter/subscribe, English or bilingual content, and any
 crypto metaphor beyond those specified in §4. Six real metadata fields beat twenty
 invented ones; unchecked metaphor expansion is the main way this design fails.
 
+Also out: any server-side or account-bound store for reader preferences (§9.1).
+They live in the reader's own browser and nowhere else, which is what keeps the
+site genuinely static.
+
 ---
 
 ## 2. Core problem and its solution
@@ -477,13 +481,67 @@ box. No server and no heavy dependency; the corpus is tens to hundreds of posts.
 
 ## 9. Visual direction
 
-Dark-first on a near-black canvas. Monospace for every hash and metadata field,
-middle-truncated with click-to-copy. A humanist sans for Vietnamese prose. Status
-pills (`✓ Confirmed`, `⏳ Pending`). The accent is deliberately not Etherscan
-blue: an amber "mined" accent, with green reserved for confirmations.
+Settled over six mockup rounds. The layout is fixed; three axes are reader
+preferences (§9.1).
 
-Fonts are self-hosted — no external CDN — which keeps the build portable and
-avoids a third-party request on every page load.
+**Structure.** Blocks are cards in a list, **newest first**, with a left gutter
+carrying the block number beside a single continuous chain line. The line is one
+colour and one weight from the newest block to the oldest; the number sits to its
+left so nothing interrupts the run. Sealed blocks carry a rotated `SEALED` stamp;
+an empty month and the open block are drawn as dashed cards.
+
+**Navigation.** One row: identity, section links, search, preferences. The stats
+tiles (chain height, transactions, addresses, difficulty) stay a separate band
+below it rather than being absorbed into the header.
+
+**Post pages.** A dense monospace transaction panel, then the article at roughly
+a 38rem measure in the prose face. Metadata and prose never share a typeface.
+
+**Type.** Monospace for every hash, address, and number, middle-truncated with
+click-to-copy and `tabular-nums` wherever digits align. A humanist sans for
+Vietnamese prose. Fonts are self-hosted — no external CDN — which keeps the build
+portable and avoids a third-party request per page load. Vietnamese diacritic
+coverage in the monospace face is a selection gate, not an afterthought (§13).
+
+**Work meter.** Each block shows how its nonce compared to the expected attempts
+for the difficulty — `16^difficulty`. Over-expected reads in the warning colour,
+under-expected in the success colour. It measures luck against a real
+distribution rather than an invented percentage.
+
+### 9.1 Reader preferences
+
+Three axes are the reader's to choose, persisted locally and applied before first
+paint. A CP audience has opinions about editor themes; the site defers to them.
+
+| Axis | Options | Default |
+|---|---|---|
+| Palette | GitHub Dark/Light, Tokyo Night, Gruvbox, Nord, Dracula, Catppuccin Mocha/Latte, Solarized Dark, One Dark, Rosé Pine | GitHub Dark |
+| Colour intensity | Minimal · Balanced · Full | Minimal |
+| Work meter | Bar · Segments · Probability curve | Bar |
+
+- **Palette** sets ground, surface, rules, text, and the token hues. Each theme
+  uses **its own signature colour**, never forced into a shared accent slot —
+  Tokyo Night reads blue, Dracula purple, Gruvbox orange.
+- **Intensity** governs how many roles get a hue. *Minimal*: mined zeros in the
+  accent, everything else muted, colour reserved for status. *Balanced*: adds
+  addresses. *Full*: hashes, addresses, tags, and numbers each take a distinct
+  token colour, syntax-highlighting style.
+- **Meter** picks between the bar with an expected-value tick, segments of
+  `16^difficulty / 4` attempts each that fill partially, and the cumulative
+  probability curve.
+
+Implementation constraints:
+
+- All three are `data-*` attributes on the root element; every palette and
+  intensity is plain CSS custom properties, so switching costs no rebuild and no
+  request.
+- Preferences are read from `localStorage` by a small **blocking inline script**
+  in `<head>`, before first paint. A flash of the wrong theme is a defect.
+- **The site works with JavaScript disabled**, at the defaults. All three meter
+  markups render statically and CSS selects one, rather than JS drawing them —
+  a reader without JS gets the bar, not an empty box.
+- The picker is a real control: keyboard-reachable, `aria-pressed` state, and it
+  respects `prefers-color-scheme` for the initial palette on first visit.
 
 ---
 
