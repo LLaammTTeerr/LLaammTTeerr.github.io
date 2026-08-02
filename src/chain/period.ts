@@ -10,7 +10,7 @@ export function monthOf(date: string): string {
 function parsePeriod(period: string): { year: number; month: number } {
   const year = Number(period.slice(0, 4));
   const month = Number(period.slice(5, 7));
-  if (!Number.isInteger(year) || month < 1 || month > 12) {
+  if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
     throw new Error(`invalid period: ${period}`);
   }
   return { year, month };

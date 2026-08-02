@@ -27,6 +27,10 @@ describe('lastDayOfMonth', () => {
   it('handles December', () => {
     expect(lastDayOfMonth('2026-12')).toBe('2026-12-31');
   });
+
+  it('throws on a non-numeric month instead of returning garbage', () => {
+    expect(() => lastDayOfMonth('2026-xx')).toThrow();
+  });
 });
 
 describe('nextMonth', () => {

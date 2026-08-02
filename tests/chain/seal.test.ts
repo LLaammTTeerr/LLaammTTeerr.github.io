@@ -98,6 +98,112 @@ describe('planBlocks', () => {
     const drafts = planBlocks([amendment, tx('2026-07-20', 'a')], OPTS);
     expect(drafts[0]!.transactions.map((t) => t.type)).toEqual(['post', 'amendment']);
   });
+
+  it('places an amendment dated before fromPeriod into the first still-open period, not its own month', () => {
+    const amendment: Transaction = {
+      ...tx('2026-03-10', 'z'),
+      type: 'amendment',
+      slug: null,
+      title: null,
+      amends: '0xolder',
+      gasUsed: 0,
+      value: 0,
+    };
+    const drafts = planBlocks([amendment], {
+      maxTxPerBlock: 4,
+      fromPeriod: '2026-08',
+      now: '2026-09-15',
+    });
+    expect(drafts).toHaveLength(1);
+    expect(drafts[0]!.period).toBe('2026-08');
+    expect(drafts[0]!.transactions).toEqual([amendment]);
+  });
+
+  it('does not mint empty blocks for months before fromPeriod, even when a stale-dated tx exists', () => {
+    const amendment: Transaction = {
+      ...tx('2026-03-10', 'z'),
+      type: 'amendment',
+      slug: null,
+      title: null,
+      amends: '0xolder',
+      gasUsed: 0,
+      value: 0,
+    };
+    const drafts = planBlocks([amendment], {
+      maxTxPerBlock: 4,
+      fromPeriod: '2026-08',
+      now: '2026-09-15',
+    });
+    // Without the fix this would propose a block for 2026-03 plus empty
+    // blocks for 2026-04..2026-08 — months already sealed on the chain.
+    expect(drafts.map((d) => d.period)).toEqual(['2026-08']);
+  });
+
+  it('places a post backdated before fromPeriod into the first still-open period, keeping its original date', () => {
+    const backdated = tx('2026-01-05', 'old-post');
+    const drafts = planBlocks([backdated], {
+      maxTxPerBlock: 4,
+      fromPeriod: '2026-08',
+      now: '2026-09-15',
+    });
+    expect(drafts).toHaveLength(1);
+    expect(drafts[0]!.period).toBe('2026-08');
+    expect(drafts[0]!.transactions).toEqual([backdated]);
+    expect(drafts[0]!.transactions[0]!.date).toBe('2026-01-05');
+  });
+
+  it('still seals the remainder of a size-limit split in its own month', () => {
+    const remainder = tx('2026-08-05', 'e');
+    const drafts = planBlocks([remainder], {
+      maxTxPerBlock: 4,
+      fromPeriod: '2026-08',
+      now: '2026-09-01',
+    });
+    expect(drafts).toHaveLength(1);
+    expect(drafts[0]!.period).toBe('2026-08');
+    expect(drafts[0]!.transactions).toEqual([remainder]);
+  });
+
+  it('orders two amendments to the same post identically regardless of input order', () => {
+    const amendment1: Transaction = {
+      ...tx('2026-07-01', 'amend1'),
+      type: 'amendment',
+      slug: null,
+      title: null,
+      amends: '0xolder',
+      gasUsed: 0,
+      value: 0,
+    };
+    const amendment2: Transaction = {
+      ...tx('2026-07-01', 'amend2'),
+      type: 'amendment',
+      slug: null,
+      title: null,
+      amends: '0xolder',
+      gasUsed: 0,
+      value: 0,
+    };
+    const forward = planBlocks([amendment1, amendment2], OPTS);
+    const reversed = planBlocks([amendment2, amendment1], OPTS);
+    expect(forward).toEqual(reversed);
+    expect(forward[0]!.transactions.map((t) => t.hash)).toEqual(['0xamend1', '0xamend2']);
+  });
+
+  it('produces exactly one full block for a past month with exactly maxTxPerBlock transactions, no trailing empty block', () => {
+    const txs = ['a', 'b', 'c', 'd'].map((s, i) => tx(`2026-07-0${i + 1}`, s));
+    const drafts = planBlocks(txs, OPTS);
+    expect(drafts).toHaveLength(1);
+    expect(drafts[0]!.period).toBe('2026-07');
+    expect(drafts[0]!.transactions).toHaveLength(4);
+  });
+
+  it('throws when maxTxPerBlock is zero', () => {
+    expect(() => planBlocks([], { ...OPTS, maxTxPerBlock: 0 })).toThrow();
+  });
+
+  it('throws when maxTxPerBlock is not an integer', () => {
+    expect(() => planBlocks([], { ...OPTS, maxTxPerBlock: 2.5 })).toThrow();
+  });
 });
 
 describe('blockTimestamp', () => {
