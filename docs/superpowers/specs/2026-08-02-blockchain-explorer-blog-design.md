@@ -100,6 +100,40 @@ Its serialization is fixed at one decimal place (`12.5`, `0.0`, `40.0`) so that
 `12.5`, `12.50`, and `12.500` in frontmatter cannot produce three different
 hashes for identical content.
 
+### 3.2b Assets — minted tokens
+
+An uploaded file (diagram, figure, screenshot) that a post references is an
+**asset**, presented in explorer vocabulary as a minted token.
+
+The reason is integrity, not theme. Without this, verification proves a post's
+*text* is untampered while its images are unchecked — someone could swap a
+diagram in a published post and `/verify` would still report a clean chain. For
+writing that carries algorithm figures, that is a real hole.
+
+- Assets live in `content/assets/`. A file no post references is not on the
+  chain at all; it is just a file.
+- An asset's hash is `sha256` over its **raw bytes**. No normalization — it is
+  binary, not text.
+- The post's canonical form carries an `assets:` line: the comma-joined,
+  **sorted** asset hashes, so declaration order cannot change the transaction
+  hash. Tampering with any referenced image therefore breaks the post's
+  transaction hash, and the existing verifier catches it with no new machinery.
+- **Token ID** is assigned by first appearance on the chain — block height,
+  then transaction order within the block, then asset hash. Deterministic.
+- **Minted in** is the block of the first transaction referencing the asset.
+- Replacing a post's image is a metadata change and produces an amendment
+  (§3.9), so the amendment form carries `assets:` too.
+
+Real fields only: hash, token ID, mint block, minter, byte size, MIME type, and
+the posts that reference it. Explicitly **not** built: transfer history (nothing
+ever changes hands on a personal blog), price, rarity, editions, or a
+marketplace. Those have no referent here, and inventing them is the gimmick
+creep §1 rules out.
+
+**Cost to accept knowingly:** binaries in git are permanent, since history keeps
+every version. Fine for diagrams; bad for photo galleries. If asset weight
+becomes a problem, git-lfs is the escape hatch, at the price of a moving part.
+
 ### 3.3 Merkle root
 
 Standard binary Merkle tree over the block's transaction hashes in block order:
@@ -344,6 +378,8 @@ middle of unrelated posts.
 | `/blocks` | Paginated block list |
 | `/block/[height]` | Block detail: header fields plus its transaction list |
 | `/tx/[slug]` | **A post.** Canonical URL — explorer-flavoured path, still readable and SEO-friendly |
+| `/assets` | Minted tokens — the gallery of every asset on the chain |
+| `/asset/[tokenId]` | One asset: the file itself, its hash, mint block, size, type, and the posts referencing it, with a "Verify this asset" button that hashes the bytes in the browser |
 | `/address/[name]` | Tag or series page: transaction list, post count, first seen, last seen |
 | `/address/lamter.eth`, `/about` | Author profile: bio, verified social links, deployed contracts, transaction history |
 | `/contracts`, `/contract/[name]` | Projects as verified contracts, source linked to GitHub |
