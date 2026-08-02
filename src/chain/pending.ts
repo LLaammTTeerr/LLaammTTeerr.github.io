@@ -1,6 +1,6 @@
-import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { canonicalRecordedTx } from './canonical';
+import { sha256HexSync } from './hash-node';
 import { orderedTransaction } from './lock';
 import type { Hex, Transaction } from './types';
 import { transactionStructuralProblem } from './verify';
@@ -31,25 +31,6 @@ export interface PendingLock {
 
 export const PENDING_PATH = 'chain.pending.json';
 
-/**
- * The same digest `sha256Hex` produces, computed synchronously.
- *
- * `readPending` is sync and is read from sync template code; WebCrypto's
- * `digest` is not, and making the whole read path async to reach it would
- * change every caller for no gain in what is proved. This module is Node-only
- * already — it reads and deletes files — and nothing here is in `verify.ts`'s
- * browser closure, which imports in the other direction.
- *
- * Only the *hashing* is duplicated, never the canonical form: that comes from
- * `canonicalRecordedTx`, the single definition `verifyBlock` also uses. The
- * two hashers are pinned against each other in `tests/chain/pending.test.ts`,
- * whose fixtures compute their hashes with `sha256Hex` and are then accepted
- * — or rejected — by this one.
- */
-function sha256HexSync(data: string): Hex {
-  return '0x' + createHash('sha256').update(data, 'utf8').digest('hex');
-}
-
 /** Same conventions as the lock: explicit key order, 2-space indent, trailing newline. */
 export function serializePending(pending: PendingLock): string {
   const ordered = {
@@ -70,10 +51,18 @@ export function serializePending(pending: PendingLock): string {
  * Deliberately total: unlike `readLock`, this **never throws**. The lock is the
  * ledger and a corrupt one must stop the build; this file is provisional and
  * fully derivable from `content/` plus the lock, so a malformed or
- * wrong-version one must never take the build down. The worst case of
- * returning `null` is that placement is reassigned from the clock for
- * transactions that had not sealed anyway — recoverable. Throwing here would
- * mean a hand-edited scratch file bricks `npm run chain:build`.
+ * wrong-version one must never crash a caller. Throwing here would mean a
+ * hand-edited scratch file bricks `npm run chain:build`.
+ *
+ * `null` is not the same as harmless, and this contract used to claim it was.
+ * For `chain:build` it is recoverable: placement is reassigned from the clock
+ * for transactions that had not sealed anyway, and the file is rewritten. For
+ * `astro build` it can be fatal, and correctly so — if the rejected file held
+ * the only amendment vouching for a post's body on disk, that body is now
+ * backed by no record this reader will accept, and `getPostContent` fails the
+ * build rather than rendering text the chain cannot vouch for. What is
+ * guaranteed is that the failure is loud and names the file, never that a
+ * rejected open block leaves the site buildable.
  */
 export function readPending(path: string): PendingLock | null {
   if (!existsSync(path)) return null;
@@ -124,6 +113,23 @@ export function readPending(path: string): PendingLock | null {
   for (const tx of transactions) {
     const canonical = canonicalRecordedTx(tx);
     if (canonical === null || sha256HexSync(canonical) !== tx.hash) return null;
+  }
+
+  // §3.9 — an amendment's `gasUsed` and `value` are fixed at 0 so block
+  // aggregation cannot re-charge the word count and research hours already
+  // counted in the block that sealed the original. Neither is in the
+  // `amendment/1` canonical form (the declared hours travel as `research`
+  // instead), so the hash check above cannot see them: a hand-edited
+  // `gasUsed: 12345` or `value: 999.0` on an amendment leaves the hash
+  // perfectly valid. They are constants, not data, so require them.
+  //
+  // A sealed amendment needs no such rule: `verifyBlock` checks each block's
+  // committed `gasUsed`/`value` against the sum over its transactions, and the
+  // open block has no committed sums to check against. This is that check's
+  // analogue for the one block that has not been mined.
+  for (const tx of transactions) {
+    if (tx.type !== 'amendment') continue;
+    if (tx.gasUsed !== 0 || tx.value !== 0) return null;
   }
 
   return {

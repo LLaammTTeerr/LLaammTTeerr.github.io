@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { CHAIN_CONFIG } from '../../chain.config';
-import { shortHash, splitHashWork } from '../../src/site/chain-data';
+import { shortHash, splitHashWork, txMetaLine, type RecordedTx } from '../../src/site/chain-data';
 import {
   getChain, getBlocks, getBlock, getPosts, getAssets, getStats,
   workRatio, expectedAttempts, getPendingBlock, researchHours,
@@ -123,6 +123,53 @@ describe('researchHours', () => {
 
   it('reports the declared hours of the one post on the committed chain', () => {
     expect(researchHours(getPosts()[0]!.value)).toBe('1.0');
+  });
+});
+
+describe('txMetaLine', () => {
+  const row = (overrides: Partial<RecordedTx>): RecordedTx => ({
+    hash: '0x' + 'a'.repeat(64),
+    type: 'post',
+    slug: 'bai-viet',
+    title: 'Bài viết',
+    date: '2026-08-05',
+    tags: [],
+    series: null,
+    from: '0x' + 'c'.repeat(40),
+    to: [],
+    contentHash: '0x' + 'b'.repeat(64),
+    assets: [],
+    gasUsed: 44,
+    value: 1,
+    research: null,
+    amends: null,
+    ...overrides,
+  });
+
+  it('shows a post its word count and its declared hours', () => {
+    expect(txMetaLine(row({}))).toBe('44 từ · 1.0 giờ');
+  });
+
+  it('shows an em dash, not 0.0, for an undeclared research figure (§3.8)', () => {
+    expect(txMetaLine(row({ value: 0 }))).toBe('44 từ · —');
+  });
+
+  it('omits a word count that could not be re-derived, rather than inventing one', () => {
+    const line = txMetaLine(row({ gasUsed: null }));
+    expect(line).toBe('— · 1.0 giờ');
+    expect(line, 'a null word count rendered as a number').not.toMatch(/\d+ từ/);
+  });
+
+  it('says where an amendment\'s figures were counted instead of printing its zeros', () => {
+    // §3.9 fixes an amendment's gasUsed and value at 0 so block aggregation
+    // cannot re-charge the original's. Printed bare, `0 từ` reads as "this
+    // post has no words" — and the post page shows the real count, derived
+    // from the body the amendment commits to. Two pages disagreeing about one
+    // transaction with nothing saying why is what this line prevents.
+    const line = txMetaLine(row({ type: 'amendment', slug: null, gasUsed: 0, value: 0, research: 9.5 }));
+    expect(line).toContain('đính chính');
+    expect(line, 'an amendment printed its accounting zero as a word count').not.toContain('0 từ');
+    expect(line).not.toMatch(/\d+ từ/);
   });
 });
 
@@ -320,25 +367,53 @@ describe('getPendingBlock', () => {
   const HASH2 = '0x' + 'b'.repeat(64);
   const ADDR = '0x' + 'c'.repeat(40);
 
+  /**
+   * A recorded open-block post naming the one post that really is on disk.
+   *
+   * The slug and `contentHash` are the committed ones, so `getPendingBlock`
+   * can re-derive the word count from `content/posts/<slug>.md` — the whole
+   * point of `derivedGas`. `hash` stays fabricated, because that field IS
+   * taken from the record as written (`readPending` is what authenticates it,
+   * and it is mocked here).
+   */
+  const REAL = getPosts()[0]!;
+  /** The word count the body on disk actually has — read from the ledger. */
+  const REAL_WORDS = REAL.gasUsed;
+
   function pendingTx(overrides: Partial<Transaction> = {}): Transaction {
     return {
       hash: HASH,
       type: 'post',
-      slug: 'bai-viet',
+      slug: REAL.slug,
       title: 'Bài viết',
       date: '2026-08-05',
       tags: ['essay'],
       series: null,
       from: ADDR,
       to: [],
-      contentHash: HASH2,
+      contentHash: REAL.contentHash,
       assets: [],
-      gasUsed: 12,
+      // Deliberately a lie: nothing may print this number.
+      gasUsed: 12345,
       value: 2,
       research: null,
       amends: null,
       ...overrides,
     };
+  }
+
+  function pendingAmendment(overrides: Partial<Transaction> = {}): Transaction {
+    return pendingTx({
+      hash: HASH2,
+      type: 'amendment',
+      slug: null,
+      title: 'Bài viết (đã sửa)',
+      amends: REAL.hash,
+      gasUsed: 0,
+      value: 0,
+      research: 3,
+      ...overrides,
+    });
   }
 
   // `prevHash` defaults to the real chain's actual tip, so the fixture reads
@@ -366,17 +441,65 @@ describe('getPendingBlock', () => {
   it('exposes the recorded transactions with their recorded hashes', () => {
     // Not recomputed. The point of the file is that the site shows what
     // chain:build committed, so a hash on the page is one you can diff. HASH
-    // and HASH2 are fabricated, not derivable from any real content — if the
-    // implementation tried to recompute them from disk instead of trusting
-    // the recorded file, this would not come back matching.
-    const recorded = pendingTx({ hash: HASH, contentHash: HASH2 });
+    // is fabricated — if the implementation recomputed it from disk instead of
+    // trusting the recorded file, this would not come back matching.
+    // (`readPending` is what authenticates that hash, and it is mocked here.)
+    const recorded = pendingTx();
     vi.mocked(readPending).mockReturnValue(pendingFixture({ transactions: [recorded] }));
 
     const pending = getPendingBlock();
     expect(pending).not.toBeNull();
-    expect(pending!.transactions).toEqual([recorded]);
     expect(pending!.transactions[0]!.hash).toBe(HASH);
-    expect(pending!.transactions[0]!.contentHash).toBe(HASH2);
+    expect(pending!.transactions[0]!.contentHash).toBe(REAL.contentHash);
+    expect(pending!.transactions[0]!.title).toBe('Bài viết');
+  });
+
+  it('re-derives a recorded word count from the body, never trusting the file', () => {
+    // §3.8 — gas is derived, and it is in neither canonical form, so a
+    // transaction hash cannot vouch for it. A sealed block's is covered by the
+    // mined header's committed sum; the open block has no such sum, which let
+    // a hand-edited `gasUsed: 12345` print on `/` and `/blocks` through a
+    // green build. The body IS committed, as `contentHash`, so the count is
+    // taken from there instead.
+    vi.mocked(readPending).mockReturnValue(pendingFixture({ transactions: [pendingTx()] }));
+    const pending = getPendingBlock()!;
+    expect(pending.transactions[0]!.gasUsed).toBe(REAL_WORDS);
+    expect(pending.transactions[0]!.gasUsed, 'the file’s claimed word count was believed').not.toBe(12345);
+    expect(pending.gasUsed).toBe(REAL_WORDS);
+  });
+
+  it('reports no word count at all when it cannot be re-derived', () => {
+    // Never a fallback to the recorded number: a figure that could not be
+    // re-derived is not one this site may print, on the same rule by which the
+    // open block shows no hash it has not mined. The block total goes with it —
+    // summing the rest would report a smaller number as the block's gas.
+    vi.mocked(readPending).mockReturnValue(
+      pendingFixture({ transactions: [pendingTx({ slug: 'khong-co-tren-dia' })] }),
+    );
+    const pending = getPendingBlock()!;
+    expect(pending.transactions[0]!.gasUsed).toBeNull();
+    expect(pending.gasUsed).toBeNull();
+  });
+
+  it('reports no word count when the body on disk is not the one committed', () => {
+    // The slug resolves, but that body hashes to something else, so it is not
+    // the text this transaction speaks for.
+    vi.mocked(readPending).mockReturnValue(
+      pendingFixture({ transactions: [pendingTx({ contentHash: HASH2 })] }),
+    );
+    expect(getPendingBlock()!.transactions[0]!.gasUsed).toBeNull();
+  });
+
+  it("keeps an amendment's gas at the accounting zero §3.9 fixes it at", () => {
+    // Not derived: an amendment's gas is 0 by definition so block aggregation
+    // cannot re-charge the original's, and `readPending` refuses a recorded
+    // amendment that says otherwise.
+    vi.mocked(readPending).mockReturnValue(
+      pendingFixture({ transactions: [pendingAmendment()] }),
+    );
+    const pending = getPendingBlock()!;
+    expect(pending.transactions[0]!.gasUsed).toBe(0);
+    expect(pending.gasUsed).toBe(0);
   });
 
   it('refuses a pending file written against a different tip', () => {
@@ -403,13 +526,17 @@ describe('getPendingBlock', () => {
   });
 
   it('sums gasUsed and value across the recorded transactions', () => {
-    const a = pendingTx({ hash: HASH, gasUsed: 10, value: 1 });
-    const b = pendingTx({ hash: HASH2, slug: 'bai-hai', gasUsed: 20, value: 3 });
+    // Gas is summed over what was *re-derived*, not over what the file claims
+    // — both records here claim 12345 and neither contributes it. `value` is
+    // summed as recorded, which is sound: a post's declared hours travel in
+    // the `post/1` canonical form, so the transaction hash does vouch for them.
+    const a = pendingTx({ hash: HASH, value: 1 });
+    const b = pendingTx({ hash: HASH2, value: 3 });
     vi.mocked(readPending).mockReturnValue(pendingFixture({ transactions: [a, b] }));
 
     const pending = getPendingBlock()!;
     expect(pending.txCount).toBe(2);
-    expect(pending.gasUsed).toBe(30);
+    expect(pending.gasUsed).toBe(REAL_WORDS * 2);
     expect(pending.value).toBe(4);
   });
 

@@ -1,7 +1,7 @@
 ---
 import WorkMeter from './WorkMeter.astro';
 import PendingState from './PendingState.astro';
-import { researchHours, shortHash, splitHashWork } from '../site/chain-data';
+import { shortHash, splitHashWork, txMetaLine } from '../site/chain-data';
 import type { AnyBlockView } from '../site/chain-data';
 // The card's styles travel with the card — see the note in WorkMeter.astro.
 import '../styles/chain.css';
@@ -62,16 +62,17 @@ const isEmpty = block.sealed && block.isEmpty;
     {block.sealed ? <WorkMeter nonce={block.nonce} difficulty={block.difficulty} /> : null}
     {block.transactions.length > 0 ? (
       <ul class="txs">
-        {block.transactions.map((tx) => {
-          // §3.8: an undeclared `research` is an em dash, not `0.0 giờ`.
-          const hours = researchHours(tx.value);
-          return (
-            <li>
-              <h3 class="t">{tx.slug ? <a href={`/tx/${tx.slug}`}>{tx.title}</a> : (tx.title ?? 'Amendment')}</h3>
-              <span class="g">{tx.gasUsed} từ · {hours ? `${hours} giờ` : '—'}</span>
-            </li>
-          );
-        })}
+        {block.transactions.map((tx) => (
+          <li>
+            <h3 class="t">{tx.slug ? <a href={`/tx/${tx.slug}`}>{tx.title}</a> : (tx.title ?? 'Amendment')}</h3>
+            {/* §3.8/§3.9 — one definition of this line, shared with the block
+                detail page: an undeclared `research` is an em dash and not
+                `0.0 giờ`, an amendment says where its figures were counted
+                instead of printing its accounting zeros, and a word count that
+                could not be re-derived is omitted rather than taken on trust. */}
+            <span class="g">{txMetaLine(tx)}</span>
+          </li>
+        ))}
       </ul>
     ) : (
       <p class="silent">Không có bài viết nào trong tháng này. Khối vẫn được đào.</p>

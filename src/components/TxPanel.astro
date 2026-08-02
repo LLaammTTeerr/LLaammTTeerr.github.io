@@ -1,6 +1,5 @@
 ---
-import type { Transaction } from '../chain/types';
-import type { AmendedIn } from '../site/chain-data';
+import type { AmendedIn, RecordedTx } from '../site/chain-data';
 import { getBlocks, getPendingBlock, researchHours } from '../site/chain-data';
 import { routeById } from '../site/routes';
 import PendingState from './PendingState.astro';
@@ -25,8 +24,14 @@ import '../styles/post.css';
 // therefore print `0 từ · —` under an amended post's text, so the caller — the
 // only party that knows which body is on screen — has to supply both.
 interface Props {
-  /** The transaction being described: the one whose hash commits to the text. */
-  tx: Transaction;
+  /**
+   * The transaction being described: the one whose hash commits to the text.
+   *
+   * `RecordedTx`, so a transaction out of the open block is accepted — its own
+   * `gasUsed` may be unverifiable, which is exactly why this panel is told the
+   * figure separately and never reads it off `tx`.
+   */
+  tx: RecordedTx;
   pending: boolean;
   /** §3.8 — word count of the body shown beside this panel. */
   gasUsed: number;

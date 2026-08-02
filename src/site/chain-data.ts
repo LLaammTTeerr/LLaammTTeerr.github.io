@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { CHAIN_CONFIG } from '../../chain.config';
 import { normalizeBody, wordCount } from '../chain/canonical';
 import { sha256Hex } from '../chain/hash';
+import { sha256HexSync } from '../chain/hash-node';
 import { readLock } from '../chain/lock';
 import { isStale, PENDING_PATH, readPending } from '../chain/pending';
 import { parsePost } from '../chain/post';
@@ -142,6 +143,26 @@ export function getPosts(): Transaction[] {
 }
 
 /**
+ * A transaction as a view may describe it.
+ *
+ * Identical to `Transaction` except that `gasUsed` may be `null`. §3.8 makes
+ * gas a **derived** field — the word count of the normalized body — and it is
+ * the one displayed field no transaction hash covers: it appears in neither
+ * the `post/1` nor the `amendment/1` canonical form. On a sealed transaction
+ * that is harmless, because `verifyBlock` checks each block's committed
+ * `gasUsed` against the sum over its transactions. The open block has no mined
+ * header and so no committed sum, which left a hand-edited
+ * `chain.pending.json` free to claim any word count it liked and have the
+ * block cards print it.
+ *
+ * So the open block's figures are re-derived from the body their own
+ * `contentHash` commits to, and `null` says "not re-derivable" — never the
+ * recorded number, the same rule by which the open block shows no hash it has
+ * not mined.
+ */
+export type RecordedTx = Omit<Transaction, 'gasUsed'> & { gasUsed: number | null };
+
+/**
  * §3.6 — post transactions in the still-open block: published, hashed, in the
  * chain, and not yet sealed.
  *
@@ -156,7 +177,7 @@ export function getPosts(): Transaction[] {
  * they are ledger entries about a post, not a post, and they carry no slug to
  * build a page from (§3.9).
  */
-export function getPendingPosts(): Transaction[] {
+export function getPendingPosts(): RecordedTx[] {
   const pending = getPendingBlock();
   if (pending === null) return [];
   return pending.transactions.filter((t) => t.type === 'post');
@@ -186,7 +207,7 @@ export interface PostContent {
    * supersedes it this is history: it names when the post entered the chain
    * and what it said then, and it describes **none** of what is rendered.
    */
-  tx: Transaction;
+  tx: RecordedTx;
   /**
    * The transaction whose hash commits to `body` — the newest amendment, or
    * `tx` when nothing amends it.
@@ -196,7 +217,7 @@ export interface PostContent {
    * printed a hash that does not commit to the words under it, which is the
    * one falsehood this project cannot ship (§3.2, §7).
    */
-  governing: Transaction;
+  governing: RecordedTx;
   /** True while `governing` is in the open block — it is not `Sealed` (§3.6). */
   pending: boolean;
   /**
@@ -240,18 +261,18 @@ export interface PostContent {
  * made, so there is no better signal to use; `detectAmendments` emits at most
  * one per post per build, which keeps that shape rare.)
  */
-function latestAmendment(txHash: Hex): (AmendedIn & { tx: Transaction }) | null {
-  const amends = (t: Transaction): boolean => t.type === 'amendment' && t.amends === txHash;
+function latestAmendment(txHash: Hex): (AmendedIn & { tx: RecordedTx }) | null {
+  const amends = (t: RecordedTx): boolean => t.type === 'amendment' && t.amends === txHash;
 
   const pending = getPendingBlock();
   if (pending !== null) {
-    let newest: Transaction | null = null;
+    let newest: RecordedTx | null = null;
     for (const tx of pending.transactions) if (amends(tx)) newest = tx;
     if (newest !== null) return { tx: newest, height: pending.height, sealed: false };
   }
 
   const ascending = [...getChain().blocks].sort((a, b) => a.height - b.height);
-  let latest: (AmendedIn & { tx: Transaction }) | null = null;
+  let latest: (AmendedIn & { tx: RecordedTx }) | null = null;
   for (const block of ascending) {
     for (const tx of block.transactions) {
       if (amends(tx)) latest = { tx, height: block.height, sealed: true };
@@ -326,9 +347,21 @@ export async function getPostContent(
     // (§3.6). Naming an amendment there would tell the author to expect a
     // ledger entry that will not appear.
     const records = sealed === undefined ? 'record the edit' : 'record the edit as an amendment';
+    // A rejected open block is the one cause this advice does not address, and
+    // it is invisible from here otherwise: `readPending` collapses "no file"
+    // and "a file this reader will not accept" into the same `null`, so the
+    // amendment vouching for this body simply stops existing and the error
+    // reads as ordinary drift. Say which it is, or the author re-runs
+    // `chain:build` against a file that was never the problem.
+    const rejected = existsSync(PENDING_PATH) && getPendingBlock() === null;
+    const note = rejected
+      ? ` — note: ${PENDING_PATH} exists but was not accepted (a transaction hash that does not` +
+        ' recompute, or a record written against a different tip), so any amendment it held' +
+        ' vouches for nothing here'
+      : '';
     throw new Error(
       `${path} does not match the chain: committed ${expected.slice(0, 10)}…, ` +
-        `on disk ${actual.slice(0, 10)}… — re-run \`npm run chain:build\` to ${records}`,
+        `on disk ${actual.slice(0, 10)}… — re-run \`npm run chain:build\` to ${records}${note}`,
     );
   }
 
@@ -367,11 +400,15 @@ export interface PendingBlockView {
   height: number;
   /** YYYY-MM — the recorded placement (§3.6); does not slide with the clock. */
   period: string;
-  /** Recorded transactions, in the order `chain:build` committed them. */
-  transactions: Transaction[];
+  /**
+   * Recorded transactions, in the order `chain:build` committed them, with
+   * each `gasUsed` re-derived from the body its own `contentHash` commits to
+   * (see `RecordedTx`).
+   */
+  transactions: RecordedTx[];
   txCount: number;
-  /** Sum over `transactions`. */
-  gasUsed: number;
+  /** Sum over `transactions`; `null` if any one of them is not re-derivable. */
+  gasUsed: number | null;
   /** Sum over `transactions`. */
   value: number;
   /** How many transactions a block holds before sealing — the "1/4 giao dịch" fill. */
@@ -419,6 +456,57 @@ function sealsOn(period: string): string {
 }
 
 /**
+ * §3.8 — the word count of the body a recorded transaction commits to,
+ * recomputed from disk, or `null` when no body on disk hashes to that value.
+ *
+ * This is the open block's analogue of the check the mined header gives a
+ * sealed block. A transaction hash covers neither `post/1` nor `amendment/1`
+ * gas — the field is derived, so it was never put in the canonical form, and
+ * adding it now would change the format and invalidate every hash already in
+ * `chain.lock.json`. It does not need to be there: the *body* is committed, as
+ * `contentHash`, so a count taken from a body that hashes to the committed
+ * value is exactly as verifiable as the hash beside it.
+ *
+ * An amendment is 0 by definition (§3.9) rather than by derivation, and
+ * `readPending` refuses a recorded amendment that says otherwise, so it is
+ * returned as the constant it is.
+ *
+ * Never falls back to the recorded figure. A number that could not be
+ * re-derived is not a number this site may print.
+ */
+function derivedGas(tx: Transaction): number | null {
+  if (tx.type === 'amendment') return 0;
+  if (tx.slug === null) return null;
+  const path = join(POSTS_DIR, `${tx.slug}.md`);
+  if (!existsSync(path)) return null;
+  const body = normalizeBody(parsePost(path, readFileSync(path, 'utf8')).body);
+  return sha256HexSync(body) === tx.contentHash ? wordCount(body) : null;
+}
+
+/**
+ * §3.8/§3.9 — the gas-and-value line under a transaction in a block's list.
+ *
+ * Three cases, and the distinction is load-bearing:
+ *
+ *  - a post: its word count and its declared hours;
+ *  - an amendment: neither figure, and a note saying where they went. §3.9
+ *    fixes an amendment's `gasUsed` and `value` at 0 so block aggregation
+ *    cannot re-charge what the original's block already counted — but printed
+ *    bare, that 0 reads as "this post has no words", and the post page shows
+ *    the real figures derived from the body the amendment commits to. Two
+ *    pages showing different numbers for one transaction, with nothing saying
+ *    why, invites the reader to conclude one of them is lying. The aggregation
+ *    itself is untouched; only what the row says about it changes;
+ *  - a figure that could not be re-derived: an em dash, never the recorded
+ *    number, on the same rule as the open block's unmined hash.
+ */
+export function txMetaLine(tx: RecordedTx): string {
+  if (tx.type === 'amendment') return 'đính chính · gas và giờ đã tính ở bản gốc';
+  const hours = researchHours(tx.value);
+  return `${tx.gasUsed === null ? '—' : `${tx.gasUsed} từ`} · ${hours ? `${hours} giờ` : '—'}`;
+}
+
+/**
  * §3.6, §9 — the open block, exactly as `chain:build` recorded it.
  *
  * Reads `chain.pending.json` rather than rebuilding the open block from
@@ -427,7 +515,11 @@ function sealsOn(period: string): string {
  * block membership must be a fact recorded once, or a transaction's
  * placement can slide forward forever and a month can seal empty while
  * holding a post. Takes no arguments and reads no clock (§14) — the recorded
- * file already carries everything needed to render it.
+ * file, plus the bodies it commits to, carry everything needed to render it.
+ *
+ * The one thing it does NOT take from the file is `gasUsed`: that is derived
+ * (§3.8) and covered by no transaction hash, so it is recomputed here from the
+ * body each `contentHash` commits to. See `RecordedTx` and `derivedGas`.
  *
  * A pending file recorded against a tip this chain no longer has belongs to
  * a different history; `null` rather than showing hashes attached to the
@@ -438,13 +530,21 @@ export function getPendingBlock(): PendingBlockView | null {
   if (pending === null) return null;
   if (isStale(pending, tipHash(getChain()))) return null;
 
+  const transactions = pending.transactions.map(
+    (t): RecordedTx => ({ ...t, gasUsed: derivedGas(t) }),
+  );
+
   const view: PendingBlockView = {
     sealed: false,
     height: pending.height,
     period: pending.period,
-    transactions: pending.transactions,
-    txCount: pending.transactions.length,
-    gasUsed: pending.transactions.reduce((sum, t) => sum + t.gasUsed, 0),
+    transactions,
+    txCount: transactions.length,
+    // One unverifiable figure makes the total unverifiable. Summing the rest
+    // would report a smaller number as though it were the block's gas.
+    gasUsed: transactions.some((t) => t.gasUsed === null)
+      ? null
+      : transactions.reduce((sum, t) => sum + (t.gasUsed ?? 0), 0),
     value: pending.transactions.reduce((sum, t) => sum + t.value, 0),
     maxTxPerBlock: CHAIN_CONFIG.maxTxPerBlock,
     sealsOn: sealsOn(pending.period),

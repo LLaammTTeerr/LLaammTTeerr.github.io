@@ -1,7 +1,7 @@
 ---
 import Base from '../../layouts/Base.astro';
 import WorkMeter from '../../components/WorkMeter.astro';
-import { getBlocks, researchHours, splitHashWork } from '../../site/chain-data';
+import { getBlocks, researchHours, splitHashWork, txMetaLine } from '../../site/chain-data';
 // `.card`, `.meta`, `.hash`, `.num` and `.txs` are BlockCard's classes, used
 // verbatim here so the detail page reads as the same chrome as the list
 // rather than drifting into a second style.
@@ -79,15 +79,17 @@ const hours = researchHours(block.value);
     <WorkMeter nonce={block.nonce} difficulty={block.difficulty} />
     {block.transactions.length > 0 ? (
       <ul class="txs">
-        {block.transactions.map((tx) => {
-          const txHours = researchHours(tx.value);
-          return (
-            <li>
-              <h2 class="t">{tx.slug ? <a href={`/tx/${tx.slug}`}>{tx.title}</a> : (tx.title ?? 'Amendment')}</h2>
-              <span class="g">{tx.gasUsed} từ · {txHours ? `${txHours} giờ` : '—'}</span>
-            </li>
-          );
-        })}
+        {block.transactions.map((tx) => (
+          <li>
+            <h2 class="t">{tx.slug ? <a href={`/tx/${tx.slug}`}>{tx.title}</a> : (tx.title ?? 'Amendment')}</h2>
+            {/* Shared with BlockCard, so the two lists cannot drift. It is
+                also what keeps this page's `0 từ` for an amendment from
+                contradicting the post page's real word count with nothing
+                saying why: the block's `Gas used` above deliberately excludes
+                amendments (§3.9), and the row now says so. */}
+            <span class="g">{txMetaLine(tx)}</span>
+          </li>
+        ))}
       </ul>
     ) : (
       <p class="silent">Không có bài viết nào trong tháng này. Khối vẫn được đào.</p>

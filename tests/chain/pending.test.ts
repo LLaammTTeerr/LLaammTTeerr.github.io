@@ -148,6 +148,24 @@ describe('readPending / writePending', () => {
     expect(read!.transactions.map((t) => t.hash)).toEqual([POST.hash, AMENDMENT.hash]);
   });
 
+  it("accepts a post whose gasUsed the file got wrong, and leaves it to the view", () => {
+    // The boundary, stated deliberately. A post's `gasUsed` is derived (§3.8)
+    // and in no canonical form, so this reader cannot authenticate it — and it
+    // must not try: it holds only the pending file's path and has no access to
+    // `content/posts/`, while `chain:build` calls it for periods alone and
+    // would gain a dependency on the content tree for nothing.
+    //
+    // The figure is re-derived where it is *displayed* instead, by
+    // `getPendingBlock` (see `derivedGas` in src/site/chain-data.ts), from the
+    // body this transaction's own `contentHash` commits to. So the file is
+    // read, and the false number never reaches a page.
+    const path = tmpPath();
+    writeFileSync(path, JSON.stringify({ ...pendingFixture(), transactions: [{ ...POST, gasUsed: 12345 }] }), 'utf8');
+    const read = readPending(path);
+    expect(read, 'a post with a wrong word count is still a structurally valid record').not.toBeNull();
+    expect(read!.transactions[0]!.gasUsed).toBe(12345);
+  });
+
   it('normalizes a missing research field back to null on read', () => {
     const path = tmpPath();
     writePending(path, pendingFixture());
@@ -191,6 +209,13 @@ describe('readPending never throws on a corrupt provisional file', () => {
     ['a tampered amendment research figure', JSON.stringify({ ...pendingFixture(), transactions: [{ ...AMENDMENT, research: 999 }] })],
     // One good transaction does not vouch for its neighbour.
     ['a second transaction with a forged hash', JSON.stringify({ ...pendingFixture(), transactions: [POST, { ...AMENDMENT, hash: '0x' + 'de'.repeat(32) }] })],
+    // §3.9 — an amendment's gasUsed and value are fixed at 0 so block
+    // aggregation cannot re-charge the original's. Neither is in the
+    // `amendment/1` canonical form (the declared hours travel as `research`),
+    // so the hash check above cannot see them: both edits below leave the
+    // recorded hash perfectly valid. They are constants, so they are required.
+    ['an amendment claiming gas it cannot have', JSON.stringify({ ...pendingFixture(), transactions: [{ ...AMENDMENT, gasUsed: 12345 }] })],
+    ['an amendment claiming value it cannot have', JSON.stringify({ ...pendingFixture(), transactions: [{ ...AMENDMENT, value: 999 }] })],
   ];
 
   for (const [label, raw] of cases) {

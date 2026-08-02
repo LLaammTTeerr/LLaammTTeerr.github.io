@@ -296,6 +296,79 @@ describe("an amended post's page describes the amendment, not the original", () 
   }, 300_000);
 });
 
+describe('a hand-edited open block cannot publish a word count it made up', () => {
+  /**
+   * §3.8 makes `gasUsed` a derived field — the word count of the normalized
+   * body — and it is therefore in neither the `post/1` nor the `amendment/1`
+   * canonical form. So recomputing a recorded transaction's hash, which is what
+   * `readPending` does, cannot see it: a `chain.pending.json` edited to claim
+   * `gasUsed: 12345` keeps a perfectly valid hash, and the block cards on `/`
+   * and `/blocks` printed the 12345.
+   *
+   * It does not need to be in the hash. The *body* is committed, as
+   * `contentHash`, so a count taken from a body that hashes to the committed
+   * value is exactly as verifiable as the hash beside it. Adding `gasUsed` to
+   * the canonical form instead would change the format and invalidate every
+   * hash already in `chain.lock.json`.
+   *
+   * Driven end to end, because the hole was in what the *pages* print and no
+   * unit test of `readPending` could have found it.
+   */
+  const SLUG = '2026-08-02-bai-moi';
+  const FILE = [
+    '---',
+    'title: "Bài mới"',
+    'date: 2026-08-02',
+    'tags: [meta]',
+    'research: 2.0',
+    '---',
+    '',
+    'Một bài viết mới trong tháng đang mở.',
+    '',
+  ].join('\n');
+
+  it('re-derives the word count from the body, on every page that shows one', () => {
+    const dir = sandboxRepo();
+    writeFileSync(join(dir, 'content/posts', `${SLUG}.md`), FILE);
+    const chain = chainBuildSandbox(dir, '2026-08-05');
+    expect(chain.status, `chain:build failed:\n${chain.output}`).toBe(0);
+    expect(pendingIdsIn(dir), 'the fixture post did not land in the open block').toContain(SLUG);
+
+    // Control: the honest build prints the true count everywhere, so a failure
+    // below is the tamper being caught and not the sandbox being broken.
+    const clean = buildSandbox(dir);
+    expect(clean.status, `control build failed:\n${clean.output}`).toBe(0);
+    const path = join(dir, 'content/posts', `${SLUG}.md`);
+    const words = wordCount(normalizeBody(parsePost(path, readFileSync(path, 'utf8')).body));
+    expect(words).toBeGreaterThan(0);
+    expect(readFileSync(join(dir, 'dist/index.html'), 'utf8')).toContain(`${words} từ`);
+
+    // The tamper. Structurally perfect, hash untouched and still valid.
+    const pendingPath = join(dir, 'chain.pending.json');
+    const record = JSON.parse(readFileSync(pendingPath, 'utf8')) as {
+      transactions: { slug: string | null; hash: string; gasUsed: number }[];
+    };
+    const tx = record.transactions.find((t) => t.slug === SLUG)!;
+    const hashBefore = tx.hash;
+    tx.gasUsed = 12345;
+    writeFileSync(pendingPath, JSON.stringify(record, null, 2) + '\n');
+
+    const build = buildSandbox(dir);
+    expect(build.status, `sandbox build failed:\n${build.output}`).toBe(0);
+
+    // The record still passes the hash check — this is not a test of that.
+    const after = JSON.parse(readFileSync(pendingPath, 'utf8')) as { transactions: { hash: string }[] };
+    expect(after.transactions.some((t) => t.hash === hashBefore)).toBe(true);
+
+    // Every page that shows a word count for this transaction.
+    for (const page of ['dist/index.html', 'dist/blocks/index.html', `dist/tx/${SLUG}/index.html`]) {
+      const html = readFileSync(join(dir, page), 'utf8');
+      expect(html, `${page} published a word count the file made up`).not.toContain('12345');
+      expect(html, `${page} lost the real word count`).toContain(`${words} từ`);
+    }
+  }, 300_000);
+});
+
 describe('a post that declares no research hours', () => {
   /**
    * §3.8: `research` is optional and "defaults to `0.0`, which displays as `—`
