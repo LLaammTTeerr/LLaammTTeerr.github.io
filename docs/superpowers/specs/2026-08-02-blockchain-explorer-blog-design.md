@@ -325,6 +325,25 @@ The original post page then displays "Amended in block #N", linking to the
 amendment. The amendment is placed in the pending block regardless of the date
 it carries, per the membership rule in §3.6.
 
+**While the block holding it is still open, an amendment is replaced rather than
+appended.** Editing the same post three times before the block seals leaves one
+amendment describing the final state, not three. The open block is provisional by
+definition — its contents are recorded in `chain.pending.json`, not in the sealed
+ledger — so a pending amendment that no other transaction has committed to yet
+carries no history worth preserving. This mirrors how a pending transaction is
+replaced on a real chain rather than queued behind itself.
+
+Once the block seals, the amendment is frozen like any other transaction, and
+every later edit produces its own amendment against it.
+
+Collapsing is also what keeps the size rule meaningful. Four transactions seal a
+block (§3.6); without replacement, fixing four typos on the day of publication
+would seal a block made entirely of corrections to a single post, which reports
+the month's activity as something it was not.
+
+The chain records committed history, not the author's editing process. A version
+that was never sealed was never part of the chain.
+
 Detection compares the **full canonical transaction hash**, not just the body
 hash — otherwise an edit to a post's title, tags, series, or research hours would
 change the transaction hash while leaving the content hash untouched, and would
