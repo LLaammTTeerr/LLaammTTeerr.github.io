@@ -49,166 +49,106 @@
 
 ---
 
-### Task 1: Separate the month walk from the membership floor
+### Task 1: The open block's period is recorded, not recomputed
 
-**Why this is first:** with the tip at `2026-07` and the clock in `2026-08`, editing a sealed post mints a *second* `2026-07` block — a month that already closed — instead of joining the open `2026-08` one. Spec §3.6: "Block membership is when a transaction entered the chain, not the date it claims."
+**This task merges what were Tasks 1 and 2.** They cannot be separated: splitting them leaves the chain in a state where a partial block *never seals at any clock*, which was measured, not predicted.
 
-**A previous attempt at this task was blocked, correctly. Read this before you start.** `firstOpenPeriod` in `planBlocks` is used for two different things:
+**The bug being fixed.** With the tip at `2026-07` and the clock in `2026-08`, editing a sealed post mints a *second* `2026-07` block — a month that already closed — instead of joining the open `2026-08` one. §3.6: "Block membership is when a transaction entered the chain, not the date it claims."
 
-1. `monthRange(firstOpenPeriod, endExclusive)` — the months to walk, which is what mints empty blocks for silent months.
-2. `minPeriod(maxPeriod(monthOf(tx.date), firstOpenPeriod), latestOpenPeriod)` — the floor for placing a transaction.
+**Why the obvious fix fails, twice.** `firstOpenPeriod` in `planBlocks` does two jobs:
 
-Raising **both** (the obvious fix, and the one the earlier attempt was told to make) skips silent months between the tip and now, so they never mint their empty blocks — permanent gaps in the chain. Only role 2 may move.
+1. `monthRange(firstOpenPeriod, endExclusive)` — the months walked, which mints empty blocks for silent months.
+2. the floor for placing a transaction.
 
-**Files:**
-- Modify: `src/chain/seal.ts` (`planBlocks`)
-- Test: `tests/chain/seal.test.ts`
+Raising **both** skips silent months, so they never mint their empty blocks: permanent gaps. Only role 2 may move — but moving role 2 alone produces this, measured over successive builds with one pending transaction:
 
-**Interfaces:**
-- Consumes: `monthOf`, `minPeriod`, `maxPeriod`, `monthRange`, `nextMonth` from `src/chain/period.ts`; `PlanOptions` with `fromPeriod: string | null`.
-- Produces: no signature change. Behaviour change only. `build.ts` is **not** modified by this task.
-
-- [ ] **Step 1: Write the failing tests**
-
-The existing helper in this file is `tx(date, slug)` — there is **no** `txFixture()`. Check its real signature before using it.
-
-```ts
-it('places a transaction entering the chain today in the open month, not the tip month', () => {
-  // Tip 2026-07 is sealed; an amendment carrying an old date enters on 2026-08-02.
-  const drafts = planBlocks([tx('2026-06-15', 'old')], {
-    now: '2026-08-02', maxTxPerBlock: 4, fromPeriod: '2026-07',
-  });
-  const withTxs = drafts.filter((d) => d.transactions.length > 0);
-  expect(withTxs.map((d) => d.period)).not.toContain('2026-07');
-});
-
-it('still mints empty blocks for silent months between the tip and now', () => {
-  // The regression that blocked the first attempt. Tip 2026-05, clock 2026-08:
-  // 2026-06 and 2026-07 were silent but complete, so each must still get its
-  // block. A month with no block is not "closed" — it is a hole in the chain.
-  const drafts = planBlocks([tx('2026-06-15', 'old')], {
-    now: '2026-08-02', maxTxPerBlock: 4, fromPeriod: '2026-05',
-  });
-  expect(drafts.map((d) => d.period)).toEqual(
-    expect.arrayContaining(['2026-05', '2026-06', '2026-07']),
-  );
-});
-
-it('still lets a busy current month split into two blocks of the same period', () => {
-  // 8, not 5: a PARTIAL group in the open month stays pending (see the
-  // `isFull || isPast` rule below), so 5 transactions yield ONE block. Eight
-  // is the smallest input that actually produces two full groups.
-  const many = Array.from({ length: 8 }, (_, i) =>
-    tx(`2026-08-${String(i + 1).padStart(2, '0')}`, `p${i}`));
-  const drafts = planBlocks(many, { now: '2026-08-20', maxTxPerBlock: 4, fromPeriod: '2026-08' });
-  expect(drafts.filter((d) => d.period === '2026-08').length).toBe(2);
-});
+```
+tip=2026-07 now=2026-08-10 -> 2026-07[0]             | still pending
+tip=2026-07 now=2026-09-10 -> 2026-07[0] 2026-08[0]  | still pending
+tip=2026-08 now=2026-10-10 -> 2026-08[0] 2026-09[0]  | still pending
 ```
 
-- [ ] **Step 2: Run and confirm each fails for its own reason**
+The transaction slides forward forever. Each build recomputes its placement against the *then*-current month, which is never `isPast`, so the month-end rule (`isFull || isPast`) can never fire — only the size rule survives. Worse, each month mints an **empty** block while actually holding a pending transaction, so the chain records months as silent that were not.
 
-Run: `npx vitest run tests/chain/seal.test.ts`
-Expected: test 1 FAILS (the transaction lands in `2026-07`). Tests 2 and 3 should **already pass** — they are regression guards for behaviour you must not break. If either fails now, stop and report: the baseline is not what this plan assumes.
+**The fix.** Placement must be a *recorded fact*, assigned once when a transaction first enters the chain and persisted in `chain.pending.json`. A transaction already recorded as belonging to `2026-07` keeps `2026-07`; when that month becomes past, its block seals normally. Only genuinely new transactions get the current month. This is also what makes a pending hash verifiable rather than merely recalculated, and what Task 3 needs for the drift check.
 
-- [ ] **Step 3: Implement in `planBlocks`**
-
-Leave `firstOpenPeriod` and the `monthRange(firstOpenPeriod, endExclusive)` walk exactly as they are. Add, directly after `latestOpenPeriod`:
-
-```ts
-  // Where a transaction ENTERING the chain now may land, as distinct from the
-  // months this build walks. The walk must still start at the tip so silent
-  // completed months mint their empty blocks (§3.6); placement must not, or a
-  // month that already sealed would quietly gain a transaction afterwards.
-  //
-  // On an empty chain there is no tip and genesis bootstraps at the earliest
-  // transaction's own month, so the floor stays where `firstOpenPeriod` put it.
-  const membershipFloor =
-    opts.fromPeriod === null ? firstOpenPeriod : maxPeriod(firstOpenPeriod, currentPeriod);
-```
-
-Then in the bucketing loop only, replace `firstOpenPeriod` with `membershipFloor`:
-
-```ts
-    const period = minPeriod(maxPeriod(monthOf(tx.date), membershipFloor), latestOpenPeriod);
-```
-
-- [ ] **Step 4: Run the full suite**
-
-Run: `npm test`
-
-**Expect failures in `tests/chain/build.test.ts`, and do not "fix" them by editing assertions.** Amendments now stay in the open block instead of sealing immediately — that is the intended change, and Task 2 is what makes it usable. Report exactly which tests fail and what each asserted. Tests that assert `amendments === 1` encode the old behaviour and need rewriting to assert the amendment is *pending*; do that only where the assertion is plainly about sealing timing. **If the determinism golden-file snapshot changes, STOP and report** — do not re-record it.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/chain/seal.ts tests/chain/seal.test.ts tests/chain/build.test.ts
-git commit -m "fix(chain): place entering transactions in the open month, keep minting silent ones"
-```
-
----
-
-### Task 2: Record the open block in `chain.pending.json`
-
-**Why:** everything unsealed is currently recomputed from disk on every build, so disk can never disagree with it — which is exactly why the drift check cannot catch an edit to an unsealed post, and why a pending hash today is merely recalculated rather than verifiable. Recording the open block to a committed file makes it real: the site reads what `chain:build` wrote, and an edit shows up as a diff.
-
-The sealed ledger stays pristine. `chain.lock.json` remains an immutable record of sealed history; the churn lives in a sibling file that is openly provisional.
+The sealed ledger stays pristine — `chain.lock.json` remains immutable sealed history; the churn lives in a sibling file that is openly provisional.
 
 **Files:**
 - Create: `src/chain/pending.ts`
-- Modify: `src/chain/build.ts`
-- Test: `tests/chain/pending.test.ts`
+- Modify: `src/chain/seal.ts` (`planBlocks`, `PlanOptions`), `src/chain/build.ts`
+- Test: `tests/chain/pending.test.ts`, `tests/chain/seal.test.ts`, `tests/chain/build.test.ts`
 
-**Interfaces:**
-- Consumes: `Transaction`, `Hex` from `./types`; `planBlocks` from `./seal`; the lock's serialization conventions in `src/chain/lock.ts` (read `writeLock`/`readLock` and match their style — stable key order, trailing newline, 2-space indent).
-- Produces:
+**Interfaces produced:**
 
 ```ts
 export interface PendingLock {
   version: 1;
-  period: string;          // YYYY-MM
+  period: string;          // YYYY-MM — the recorded placement, which does not slide
   height: number;          // the height this block will take once sealed
-  prevHash: Hex;           // the tip's hash when this was written
+  prevHash: Hex;           // the tip's hash when written; makes staleness detectable
   transactions: Transaction[];
 }
 export const PENDING_PATH = 'chain.pending.json';
-export function readPending(path: string): PendingLock | null;
-export function writePending(path: string, pending: PendingLock | null): void;
+export function readPending(path: string): PendingLock | null;   // null on missing/corrupt/wrong-version
+export function writePending(path: string, pending: PendingLock | null): void;  // null DELETES the file
+export function isStale(pending: PendingLock, tipHash: Hex): boolean;
 ```
 
-`writePending(path, null)` **deletes** the file — an empty open block must not leave a stale one behind.
+`PlanOptions` gains `recordedPeriods?: ReadonlyMap<Hex, string>` — transaction hash to its already-recorded period.
 
-- [ ] **Step 1: Write the failing tests**
+- [ ] **Step 1: Keep the placement/walk split already in the working tree.** It is correct and its regression guards pass. Do not revert it.
+
+- [ ] **Step 2: Write the failing test that proves a recorded placement seals**
 
 ```ts
-it('round-trips a pending block through the file', () => { /* write then read, deep equal */ });
-
-it('reports a pending file as stale when the tip has moved on', () => {
-  // prevHash is what makes the file honest. Without it a pending block written
-  // against one history could be displayed against another, and the hashes
-  // would be real but attached to the wrong chain.
-  const stale = { ...fixture(), prevHash: '0x' + 'ff'.repeat(32) };
-  expect(isStale(stale, tipHash)).toBe(true);
+it('seals a block whose recorded period has ended, even with a partial group', () => {
+  // The month-end rule must fire for 1-3 transactions. Without recorded
+  // placement this is unreachable at ANY clock: the transaction is re-placed
+  // into the current month on every build and the current month is never past.
+  const t = tx('2026-07-05', 'p');
+  const drafts = planBlocks([t], {
+    now: '2026-08-10', maxTxPerBlock: 4, fromPeriod: '2026-07',
+    recordedPeriods: new Map([[t.hash, '2026-07']]),
+  });
+  const withTxs = drafts.filter((d) => d.transactions.length > 0);
+  expect(withTxs.map((d) => d.period)).toEqual(['2026-07']);
 });
 
-it('deletes the file rather than leaving a stale open block', () => {
-  writePending(path, fixture());
-  writePending(path, null);
-  expect(existsSync(path)).toBe(false);
+it('does not mint an empty block for a month that held a pending transaction', () => {
+  const t = tx('2026-07-05', 'p');
+  const drafts = planBlocks([t], {
+    now: '2026-08-10', maxTxPerBlock: 4, fromPeriod: '2026-07',
+    recordedPeriods: new Map([[t.hash, '2026-07']]),
+  });
+  expect(drafts.filter((d) => d.period === '2026-07' && d.transactions.length === 0)).toEqual([]);
 });
 
-it('returns null rather than throwing on a corrupt file', () => {
-  writeFileSync(path, '{ not json');
-  expect(readPending(path)).toBeNull();
+it('gives a genuinely new transaction the current month, not its claimed date', () => {
+  const t = tx('2026-06-15', 'backdated');
+  const drafts = planBlocks([t], { now: '2026-08-10', maxTxPerBlock: 4, fromPeriod: '2026-07' });
+  expect(drafts.filter((d) => d.transactions.length > 0).map((d) => d.period)).not.toContain('2026-07');
 });
 ```
 
-- [ ] **Step 2: Run and confirm failure.** Run: `npx vitest run tests/chain/pending.test.ts`
+- [ ] **Step 3: Run and confirm the first two fail** for the reason above (`recordedPeriods` is not a known option).
 
-- [ ] **Step 3: Implement `src/chain/pending.ts`.** Validate on read the way `readLock` does — a malformed or wrong-version file returns `null` rather than throwing, because a corrupt provisional file must never take the build down.
+- [ ] **Step 4: Use it in the bucketing loop.** A recorded period wins, but is still floored by `firstOpenPeriod` so it can never reopen a sealed month:
 
-- [ ] **Step 4: Emit it from `build.ts`.** After the sealing loop, the transactions that `planBlocks` left unsealed are the open block. Write them with `prevHash` = the final tip's hash and `height` = tip height + 1. Report the count in the build summary alongside `sealed` and `amendments`, so running `chain:build` tells you what is waiting.
+```ts
+    const recorded = opts.recordedPeriods?.get(tx.hash);
+    const period = recorded !== undefined
+      ? maxPeriod(recorded, firstOpenPeriod)
+      : minPeriod(maxPeriod(monthOf(tx.date), membershipFloor), latestOpenPeriod);
+```
 
-- [ ] **Step 5: Prove the end-to-end flow.** In a **copy** of the repo outside the working tree:
+- [ ] **Step 5: Implement `src/chain/pending.ts`.** Validate on read the way `readLock` does — a malformed or wrong-version file returns `null` rather than throwing, because a corrupt provisional file must never take the build down. Match the lock's serialization conventions (stable key order, 2-space indent, trailing newline).
+
+- [ ] **Step 6: Wire `build.ts`.** Read `chain.pending.json` before planning; if `isStale` against the current tip, ignore it. Feed its transactions' periods in as `recordedPeriods`. After the sealing loop, write the still-unsealed transactions back with `prevHash` = the final tip's hash. Report the pending count in the build summary beside `sealed` and `amendments`.
+
+- [ ] **Step 7: Rewrite the `build.test.ts` assertions that encode the old timing.** `BuildResult.amendments` counts amendments *sealed*, so an amendment that stays pending makes it `0`. That is now correct. Where a test's real subject is the amendment's content (title, research figure, gas, asset minting), assert against the **pending block** instead of deleting the coverage — `BuildResult` should expose it. Report every test you touched and why.
+
+- [ ] **Step 8: Prove the whole cycle end to end** in a **copy** of the repo outside the working tree:
 
 ```bash
 SB=$(mktemp -d)
@@ -216,22 +156,25 @@ tar -c --exclude=node_modules --exclude=dist --exclude=.git . | tar -x -C "$SB"
 ln -s "$PWD/node_modules" "$SB/node_modules"
 cd "$SB"
 printf '\nMột câu bổ sung.\n' >> content/posts/2026-06-15-genesis.md
-npm run chain:build
+npm run chain:build          # amendment lands in chain.pending.json
 cat chain.pending.json
+git diff --stat chain.lock.json   # must be EMPTY — sealed history untouched
 ```
 
-Expected: the amendment appears in `chain.pending.json`, and `chain.lock.json` is **unchanged** (`git diff --stat chain.lock.json` empty). Paste both into your report. Leave the real working tree clean.
+Then prove the month-end rule now fires: run `chain:build` again with an injected clock in the following month and show the pending block **seals**, carrying its recorded period. That is the behaviour whose absence blocked this task twice; demonstrate it rather than asserting it.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 9: Full suite, typecheck, then commit**
 
 ```bash
-git add src/chain/pending.ts src/chain/build.ts tests/chain/pending.test.ts chain.pending.json
-git commit -m "feat(chain): record the open block in chain.pending.json"
+git add src/chain tests/chain chain.pending.json
+git commit -m "feat(chain): record the open block so its placement stops sliding"
 ```
+
+**If the determinism golden-file snapshot changes, STOP and report** — do not re-record it.
 
 ---
 
-### Task 3: The site reads the recorded open block
+### Task 2: The site reads the recorded open block
 
 **Files:**
 - Modify: `src/site/chain-data.ts`
@@ -285,7 +228,7 @@ it('reports the month end as the seal date', () => {
 
 ---
 
-### Task 4: Editing a sealed post must not brick the build
+### Task 3: Editing a sealed post must not brick the build
 
 **Why:** the current behaviour is a closed loop. Edit a sealed post → the site build fails with *"re-run `npm run chain:build` to record the edit as an amendment"* → you run it, it records the amendment → **the build fails with the identical message, forever.** `getPostContent` compares the file on disk against the *sealed* transaction's `contentHash`, which by design never changes.
 
@@ -316,7 +259,7 @@ Expected: **both succeed.** Before this task the second fails. This is the deliv
 
 ---
 
-### Task 5: The pending treatment on the two components
+### Task 4: The pending treatment on the two components
 
 **Design, already settled with the user — implement exactly this:**
 
@@ -420,7 +363,7 @@ git commit -m "feat(site): render the open block and its provisional hashes"
 
 ---
 
-### Task 6: Pending posts get pages
+### Task 5: Pending posts get pages
 
 **Files:**
 - Modify: `src/pages/tx/[slug].astro`, `src/pages/index.astro`
@@ -440,7 +383,7 @@ git commit -m "feat(site): render the open block and its provisional hashes"
 
 ---
 
-### Task 7: `/blocks`, `/block/[height]`, and 404
+### Task 6: `/blocks`, `/block/[height]`, and 404
 
 **Files:**
 - Create: `src/pages/blocks.astro`, `src/pages/block/[height].astro`, `src/pages/404.astro`
@@ -467,7 +410,7 @@ it('has a 404 page that links back to the chain', () => { /* … */ });
 
 ## Self-Review
 
-**Spec coverage.** §3.6 open block → Tasks 1, 2, 3. §3.9 amendments → Tasks 1, 2, 4. §3.2 hash display → Task 6. §6 block pages → Task 6. §9 visual direction → Task 4. §14 committed fields only → Task 4's "no invented placeholder" rule. Addresses, assets, mempool, RSS and `/contracts` are explicitly out of scope above, not omissions.
+**Spec coverage.** §3.6 open block → Tasks 1, 2. §3.9 amendments → Tasks 1, 3. §3.2 hash display → Task 6. §6 block pages → Task 6. §9 visual direction → Task 4. §14 committed fields only → Task 4's "no invented placeholder" rule. Addresses, assets, mempool, RSS and `/contracts` are explicitly out of scope above, not omissions.
 
 **Known gap carried forward.** `summary` is still parsed from frontmatter and hashed nowhere. No task here displays it. If Plan 2b-iii puts it on a listing page, it must not sit next to a hash as though committed.
 
