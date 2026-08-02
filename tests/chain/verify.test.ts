@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
 import { verifyChain } from '../../src/chain/verify';
 import { merkleRootHex } from '../../src/chain/merkle';
@@ -105,6 +106,7 @@ describe('verifyChain', () => {
     const chain = await validChain();
     chain.blocks[0]!.prevHash = '0x' + '11'.repeat(32);
     const result = await verifyChain(chain);
+    expect(result.ok).toBe(false);
     expect(result.blocks[0]!.linkOk).toBe(false);
   });
 
@@ -120,14 +122,56 @@ describe('verifyChain', () => {
     chain.blocks[1]!.height = 5;
     const result = await verifyChain(chain);
     expect(result.ok).toBe(false);
+    expect(result.blocks[1]!.linkOk).toBe(false);
+  });
+
+  it('detects a spliced-out block while the survivor header stays valid', async () => {
+    const b0 = await makeBlock(0, ZERO, [tx('a')]);
+    const b1 = await makeBlock(1, b0.hash, [tx('b')]);
+    const b2 = await makeBlock(2, b1.hash, [tx('c')]);
+
+    // Delete the middle block. b2's own header is untouched and still hashes
+    // correctly — only its linkage to a parent is now wrong.
+    const spliced = { version: 1 as const, difficulty: DIFFICULTY, blocks: [b0, b2] };
+    const result = await verifyChain(spliced);
+
+    expect(result.ok).toBe(false);
+    expect(result.blocks[1]!.linkOk).toBe(false);
+    expect(result.blocks[1]!.hashOk).toBe(true);
+    expect(result.blocks[1]!.merkleOk).toBe(true);
   });
 });
 
-import { readFileSync } from 'node:fs';
+/** Transitively resolve the same-directory imports reachable from an entry module. */
+function browserSafeClosure(entry: string): string[] {
+  const seen = new Set<string>();
+  const stack = [entry];
+  while (stack.length > 0) {
+    const file = stack.pop()!;
+    if (seen.has(file)) continue;
+    seen.add(file);
+    const source = readFileSync(`src/chain/${file}`, 'utf8');
+    for (const match of source.matchAll(/from\s+'\.\/([\w.-]+)'/g)) {
+      stack.push(`${match[1]}.ts`);
+    }
+  }
+  return [...seen].sort();
+}
 
 describe('browser safety', () => {
-  it('verify.ts and its transitive chain deps never import node:crypto', () => {
-    for (const file of ['verify.ts', 'hash.ts', 'merkle.ts', 'canonical.ts', 'types.ts']) {
+  it('reaches the expected module closure from verify.ts', () => {
+    // Pins the closure itself. If a new module joins it, this fails loudly
+    // and forces a deliberate decision rather than silently going unchecked.
+    expect(browserSafeClosure('verify.ts')).toEqual([
+      'canonical.ts', 'hash.ts', 'merkle.ts', 'types.ts', 'verify.ts',
+    ]);
+  });
+
+  it('no module reachable from verify.ts imports a node builtin', () => {
+    const closure = browserSafeClosure('verify.ts');
+    // Guard against a broken walk vacuously passing.
+    expect(closure.length).toBeGreaterThanOrEqual(5);
+    for (const file of closure) {
       const source = readFileSync(`src/chain/${file}`, 'utf8');
       expect(source, `${file} must stay browser-safe`).not.toContain('node:');
     }
