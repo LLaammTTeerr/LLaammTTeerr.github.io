@@ -1142,7 +1142,9 @@ export function monthOf(date: string): string {
 function parsePeriod(period: string): { year: number; month: number } {
   const year = Number(period.slice(0, 4));
   const month = Number(period.slice(5, 7));
-  if (!Number.isInteger(year) || month < 1 || month > 12) {
+  // Both integer checks are required: Number('xx') is NaN, and NaN fails
+  // every comparison, so a range check alone would let it through.
+  if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
     throw new Error(`invalid period: ${period}`);
   }
   return { year, month };
@@ -1155,6 +1157,7 @@ function formatPeriod(year: number, month: number): string {
 export function lastDayOfMonth(period: string): string {
   const { year, month } = parsePeriod(period);
   // Day 0 of the following month is the last day of this one.
+  // (parsePeriod rejects NaN, so `month` is a real 1-12 integer here.)
   const d = new Date(Date.UTC(year, month, 0));
   return `${period}-${String(d.getUTCDate()).padStart(2, '0')}`;
 }
@@ -1346,9 +1349,26 @@ export interface PlanOptions {
 function orderWithinBlock(txs: Transaction[]): Transaction[] {
   const posts = txs.filter((t) => t.type !== 'amendment');
   const amendments = txs.filter((t) => t.type === 'amendment');
-  posts.sort((a, b) => a.date.localeCompare(b.date) || (a.slug ?? '').localeCompare(b.slug ?? ''));
-  amendments.sort((a, b) => (a.amends ?? '').localeCompare(b.amends ?? ''));
+  // The trailing `hash` comparison makes both keys total. Without it, ties
+  // fall back to caller array order, which would make the Merkle root — and
+  // therefore every downstream hash — depend on filesystem enumeration order.
+  posts.sort(
+    (a, b) =>
+      a.date.localeCompare(b.date) ||
+      (a.slug ?? '').localeCompare(b.slug ?? '') ||
+      a.hash.localeCompare(b.hash),
+  );
+  amendments.sort(
+    (a, b) =>
+      (a.amends ?? '').localeCompare(b.amends ?? '') ||
+      a.hash.localeCompare(b.hash),
+  );
   return [...posts, ...amendments];
+}
+
+/** Lexicographic max over zero-padded YYYY-MM periods. */
+function maxPeriod(a: string, b: string): string {
+  return a > b ? a : b;
 }
 
 function chunk<T>(items: T[], size: number): T[][] {
@@ -1366,31 +1386,41 @@ function chunk<T>(items: T[], size: number): T[][] {
  * still open.
  */
 export function planBlocks(pending: Transaction[], opts: PlanOptions): BlockDraft[] {
+  if (!Number.isInteger(opts.maxTxPerBlock) || opts.maxTxPerBlock <= 0) {
+    throw new Error(
+      `maxTxPerBlock must be a positive integer, got ${opts.maxTxPerBlock}`,
+    );
+  }
+
   const currentPeriod = monthOf(opts.now);
+
+  const txPeriods = pending.map((t) => monthOf(t.date)).sort();
+  const earliestTxPeriod = txPeriods[0] ?? null;
+
+  // The first period still open for new blocks. Everything before it is
+  // sealed and immutable.
+  const firstOpenPeriod = opts.fromPeriod ?? earliestTxPeriod;
+  if (firstOpenPeriod === null) return [];
 
   const byPeriod = new Map<string, Transaction[]>();
   for (const tx of pending) {
-    const period = monthOf(tx.date);
+    // §3.6 — block membership is "when it entered the chain", not "what date
+    // it claims". An amendment carries the date of the post it amends, and a
+    // post may be backdated; neither may reopen a sealed month.
+    const period = maxPeriod(monthOf(tx.date), firstOpenPeriod);
     const bucket = byPeriod.get(period);
     if (bucket) bucket.push(tx);
     else byPeriod.set(period, [tx]);
   }
 
-  const earliestTxPeriod = [...byPeriod.keys()].sort()[0] ?? null;
-  const start = [opts.fromPeriod, earliestTxPeriod]
-    .filter((p): p is string => p !== null)
-    .sort()[0];
-  if (start === undefined) return [];
-
-  const latestTxPeriod = [...byPeriod.keys()].sort().at(-1) ?? start;
-  // Walk every month from the start through the later of "last post" and
-  // "month before now", so silent months in between are not skipped.
-  const endExclusive = nextMonth(
-    latestTxPeriod > currentPeriod ? latestTxPeriod : currentPeriod,
-  );
+  const latestBucket = [...byPeriod.keys()].sort().at(-1) ?? firstOpenPeriod;
+  // Walk to the month after the later of "latest bucket" and "now", so the
+  // current month is still visited (the size rule can fire there) while
+  // silent months in between are not skipped.
+  const endExclusive = nextMonth(maxPeriod(latestBucket, currentPeriod));
 
   const drafts: BlockDraft[] = [];
-  for (const period of monthRange(start, endExclusive)) {
+  for (const period of monthRange(firstOpenPeriod, endExclusive)) {
     const txs = orderWithinBlock(byPeriod.get(period) ?? []);
     const isPast = period < currentPeriod;
 
@@ -2315,7 +2345,7 @@ describe('buildChain', () => {
     expect(new Set(periods).size).toBe(periods.length);
   });
 
-  it('seals a backdated post without duplicating intervening months', async () => {
+  it('places a backdated post in the first open period, not its own month', async () => {
     const { postsDir, lockPath } = workspace();
     const before = await buildChain({ postsDir, lockPath, now: '2026-09-10', config: CONFIG });
 
@@ -2328,6 +2358,13 @@ describe('buildChain', () => {
     expect(after.chain.blocks.slice(0, 3)).toEqual(before.chain.blocks);
     expect(after.chain.blocks).toHaveLength(4);
     expect(after.chain.blocks[3]!.transactions.map((t) => t.slug)).toEqual(['2026-06-01-backdated']);
+    // §3.6 — membership is when it entered the chain. The post keeps its
+    // 2026-06-01 date, but its block is the first period still open.
+    expect(after.chain.blocks[3]!.period).toBe('2026-08');
+    expect(after.chain.blocks[3]!.transactions[0]!.date).toBe('2026-06-01');
+    // Block periods never decrease along the chain.
+    const periods = after.chain.blocks.map((b) => b.period);
+    expect([...periods].sort()).toEqual(periods);
     expect((await verifyChain(after.chain)).ok).toBe(true);
   });
 

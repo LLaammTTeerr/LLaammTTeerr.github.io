@@ -175,6 +175,18 @@ Transactions not yet in a sealed block belong to the **pending block**, which is
 displayed with its transaction list but without a hash or nonce, since neither
 exists until sealing.
 
+**Block membership is when a transaction entered the chain, not the date it
+claims.** A transaction dated earlier than the first still-open month — an
+amendment, which carries the date of the post it amends (§3.9), or a
+deliberately backdated post — is placed in that open month. It keeps its
+original `date` as a visible field; only its block placement moves forward.
+
+Without this rule, editing an old post would reopen months already sealed and
+mint empty blocks for months that were not silent. Real chains behave the same
+way: a transaction joins the block that mines it, whatever it refers to.
+Block periods are therefore non-decreasing along the chain, though two blocks
+may share a period when the size limit splits a busy month.
+
 The pending block and the mempool are distinct and must not be conflated:
 
 - **Mempool** (`/mempool`) — drafts, not yet published, not in the chain at all.
@@ -230,7 +242,8 @@ recomputed and compared against the recorded value. On mismatch the build:
    supported, expected operation.
 
 The original post page then displays "Amended in block #N", linking to the
-amendment.
+amendment. The amendment is placed in the pending block regardless of the date
+it carries, per the membership rule in §3.6.
 
 An amendment is a transaction and so needs its own canonical form, distinct from
 `tx/1` in §3.2:
