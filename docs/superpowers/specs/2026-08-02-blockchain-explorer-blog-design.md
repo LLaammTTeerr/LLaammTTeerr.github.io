@@ -129,11 +129,14 @@ nonce:<n>
 `blockHash = sha256(header)`. Mining increments `nonce` from 0 until `blockHash`
 begins with `difficulty` hexadecimal zeros.
 
-`timestamp` is **derived from content, never from wall-clock build time**: it is
-`max(dates of the block's transactions, previous block's timestamp)` at
-`00:00:00Z`. Using the actual sealing time would make every build produce a
-different hash and would directly contradict the determinism requirement in §11
-and §14.
+`timestamp` is **never the wall-clock build time**, at `00:00:00Z`:
+
+- Block with transactions: `max(latest transaction date, previous timestamp)`.
+- Empty block (§3.6): `max(last day of the block's calendar month, previous
+  timestamp)`.
+
+Using the actual sealing time would make every build produce a different hash and
+would directly contradict the determinism requirement in §11 and §14.
 
 The previous block's timestamp participates in the maximum to keep timestamps
 monotonically non-decreasing along the chain, as real chains require. Without it,
@@ -150,13 +153,23 @@ Block `#0`, with `prevHash` set to 64 zeros. Sealed like any other block.
 
 ### 3.6 Sealing rule
 
-A block seals when it reaches **4 transactions** or when the **calendar week
+A block seals when it reaches **4 transactions** or when the **calendar month
 ends**, whichever comes first. This mirrors a real block size limit paired with a
-block time target. Both values are configurable.
+block time target. Both values are configurable, and changing them later is safe:
+sealed blocks are frozen in the lock file, so a change affects only the pending
+block and everything after it.
 
-"Week" means the ISO-8601 week, sealing after Sunday. The boundary is evaluated
-against transaction dates, never against build time, so sealing stays
-deterministic (§3.4).
+**Empty blocks are minted.** A month with no posts still produces a sealed block
+with zero transactions, a Merkle root of 32 zero bytes (§3.3), `gasUsed: 0`, and
+`value: 0`. It is mined like any other block. This matches real chains, and it
+makes the chain an honest record: a gap in writing becomes a visible run of empty
+blocks rather than silently vanishing from history.
+
+Empty-block minting is the one place the build consults the current date, to know
+which months have elapsed. Blocks are minted for every complete calendar month
+between the last sealed block and the current month; the current month is never
+sealed, since it is still open. The clock is therefore an **explicit injected
+input to the build**, not an ambient call, so tests can pin it (§11).
 
 Transactions not yet in a sealed block belong to the **pending block**, which is
 displayed with its transaction list but without a hash or nonce, since neither
@@ -344,7 +357,8 @@ src/chain/
   hash.ts        sha256, isomorphic (node:crypto | crypto.subtle)
   merkle.ts      root and proofs (§3.3)
   mine.ts        proof-of-work nonce search (§3.4)
-  seal.ts        block sealing rules (§3.6)
+  seal.ts        block sealing rules, incl. empty-block minting (§3.6);
+                 takes the clock as an explicit parameter, never reads it
   address.ts     tag/author → address and name (§3.7)
   verify.ts      pure verification — used by build AND browser (§7)
   lock.ts        read and write chain.lock.json (§2)
@@ -396,9 +410,14 @@ helper across both runtimes, Merkle root construction including the odd-count
 duplication rule, the miner, sealing rules, address derivation, and amendment
 detection.
 
-**Golden-file test:** a fixed set of fixture posts must produce a byte-identical
-`chain.lock.json`. This test guards determinism, which is the property the entire
-concept rests on. If it ever fails, the chain is untrustworthy.
+**Golden-file test:** a fixed set of fixture posts, built against a **pinned
+clock**, must produce a byte-identical `chain.lock.json`. This test guards
+determinism, which is the property the entire concept rests on. If it ever fails,
+the chain is untrustworthy.
+
+Empty-block minting gets its own tests, driven by advancing the injected clock
+over a fixture chain: skipping several months mints one block per elapsed month,
+the current month is never sealed, and re-running at the same clock is a no-op.
 
 Verification is additionally asserted end-to-end: build a fixture chain, then run
 `verify.ts` against it and require a clean result.
@@ -431,7 +450,9 @@ so no CMS layer is needed to write from another machine.
 
 ## 14. Success criteria
 
-- `npm run build` produces static output, byte-identical across repeated runs.
+- `npm run build` produces static output, byte-identical across repeated runs at
+  a fixed clock. The only permitted difference between builds run at different
+  times is newly minted empty blocks (§3.6); no existing block may ever change.
 - The chain verifies clean in-browser at `/verify`.
 - Publishing is write-a-file-and-push, live in under three minutes.
 - Lighthouse performance and accessibility both ≥ 95.
