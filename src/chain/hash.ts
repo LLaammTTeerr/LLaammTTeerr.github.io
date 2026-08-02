@@ -20,7 +20,12 @@ export function fromHex(hex: string): Uint8Array {
 
 export async function sha256(data: Uint8Array | string): Promise<Uint8Array> {
   const bytes = typeof data === 'string' ? utf8(data) : data;
-  const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes);
+  // TS 5.7+ types Uint8Array as generic over ArrayBufferLike, but
+  // crypto.subtle.digest requires an ArrayBuffer-backed view. Copying into a
+  // fresh Uint8Array satisfies that without a cast and without forcing every
+  // caller to thread a narrower type.
+  const view = new Uint8Array(bytes);
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', view);
   return new Uint8Array(digest);
 }
 
