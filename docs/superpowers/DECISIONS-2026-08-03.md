@@ -114,3 +114,26 @@ a dead link, that test can cover the whole page.
 
 **To reverse:** each becomes a link again as its route lands; the next plan will do that
 route by route.
+
+---
+
+## D7 — the tag links on every post page were dead too
+
+**Found:** after fixing the nav (D6) I audited every `href` in the built site. One dead link
+remained: `/address/meta.tag`, emitted by `TxPanel` on **every post page**. `/address/[name]`
+belongs to the next plan.
+
+I only found it after fixing a hole in my own audit script — it was skipping any path whose last
+segment contained a dot, treating `/address/meta.tag` as a static file rather than a route. The
+project's own link-integrity test has the same blind spot, which is why it passed.
+
+**Decision:** same treatment as D6 — a tag renders as plain text until its route exists, reusing
+the same "built" flag so the next plan flips one boolean and restores both. The test that pinned
+the link is being rewritten, because it was asserting a link that 404s: a test encoding a bug.
+
+**Reasoning:** consistency, and the same honesty argument. It also means the branch ships with
+zero dead links, which is a property worth being able to state.
+
+**Ambiguity for you:** this is the third place I have applied "do not link to what does not
+exist". If you would rather ship the links and accept 404s until the routes land, it is one
+boolean per site.
