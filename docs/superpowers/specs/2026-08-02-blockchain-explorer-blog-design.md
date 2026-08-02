@@ -230,6 +230,31 @@ Transactions not yet in a sealed block belong to the **pending block**, which is
 displayed with its transaction list but without a hash or nonce, since neither
 exists until sealing.
 
+**A pending transaction still carries its own real hash.** A transaction hash is
+`sha256` of the canonical form (§3.2) — derived entirely from the post's own
+fields. Nothing about sealing creates it; sealing only commits it into a block's
+Merkle root. So a post published into the open month gets its true hash, a
+transaction page at `/tx/<slug>`, and a row in the pending block's card, the same
+as any sealed post. Withholding all of that until month-end would make a freshly
+published post indistinguishable from a publishing failure — no page, no URL, no
+feed entry — which is the opposite of what an explorer should show.
+
+What sealing adds is **immutability, not identity**. Before the seal, editing the
+post changes its hash silently and legitimately: there is nothing yet committed
+for an amendment (§3.9) to be evidence against. After the seal, the same edit
+produces a visible amendment. This difference is load-bearing and must be shown,
+not hidden — a pending transaction's hash is marked as unconfirmed wherever it
+appears, and its panel says the value can still change. A pending hash presented
+with the same authority as a sealed one would be the single most misleading thing
+this site could display, because the entire premise is that displayed metadata is
+provable.
+
+`Confirmed` is therefore a state, not a decoration: any stamp or status must be
+derived from whether the transaction's block is sealed.
+
+This does not blur §3.6's distinction below. A pending transaction is *in the
+chain* and has a hash; a draft is not and does not.
+
 **Block membership is when a transaction entered the chain, not the date it
 claims.** A transaction dated earlier than the first still-open month — an
 amendment, which carries the date of the post it amends (§3.9), or a
