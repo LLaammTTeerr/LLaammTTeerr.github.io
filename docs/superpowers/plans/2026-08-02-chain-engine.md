@@ -2033,7 +2033,8 @@ describe('toTransaction', () => {
   it('sets gas to the word count and value to the research hours', async () => {
     const post = parsePost('a/2026-07-28-x.md', RAW);
     const tx = await toTransaction(post, '0xauthor');
-    expect(tx.gasUsed).toBe(8);
+    // "Khi làm việc với các truy vấn trên đoạn." — 9 whitespace-separated tokens.
+    expect(tx.gasUsed).toBe(9);
     expect(tx.value).toBe(12.5);
   });
 
