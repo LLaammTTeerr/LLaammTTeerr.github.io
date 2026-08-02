@@ -21,6 +21,7 @@ This plan implements the spec at `docs/superpowers/specs/2026-08-02-blockchain-e
 - **`research` always serializes to exactly one decimal place** (§3.2).
 - **Difficulty is 5, max 4 transactions per block, sealing period is the calendar month** (§3.4, §3.6). All three are config values, never hardcoded outside `chain.config.ts`.
 - **Sealed blocks are immutable.** Nothing may rewrite a block already present in the lock file.
+- **`npm run typecheck` must pass** at the end of every task, alongside the tests.
 
 ---
 
@@ -54,6 +55,7 @@ This plan implements the spec at `docs/superpowers/specs/2026-08-02-blockchain-e
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
     "chain:build": "tsx scripts/build-chain.ts"
   },
   "devDependencies": {
@@ -205,7 +207,12 @@ export function fromHex(hex: string): Uint8Array {
 
 export async function sha256(data: Uint8Array | string): Promise<Uint8Array> {
   const bytes = typeof data === 'string' ? utf8(data) : data;
-  const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes);
+  // TS 5.7+ types Uint8Array as generic over ArrayBufferLike, but
+  // crypto.subtle.digest requires an ArrayBuffer-backed view. Copying into a
+  // fresh Uint8Array satisfies that without a cast and without forcing every
+  // caller to thread a narrower type.
+  const view = new Uint8Array(bytes);
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', view);
   return new Uint8Array(digest);
 }
 
