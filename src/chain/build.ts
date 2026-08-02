@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { ChainConfig } from '../../chain.config';
 import { identityAddress } from './address';
 import { hashAssetFile, referencedAssets, type AssetFile } from './asset';
@@ -8,8 +8,15 @@ import { sha256Hex } from './hash';
 import { readLock, writeLock } from './lock';
 import { merkleRootHex } from './merkle';
 import { mine } from './mine';
+import {
+  isStale,
+  PENDING_PATH,
+  readPending,
+  writePending,
+  type PendingLock,
+} from './pending';
 import { parsePost, toTransaction } from './post';
-import { blockTimestamp, planBlocks } from './seal';
+import { blockTimestamp, planChain } from './seal';
 import type { Block, Chain, Hex, Transaction } from './types';
 import { verifyChain, type ChainVerification } from './verify';
 
@@ -32,6 +39,8 @@ export interface BuildOptions {
   postsDir: string;
   assetsDir: string;
   lockPath: string;
+  /** The open block's file. Defaults to `chain.pending.json` beside the lock. */
+  pendingPath?: string;
   /** Injected clock, YYYY-MM-DD. */
   now: string;
   config: ChainConfig;
@@ -41,8 +50,19 @@ export interface BuildResult {
   chain: Chain;
   /** Blocks sealed by this build. */
   minted: number;
-  /** Amendment transactions emitted by this build. */
+  /**
+   * Amendment transactions **sealed** by this build.
+   *
+   * An amendment that lands in the still-open block is not counted here — it
+   * has not entered sealed history yet. Look in `pending` for those.
+   */
   amendments: number;
+  /**
+   * The open block after this build: placed, recorded, but not yet sealed.
+   * Null when nothing is waiting. This is the same content written to
+   * `chain.pending.json`.
+   */
+  pending: PendingLock | null;
 }
 
 async function readPostTransactions(
@@ -225,10 +245,34 @@ export async function buildChain(opts: BuildOptions): Promise<BuildResult> {
   ];
 
   const lastBlock = chain.blocks.at(-1) ?? null;
-  const drafts = planBlocks(pending, {
+  const tipHash = lastBlock ? lastBlock.hash : ZERO_HASH;
+
+  // §3.6 — placement is a recorded fact, not something re-derived from the
+  // clock. A pending file written against a different tip describes a history
+  // this chain no longer has, so it is ignored rather than trusted; the worst
+  // case is that its transactions are placed afresh, which is exactly what
+  // would have happened without the file at all.
+  const pendingPath = opts.pendingPath ?? join(dirname(opts.lockPath), PENDING_PATH);
+  const recordedFile = readPending(pendingPath);
+  const usable =
+    recordedFile !== null && !isStale(recordedFile, tipHash) ? recordedFile : null;
+
+  // We only ever record the then-current month, so a recorded period in the
+  // future means a hand-edited file. Clamp it here, where the clock legitimately
+  // lives: `planChain` walks every month up to the latest bucket, and an
+  // unclamped `9999-12` would walk it literally.
+  const currentPeriod = opts.now.slice(0, 7);
+  const recordedPeriod =
+    usable === null ? '' : usable.period < currentPeriod ? usable.period : currentPeriod;
+  const recordedPeriods = new Map<Hex, string>(
+    usable === null ? [] : usable.transactions.map((t) => [t.hash, recordedPeriod]),
+  );
+
+  const { drafts, open } = planChain(pending, {
     fromPeriod: lastBlock ? lastBlock.period : null,
     now: opts.now,
     maxTxPerBlock: config.maxTxPerBlock,
+    recordedPeriods,
   });
 
   let prev: Block | null = lastBlock;
@@ -321,5 +365,25 @@ export async function buildChain(opts: BuildOptions): Promise<BuildResult> {
   }
 
   writeLock(opts.lockPath, chain);
-  return { chain, minted, amendments: amendmentsSealed };
+
+  // Record the open block against the tip as it now stands. Writing this only
+  // after the lock is verified and persisted keeps the two consistent: the
+  // recorded `prevHash` names a block that is definitely on disk, so the next
+  // build's staleness check is meaningful.
+  //
+  // The period comes from `planChain`, never re-derived here — deriving it a
+  // second time is what made placement slide forward on every build.
+  const openBlock: PendingLock | null =
+    open === null
+      ? null
+      : {
+          version: 1,
+          period: open.period,
+          height: prev ? prev.height + 1 : 0,
+          prevHash: prev ? prev.hash : ZERO_HASH,
+          transactions: open.transactions,
+        };
+  writePending(pendingPath, openBlock);
+
+  return { chain, minted, amendments: amendmentsSealed, pending: openBlock };
 }

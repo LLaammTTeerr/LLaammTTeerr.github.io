@@ -38,7 +38,12 @@ function isHexOfLength(value: unknown, len: number): boolean {
   return typeof value === 'string' && new RegExp(`^0x[0-9a-f]{${len}}$`).test(value);
 }
 
-function transactionProblem(tx: unknown, index: number): string | null {
+/**
+ * Exported for the same reason `blockStructuralProblem` is: the pending-block
+ * reader validates transactions that never went through a sealed block, and a
+ * second definition of "valid transaction" there would drift from this one.
+ */
+export function transactionStructuralProblem(tx: unknown, index: number): string | null {
   const at = `transaction #${index}`;
   if (!isRecord(tx)) return `${at} is not an object`;
   if (!isHexOfLength(tx.hash, 64)) {
@@ -99,7 +104,7 @@ export function blockStructuralProblem(block: unknown): string | null {
   }
   if (!Array.isArray(block.transactions)) return 'field "transactions" is not an array';
   for (const [index, tx] of block.transactions.entries()) {
-    const problem = transactionProblem(tx, index);
+    const problem = transactionStructuralProblem(tx, index);
     if (problem !== null) return problem;
   }
   return null;

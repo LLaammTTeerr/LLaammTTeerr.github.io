@@ -1,5 +1,5 @@
 import { lastDayOfMonth, monthOf, monthRange, nextMonth } from './period';
-import type { Transaction } from './types';
+import type { Hex, Transaction } from './types';
 
 export interface BlockDraft {
   period: string; // YYYY-MM
@@ -8,15 +8,39 @@ export interface BlockDraft {
 
 export interface PlanOptions {
   /**
-   * The last sealed block's period — the first period still open — or null if
-   * the chain is empty. It is NOT the month after the last sealed block: a
-   * month may be sealed and still take further blocks, as the remainder of a
-   * size-limit split or as the landing place for a backdated post.
+   * The last sealed block's period, or null if the chain is empty.
+   *
+   * This is where the month *walk* starts, and it is NOT the month after the
+   * last sealed block: the walk must revisit the tip's own month so silent
+   * completed months between it and now still mint their empty blocks (§3.6).
+   *
+   * It is deliberately not where a transaction may *land*. Once the tip's
+   * month has also ended it is closed, and a transaction entering the chain
+   * now goes to the first still-open month instead — see `membershipFloor` in
+   * `planBlocks`. Within a single build a busy month can still split into two
+   * blocks of the same period; what cannot happen is a closed month gaining
+   * another block on a later build.
    */
   fromPeriod: string | null;
   /** Injected clock, YYYY-MM-DD. The ONLY time input to the engine. */
   now: string;
   maxTxPerBlock: number;
+  /**
+   * Transaction hash to the period it was *already* recorded in, from
+   * `chain.pending.json`.
+   *
+   * Placement has to be a recorded fact rather than something recomputed from
+   * the clock on every build. Recomputed, a partial block never seals at any
+   * clock: each build re-places its transactions into the then-current month,
+   * and the current month is never past, so the month-end half of
+   * `isFull || isPast` can never fire. The transaction slides forward forever
+   * while its month mints an *empty* block behind it, recording as silent a
+   * month that in fact held a pending transaction.
+   *
+   * Recorded, `2026-07` stays `2026-07`, and the month-end rule fires normally
+   * the moment that month is past.
+   */
+  recordedPeriods?: ReadonlyMap<Hex, string>;
 }
 
 /**
@@ -68,6 +92,18 @@ function minPeriod(a: string, b: string): string {
   return a < b ? a : b;
 }
 
+export interface ChainPlan {
+  /** Blocks ready to seal now. */
+  drafts: BlockDraft[];
+  /**
+   * The still-open block: transactions that have been *placed* in a period but
+   * whose block has neither filled nor reached its month's end. Null when
+   * nothing is waiting. Its period is what must be recorded, so the next build
+   * places these transactions where this one did instead of re-deriving it.
+   */
+  open: BlockDraft | null;
+}
+
 /**
  * §3.6 — decide which blocks are ready to seal.
  *
@@ -77,6 +113,18 @@ function minPeriod(a: string, b: string): string {
  * still open.
  */
 export function planBlocks(pending: Transaction[], opts: PlanOptions): BlockDraft[] {
+  return planChain(pending, opts).drafts;
+}
+
+/**
+ * As `planBlocks`, but also reports the block left open.
+ *
+ * Callers that persist the open block need its period, and re-deriving that
+ * period outside this function is precisely the bug this design removes: two
+ * implementations of "where does this transaction go" drift, and placement
+ * recomputed against a later clock slides forward forever.
+ */
+export function planChain(pending: Transaction[], opts: PlanOptions): ChainPlan {
   if (!Number.isInteger(opts.maxTxPerBlock) || opts.maxTxPerBlock <= 0) {
     throw new Error(
       `maxTxPerBlock must be a positive integer, got ${opts.maxTxPerBlock}`,
@@ -95,7 +143,7 @@ export function planBlocks(pending: Transaction[], opts: PlanOptions): BlockDraf
   const firstOpenPeriod =
     opts.fromPeriod ??
     (earliestTxPeriod === null ? null : minPeriod(earliestTxPeriod, currentPeriod));
-  if (firstOpenPeriod === null) return [];
+  if (firstOpenPeriod === null) return { drafts: [], open: null };
 
   // A transaction can never join a month that has not started yet. Without
   // this upper bound a single future-dated post seals a block in its own
@@ -107,13 +155,31 @@ export function planBlocks(pending: Transaction[], opts: PlanOptions): BlockDraf
   // protects sealed months and must not be violated by the upper one.
   const latestOpenPeriod = maxPeriod(currentPeriod, firstOpenPeriod);
 
+  // Where a transaction ENTERING the chain now may land, as distinct from the
+  // months this build walks. The walk must still start at the tip so silent
+  // completed months mint their empty blocks (§3.6); placement must not, or a
+  // month that already sealed would quietly gain a transaction afterwards.
+  //
+  // On an empty chain there is no tip and genesis bootstraps at the earliest
+  // transaction's own month, so the floor stays where `firstOpenPeriod` put it.
+  const membershipFloor =
+    opts.fromPeriod === null ? firstOpenPeriod : maxPeriod(firstOpenPeriod, currentPeriod);
+
   const byPeriod = new Map<string, Transaction[]>();
   for (const tx of pending) {
     // Block membership is "when it entered the chain", not "what date it
     // claims". An amendment carries the date of the post it amends, a post
     // may be backdated, and a post may be dated into the future; none of them
     // may reopen a sealed month or open an unstarted one.
-    const period = minPeriod(maxPeriod(monthOf(tx.date), firstOpenPeriod), latestOpenPeriod);
+    // A period already recorded for this transaction wins: it is where the
+    // transaction entered the chain, and re-deriving it from the clock is what
+    // makes a partial block slide forward forever. It is still floored by
+    // `firstOpenPeriod`, so a stale pending file naming a since-sealed month
+    // cannot reopen it.
+    const recorded = opts.recordedPeriods?.get(tx.hash);
+    const period = recorded !== undefined
+      ? maxPeriod(recorded, firstOpenPeriod)
+      : minPeriod(maxPeriod(monthOf(tx.date), membershipFloor), latestOpenPeriod);
     const bucket = byPeriod.get(period);
     if (bucket) bucket.push(tx);
     else byPeriod.set(period, [tx]);
@@ -126,6 +192,7 @@ export function planBlocks(pending: Transaction[], opts: PlanOptions): BlockDraf
   const endExclusive = nextMonth(maxPeriod(latestBucket, currentPeriod));
 
   const drafts: BlockDraft[] = [];
+  let open: BlockDraft | null = null;
   for (const period of monthRange(firstOpenPeriod, endExclusive)) {
     const txs = orderWithinBlock(byPeriod.get(period) ?? []);
     const isPast = period < currentPeriod;
@@ -138,12 +205,15 @@ export function planBlocks(pending: Transaction[], opts: PlanOptions): BlockDraf
     const groups = chunk(txs, opts.maxTxPerBlock);
     for (const group of groups) {
       const isFull = group.length === opts.maxTxPerBlock;
-      // A partial group in the current month stays pending.
+      // A partial group in a month that has not ended stays pending. Only the
+      // last group of one still-open period can land here: every earlier group
+      // is full, and every earlier period is past.
       if (isFull || isPast) drafts.push({ period, transactions: group });
+      else open = { period, transactions: group };
     }
   }
 
-  return drafts;
+  return { drafts, open };
 }
 
 /**

@@ -111,14 +111,24 @@ describe('planBlocks', () => {
       gasUsed: 0,
       value: 0,
     };
-    const drafts = planBlocks([amendment], {
-      maxTxPerBlock: 4,
-      fromPeriod: '2026-08',
-      now: '2026-09-15',
-    });
-    expect(drafts).toHaveLength(1);
-    expect(drafts[0]!.period).toBe('2026-08');
-    expect(drafts[0]!.transactions).toEqual([amendment]);
+    const opts = { maxTxPerBlock: 4, fromPeriod: '2026-08', now: '2026-09-15' };
+    const drafts = planBlocks([amendment], opts);
+    // It must not get a block in its own stale month, which is the point of
+    // the membership floor.
+    expect(drafts.map((d) => d.period)).not.toContain('2026-03');
+    // §3.6 — the first still-open month is 2026-09, not the sealed tip 2026-08.
+    // A lone transaction there is a partial group in the *current* month, so it
+    // stays pending rather than sealing.
+    expect(drafts.flatMap((d) => d.transactions)).toEqual([]);
+    // It really is placed in 2026-09: once that month fills, it seals there.
+    const filled = planBlocks(
+      [amendment, tx('2026-09-01', 'a'), tx('2026-09-02', 'b'), tx('2026-09-03', 'c')],
+      opts,
+    );
+    const sealed = filled.filter((d) => d.transactions.length > 0);
+    expect(sealed).toHaveLength(1);
+    expect(sealed[0]!.period).toBe('2026-09');
+    expect(sealed[0]!.transactions).toContain(amendment);
   });
 
   it('does not mint empty blocks for months before fromPeriod, even when a stale-dated tx exists', () => {
@@ -143,27 +153,42 @@ describe('planBlocks', () => {
 
   it('places a post backdated before fromPeriod into the first still-open period, keeping its original date', () => {
     const backdated = tx('2026-01-05', 'old-post');
-    const drafts = planBlocks([backdated], {
-      maxTxPerBlock: 4,
-      fromPeriod: '2026-08',
-      now: '2026-09-15',
-    });
-    expect(drafts).toHaveLength(1);
-    expect(drafts[0]!.period).toBe('2026-08');
-    expect(drafts[0]!.transactions).toEqual([backdated]);
-    expect(drafts[0]!.transactions[0]!.date).toBe('2026-01-05');
+    const opts = { maxTxPerBlock: 4, fromPeriod: '2026-08', now: '2026-09-15' };
+    const drafts = planBlocks([backdated], opts);
+    expect(drafts.map((d) => d.period)).not.toContain('2026-01');
+    // The first still-open month is 2026-09; a lone post there stays pending.
+    expect(drafts.flatMap((d) => d.transactions)).toEqual([]);
+    // Once 2026-09 fills, the backdated post seals there — carrying its own
+    // date unchanged. Membership moves; the date it claims never does.
+    const filled = planBlocks(
+      [backdated, tx('2026-09-01', 'a'), tx('2026-09-02', 'b'), tx('2026-09-03', 'c')],
+      opts,
+    );
+    const sealed = filled.filter((d) => d.transactions.length > 0);
+    expect(sealed).toHaveLength(1);
+    expect(sealed[0]!.period).toBe('2026-09');
+    expect(sealed[0]!.transactions.find((t) => t.slug === 'old-post')!.date).toBe('2026-01-05');
   });
 
-  it('still seals the remainder of a size-limit split in its own month', () => {
+  it('carries the remainder of a size-limit split into the open month once its own month has closed', () => {
+    // Previously this sealed as a second 2026-08 block. That is the very bug
+    // this rule closes: 2026-08 is sealed AND over, so appending to it would
+    // mean a completed month gained a transaction after the fact. The
+    // remainder joins the open month instead. Splitting a busy month into two
+    // blocks *within one build* is untouched — see the size-rule test below.
     const remainder = tx('2026-08-05', 'e');
-    const drafts = planBlocks([remainder], {
-      maxTxPerBlock: 4,
-      fromPeriod: '2026-08',
-      now: '2026-09-01',
-    });
-    expect(drafts).toHaveLength(1);
-    expect(drafts[0]!.period).toBe('2026-08');
-    expect(drafts[0]!.transactions).toEqual([remainder]);
+    const opts = { maxTxPerBlock: 4, fromPeriod: '2026-08', now: '2026-09-01' };
+    const drafts = planBlocks([remainder], opts);
+    expect(drafts.flatMap((d) => d.transactions)).toEqual([]);
+
+    const filled = planBlocks(
+      [remainder, tx('2026-09-01', 'a'), tx('2026-09-02', 'b'), tx('2026-09-03', 'c')],
+      opts,
+    );
+    const sealed = filled.filter((d) => d.transactions.length > 0);
+    expect(sealed).toHaveLength(1);
+    expect(sealed[0]!.period).toBe('2026-09');
+    expect(sealed[0]!.transactions).toContain(remainder);
   });
 
   it('orders two amendments to the same post identically regardless of input order', () => {
@@ -251,6 +276,77 @@ describe('planBlocks', () => {
   it('orders ch- initial slugs by codepoint', () => {
     const drafts = planBlocks([tx('2026-07-01', 'hi-mot'), tx('2026-07-01', 'chi-hai')], OPTS);
     expect(drafts[0]!.transactions.map((t) => t.slug)).toEqual(['chi-hai', 'hi-mot']);
+  });
+
+  it('places a transaction entering the chain today in the open month, not the tip month', () => {
+    // Tip 2026-07 is sealed; an amendment carrying an old date enters on 2026-08-02.
+    const drafts = planBlocks([tx('2026-06-15', 'old')], {
+      now: '2026-08-02', maxTxPerBlock: 4, fromPeriod: '2026-07',
+    });
+    const withTxs = drafts.filter((d) => d.transactions.length > 0);
+    expect(withTxs.map((d) => d.period)).not.toContain('2026-07');
+  });
+
+  it('still mints empty blocks for silent months between the tip and now', () => {
+    // The regression that blocked the first attempt. Tip 2026-05, clock 2026-08:
+    // 2026-06 and 2026-07 were silent but complete, so each must still get its
+    // block. A month with no block is not "closed" — it is a hole in the chain.
+    const drafts = planBlocks([tx('2026-06-15', 'old')], {
+      now: '2026-08-02', maxTxPerBlock: 4, fromPeriod: '2026-05',
+    });
+    expect(drafts.map((d) => d.period)).toEqual(
+      expect.arrayContaining(['2026-05', '2026-06', '2026-07']),
+    );
+  });
+
+  it('still lets a busy current month split into two blocks of the same period', () => {
+    // 8, not 5: a PARTIAL group in the open month stays pending (see the
+    // `isFull || isPast` rule below), so 5 transactions yield ONE block. Eight
+    // is the smallest input that actually produces two full groups.
+    const many = Array.from({ length: 8 }, (_, i) =>
+      tx(`2026-08-${String(i + 1).padStart(2, '0')}`, `p${i}`));
+    const drafts = planBlocks(many, { now: '2026-08-20', maxTxPerBlock: 4, fromPeriod: '2026-08' });
+    expect(drafts.filter((d) => d.period === '2026-08').length).toBe(2);
+  });
+
+  it('seals a block whose recorded period has ended, even with a partial group', () => {
+    // The month-end rule must fire for 1-3 transactions. Without recorded
+    // placement this is unreachable at ANY clock: the transaction is re-placed
+    // into the current month on every build and the current month is never past.
+    const t = tx('2026-07-05', 'p');
+    const drafts = planBlocks([t], {
+      now: '2026-08-10', maxTxPerBlock: 4, fromPeriod: '2026-07',
+      recordedPeriods: new Map([[t.hash, '2026-07']]),
+    });
+    const withTxs = drafts.filter((d) => d.transactions.length > 0);
+    expect(withTxs.map((d) => d.period)).toEqual(['2026-07']);
+  });
+
+  it('does not mint an empty block for a month that held a pending transaction', () => {
+    const t = tx('2026-07-05', 'p');
+    const drafts = planBlocks([t], {
+      now: '2026-08-10', maxTxPerBlock: 4, fromPeriod: '2026-07',
+      recordedPeriods: new Map([[t.hash, '2026-07']]),
+    });
+    expect(drafts.filter((d) => d.period === '2026-07' && d.transactions.length === 0)).toEqual([]);
+  });
+
+  it('gives a genuinely new transaction the current month, not its claimed date', () => {
+    const t = tx('2026-06-15', 'backdated');
+    const drafts = planBlocks([t], { now: '2026-08-10', maxTxPerBlock: 4, fromPeriod: '2026-07' });
+    expect(drafts.filter((d) => d.transactions.length > 0).map((d) => d.period)).not.toContain('2026-07');
+  });
+
+  it('never lets a recorded period reopen a month the chain has already sealed', () => {
+    // A stale pending file could name a period that has since sealed. The
+    // recorded value wins over the clock, but never over the sealed floor.
+    const t = tx('2026-05-05', 'p');
+    const drafts = planBlocks([t], {
+      now: '2026-08-10', maxTxPerBlock: 4, fromPeriod: '2026-07',
+      recordedPeriods: new Map([[t.hash, '2026-05']]),
+    });
+    expect(drafts.map((d) => d.period)).not.toContain('2026-05');
+    expect(drafts.filter((d) => d.transactions.length > 0).map((d) => d.period)).toEqual(['2026-07']);
   });
 
   it('throws when maxTxPerBlock is zero', () => {

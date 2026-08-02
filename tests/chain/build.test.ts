@@ -1,10 +1,24 @@
 import { describe, it, expect, vi } from 'vitest';
 import { mkdtempSync, cpSync, writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { buildChain } from '../../src/chain/build';
+import { dirname, join } from 'node:path';
+import { buildChain, type BuildResult } from '../../src/chain/build';
 import { verifyChain } from '../../src/chain/verify';
 import { serializeChain } from '../../src/chain/lock';
+import type { Transaction } from '../../src/chain/types';
+
+/**
+ * §3.6 — an edit enters the chain in the open month, so it lands in the
+ * pending block and seals once that month has ended. `BuildResult.amendments`
+ * counts only what *sealed*, so these read the amendment wherever it is now.
+ */
+function pendingAmendments(r: BuildResult): Transaction[] {
+  return (r.pending?.transactions ?? []).filter((t) => t.type === 'amendment');
+}
+
+function sealedAmendments(r: BuildResult): Transaction[] {
+  return r.chain.blocks.flatMap((b) => b.transactions).filter((t) => t.type === 'amendment');
+}
 
 const CONFIG = { difficulty: 2, maxTxPerBlock: 4, authorHandle: 'lamter', authorName: 'lamter.eth' };
 
@@ -86,11 +100,12 @@ describe('buildChain', () => {
     writeFileSync(target, readFileSync(target, 'utf8') + '\nMột dòng sửa lại.\n');
 
     const after = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-11-10', config: CONFIG });
-    expect(after.amendments).toBe(1);
+    // The edit entered the chain in the open month, so it waits in the pending
+    // block rather than sealing into 2026-10, a month that already closed.
+    expect(after.amendments).toBe(0);
+    expect(after.pending!.period).toBe('2026-11');
 
-    const amendments = after.chain.blocks.flatMap((b) =>
-      b.transactions.filter((t) => t.type === 'amendment'),
-    );
+    const amendments = pendingAmendments(after);
     expect(amendments).toHaveLength(1);
     expect(amendments[0]!.amends).toBe(originalHash);
     expect(amendments[0]!.gasUsed).toBe(0);
@@ -118,11 +133,9 @@ describe('buildChain', () => {
     );
 
     const after = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-11-10', config: CONFIG });
-    expect(after.amendments).toBe(1);
+    expect(after.amendments).toBe(0);
 
-    const amendment = after.chain.blocks
-      .flatMap((b) => b.transactions)
-      .find((t) => t.type === 'amendment')!;
+    const amendment = pendingAmendments(after)[0]!;
     expect(amendment.amends).toBe(originalHash);
     expect(amendment.title).toBe('Bài viết đầu tiên (sửa)');
     expect(amendment.contentHash).toBe(before.chain.blocks[0]!.transactions[0]!.contentHash);
@@ -138,20 +151,24 @@ describe('buildChain', () => {
     writeFileSync(target, readFileSync(target, 'utf8').replace('research: 2.0', 'research: 6.5'));
 
     const after = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-11-10', config: CONFIG });
-    expect(after.amendments).toBe(1);
+    expect(after.amendments).toBe(0);
 
-    const amendment = after.chain.blocks
-      .flatMap((b) => b.transactions)
-      .find((t) => t.type === 'amendment')!;
+    const amendment = pendingAmendments(after)[0]!;
     expect(amendment.research).toBe(6.5);
     // The hours are declared as metadata but not re-charged: they were already
     // counted in the block that sealed the original.
     expect(amendment.value).toBe(0);
-    const amendmentBlock = after.chain.blocks.find((b) =>
+
+    // And once its recorded month has ended the block seals still charging
+    // nothing — the guarantee is about the sealed block, so check it there.
+    const sealed = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-12-10', config: CONFIG });
+    expect(sealed.amendments).toBe(1);
+    const amendmentBlock = sealed.chain.blocks.find((b) =>
       b.transactions.some((t) => t.type === 'amendment'),
     )!;
     expect(amendmentBlock.value).toBe(0);
-    expect((await verifyChain(after.chain)).ok).toBe(true);
+    expect(amendmentBlock.period).toBe('2026-11');
+    expect((await verifyChain(sealed.chain)).ok).toBe(true);
   });
 
   it('does not re-emit a metadata amendment on a subsequent unchanged build', async () => {
@@ -161,8 +178,17 @@ describe('buildChain', () => {
     writeFileSync(target, readFileSync(target, 'utf8').replace('tags: [essay]', 'tags: [essay, meta]'));
     await buildChain({ postsDir, assetsDir, lockPath, now: '2026-11-10', config: CONFIG });
 
+    // The pending amendment's recorded month has now ended, so this build is
+    // where it seals. What must not happen is a *second* amendment for the
+    // same edit, now or on any later build.
     const third = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-12-10', config: CONFIG });
-    expect(third.amendments).toBe(0);
+    expect(sealedAmendments(third)).toHaveLength(1);
+    expect(third.pending).toBeNull();
+
+    const fourth = await buildChain({ postsDir, assetsDir, lockPath, now: '2027-01-10', config: CONFIG });
+    expect(fourth.amendments).toBe(0);
+    expect(sealedAmendments(fourth)).toHaveLength(1);
+    expect(pendingAmendments(fourth)).toHaveLength(0);
   });
 
   it('emits exactly one amendment per successive distinct metadata edit', async () => {
@@ -170,24 +196,50 @@ describe('buildChain', () => {
     await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
     const target = join(postsDir, '2026-06-15-first.md');
 
+    // Each edit is allowed to seal before the next is made, so both are
+    // confirmed history and both must be recorded.
     writeFileSync(target, readFileSync(target, 'utf8').replace('đầu tiên"', 'đầu tiên (v2)"'));
-    const second = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-11-10', config: CONFIG });
-    expect(second.amendments).toBe(1);
+    await buildChain({ postsDir, assetsDir, lockPath, now: '2026-11-10', config: CONFIG });
+    const sealV2 = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-12-10', config: CONFIG });
+    expect(sealV2.amendments).toBe(1);
 
     writeFileSync(target, readFileSync(target, 'utf8').replace('(v2)"', '(v3)"'));
-    const third = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-12-10', config: CONFIG });
-    expect(third.amendments).toBe(1);
+    await buildChain({ postsDir, assetsDir, lockPath, now: '2027-01-10', config: CONFIG });
+    const sealV3 = await buildChain({ postsDir, assetsDir, lockPath, now: '2027-02-10', config: CONFIG });
+    expect(sealV3.amendments).toBe(1);
 
-    const amendments = third.chain.blocks
-      .flatMap((b) => b.transactions)
-      .filter((t) => t.type === 'amendment');
+    const amendments = sealedAmendments(sealV3);
     expect(amendments).toHaveLength(2);
     expect(amendments.map((t) => t.title)).toEqual([
       'Bài viết đầu tiên (v2)',
       'Bài viết đầu tiên (v3)',
     ]);
     expect(new Set(amendments.map((t) => t.hash)).size).toBe(2);
-    expect((await verifyChain(third.chain)).ok).toBe(true);
+    expect((await verifyChain(sealV3.chain)).ok).toBe(true);
+  });
+
+  it('collapses successive edits made while the amendment is still pending', async () => {
+    // An unconfirmed transaction can still be replaced. Editing again before
+    // the open block seals supersedes the pending amendment rather than
+    // stacking a second one, so the chain records the state that was actually
+    // confirmed — not every intermediate keystroke.
+    const { postsDir, assetsDir, lockPath } = workspace();
+    await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
+    const target = join(postsDir, '2026-06-15-first.md');
+
+    writeFileSync(target, readFileSync(target, 'utf8').replace('đầu tiên"', 'đầu tiên (v2)"'));
+    const second = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-11-10', config: CONFIG });
+    expect(pendingAmendments(second).map((t) => t.title)).toEqual(['Bài viết đầu tiên (v2)']);
+
+    writeFileSync(target, readFileSync(target, 'utf8').replace('(v2)"', '(v3)"'));
+    const third = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-12-10', config: CONFIG });
+    expect(pendingAmendments(third).map((t) => t.title)).toEqual(['Bài viết đầu tiên (v3)']);
+    expect(sealedAmendments(third)).toHaveLength(0);
+
+    const fourth = await buildChain({ postsDir, assetsDir, lockPath, now: '2027-01-10', config: CONFIG });
+    const sealed = sealedAmendments(fourth);
+    expect(sealed.map((t) => t.title)).toEqual(['Bài viết đầu tiên (v3)']);
+    expect((await verifyChain(fourth.chain)).ok).toBe(true);
   });
 
   it('refuses a reused filename carrying a different date', async () => {
@@ -215,10 +267,14 @@ describe('buildChain', () => {
     writeFileSync(target, readFileSync(target, 'utf8') + '\nMột dòng sửa lại.\n');
     const after = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-11-10', config: CONFIG });
 
-    // The amendment's own block, not necessarily the last block on the
-    // chain — a backdated-into-a-sealed-period amendment can be followed by
-    // further, later, empty months (§3.6's own already-tested rule).
-    const amendmentBlock = after.chain.blocks.find((b) =>
+    // The open block holds the amendment alone — not the amendment plus a
+    // fresh "post" transaction for the same slug.
+    expect(after.pending!.transactions).toHaveLength(1);
+    expect(after.pending!.transactions[0]!.type).toBe('amendment');
+
+    // And it stays alone once it seals.
+    const sealed = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-12-10', config: CONFIG });
+    const amendmentBlock = sealed.chain.blocks.find((b) =>
       b.transactions.some((t) => t.type === 'amendment'),
     )!;
     expect(amendmentBlock.txCount).toBe(1);
@@ -244,11 +300,16 @@ describe('buildChain', () => {
     await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
     const target = join(postsDir, '2026-06-15-first.md');
 
+    // Each edit is sealed before the next is made, so both are confirmed and
+    // the question is whether the second one *compounds* — re-emitting the
+    // first alongside it, or re-publishing the post itself.
     writeFileSync(target, readFileSync(target, 'utf8') + '\nMột dòng sửa lại.\n');
     await buildChain({ postsDir, assetsDir, lockPath, now: '2026-11-10', config: CONFIG });
+    await buildChain({ postsDir, assetsDir, lockPath, now: '2026-12-10', config: CONFIG });
 
     writeFileSync(target, readFileSync(target, 'utf8') + '\nMột dòng sửa khác.\n');
-    const after = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-12-10', config: CONFIG });
+    await buildChain({ postsDir, assetsDir, lockPath, now: '2027-01-10', config: CONFIG });
+    const after = await buildChain({ postsDir, assetsDir, lockPath, now: '2027-02-10', config: CONFIG });
 
     expect(after.amendments).toBe(1);
     const postSlugs = after.chain.blocks
@@ -256,10 +317,34 @@ describe('buildChain', () => {
       .filter((t) => t.type === 'post')
       .map((t) => t.slug);
     expect(new Set(postSlugs).size).toBe(postSlugs.length);
-    const amendmentCount = after.chain.blocks
-      .flatMap((b) => b.transactions)
-      .filter((t) => t.type === 'amendment').length;
-    expect(amendmentCount).toBe(2);
+    expect(sealedAmendments(after)).toHaveLength(2);
+  });
+
+  it('ignores a pending file recorded against a different tip', async () => {
+    // The recorded period is only meaningful relative to the tip it was
+    // recorded against. If the lock was rebuilt, reverted or replaced, that
+    // placement was chosen for a history this chain no longer has — honouring
+    // it would seal a transaction into a month picked for a different chain.
+    const { postsDir, assetsDir, lockPath } = workspace();
+    const pendingPath = join(dirname(lockPath), 'chain.pending.json');
+    await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
+
+    const target = join(postsDir, '2026-06-15-first.md');
+    writeFileSync(target, readFileSync(target, 'utf8') + '\nMột dòng sửa lại.\n');
+    const pendingBuild = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-11-10', config: CONFIG });
+    expect(pendingBuild.pending!.period).toBe('2026-11');
+
+    // Same file, but recorded against a tip this chain does not have.
+    const onDisk = JSON.parse(readFileSync(pendingPath, 'utf8'));
+    onDisk.prevHash = '0x' + 'e'.repeat(64);
+    writeFileSync(pendingPath, JSON.stringify(onDisk, null, 2) + '\n');
+
+    const after = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-12-10', config: CONFIG });
+    // Ignored, so the amendment is placed afresh in the open month rather than
+    // sealing into the stale file's 2026-11.
+    expect(after.amendments).toBe(0);
+    expect(after.pending!.period).toBe('2026-12');
+    expect((await verifyChain(after.chain)).ok).toBe(true);
   });
 
   it('does not re-charge gas or research hours for an edited post', async () => {
@@ -269,16 +354,19 @@ describe('buildChain', () => {
     writeFileSync(target, readFileSync(target, 'utf8') + '\nMột dòng sửa lại.\n');
     const after = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-11-10', config: CONFIG });
 
-    const amendmentBlock = after.chain.blocks.find((b) =>
+    // The original block's totals — sealed before the edit — must be unchanged
+    // the moment the amendment is created, before it has sealed anywhere.
+    expect(after.chain.blocks[0]).toEqual(before.chain.blocks[0]);
+
+    const sealed = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-12-10', config: CONFIG });
+    const amendmentBlock = sealed.chain.blocks.find((b) =>
       b.transactions.some((t) => t.type === 'amendment'),
     )!;
     // The amendment itself carries no gas/value (asserted elsewhere); the
     // original post's numbers must not be re-summed into this block.
     expect(amendmentBlock.gasUsed).toBe(0);
     expect(amendmentBlock.value).toBe(0);
-    // And the original block's totals — sealed before the edit — must be
-    // unchanged.
-    expect(after.chain.blocks[0]).toEqual(before.chain.blocks[0]);
+    expect(sealed.chain.blocks[0]).toEqual(before.chain.blocks[0]);
   });
 
   it('leaves the original transaction untouched after an amendment', async () => {
@@ -298,8 +386,12 @@ describe('buildChain', () => {
     const target = join(postsDir, '2026-06-15-first.md');
     writeFileSync(target, readFileSync(target, 'utf8') + '\nMột dòng sửa lại.\n');
     await buildChain({ postsDir, assetsDir, lockPath, now: '2026-11-10', config: CONFIG });
+    // 2026-12 seals the pending amendment; 2027-01 must add nothing further.
     const third = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-12-10', config: CONFIG });
-    expect(third.amendments).toBe(0);
+    expect(sealedAmendments(third)).toHaveLength(1);
+    const fourth = await buildChain({ postsDir, assetsDir, lockPath, now: '2027-01-10', config: CONFIG });
+    expect(fourth.amendments).toBe(0);
+    expect(sealedAmendments(fourth)).toHaveLength(1);
   });
 
   it('does not re-mint an empty block for an already-sealed month', async () => {
@@ -320,17 +412,24 @@ describe('buildChain', () => {
     );
 
     const after = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
-    expect(after.chain.blocks.slice(0, 3)).toEqual(before.chain.blocks);
-    expect(after.chain.blocks).toHaveLength(4);
-    expect(after.chain.blocks[3]!.transactions.map((t) => t.slug)).toEqual(['2026-06-01-backdated']);
-    // §3.6 — membership is when it entered the chain. The post keeps its
-    // 2026-06-01 date, but its block is the first period still open.
-    expect(after.chain.blocks[3]!.period).toBe('2026-08');
-    expect(after.chain.blocks[3]!.transactions[0]!.date).toBe('2026-06-01');
+    // Sealed history is untouched: the backdated post joins the OPEN month.
+    expect(after.chain.blocks).toEqual(before.chain.blocks);
+    // §3.6 — membership is when it entered the chain, which is 2026-09, not
+    // its own 2026-06 and not the already-sealed tip month 2026-08.
+    expect(after.pending!.period).toBe('2026-09');
+    expect(after.pending!.transactions.map((t) => t.slug)).toEqual(['2026-06-01-backdated']);
+
+    // Once 2026-09 has ended it seals there, still carrying its own date.
+    const sealed = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-10-05', config: CONFIG });
+    const block = sealed.chain.blocks.find((b) =>
+      b.transactions.some((t) => t.slug === '2026-06-01-backdated'),
+    )!;
+    expect(block.period).toBe('2026-09');
+    expect(block.transactions[0]!.date).toBe('2026-06-01');
     // Block periods never decrease along the chain.
-    const periods = after.chain.blocks.map((b) => b.period);
+    const periods = sealed.chain.blocks.map((b) => b.period);
     expect([...periods].sort()).toEqual(periods);
-    expect((await verifyChain(after.chain)).ok).toBe(true);
+    expect((await verifyChain(sealed.chain)).ok).toBe(true);
   });
 
   it('refuses to extend a lock file that fails verification', async () => {
@@ -470,7 +569,10 @@ describe('buildChain', () => {
       join(postsDir, '2026-09-05-two.md'),
       '---\ntitle: "Hai"\ndate: 2026-09-05\ntags: [cp]\n---\n\n![b](/assets/b.svg)\n',
     );
-    const second = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-11-10', config: CONFIG });
+    await buildChain({ postsDir, assetsDir, lockPath, now: '2026-11-10', config: CONFIG });
+    // A token is minted by first appearance in a *sealed* block, so the second
+    // post must seal before its asset has an identity.
+    const second = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-12-10', config: CONFIG });
 
     expect(second.chain.assets[0]).toEqual(tokenOne);
     expect(second.chain.assets[1]!.tokenId).toBe(2);
@@ -489,16 +591,23 @@ describe('buildChain', () => {
     writeFileSync(join(assetsDir, 'a.svg'), 'SWAPPED');
     const after = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-11-10', config: CONFIG });
 
-    expect(after.amendments).toBe(1);
-    expect(after.chain.assets).toHaveLength(2);
-    expect((await verifyChain(after.chain)).ok).toBe(true);
+    // The swap is detected and lands in the open block; the new file's token
+    // is minted only once that block seals.
+    expect(pendingAmendments(after)).toHaveLength(1);
+    expect(after.chain.assets).toHaveLength(1);
+
+    const third = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-12-10', config: CONFIG });
+    expect(third.amendments).toBe(1);
+    expect(third.chain.assets).toHaveLength(2);
+    expect((await verifyChain(third.chain)).ok).toBe(true);
 
     // The text-edit path already has a "does not re-emit on a subsequent
     // unchanged build" guard; the asset path stopped short of it. If this
     // regresses, the failure mode is an amendment emitted on every build
     // forever.
-    const third = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-12-10', config: CONFIG });
-    expect(third.amendments).toBe(0);
+    const fourth = await buildChain({ postsDir, assetsDir, lockPath, now: '2027-01-10', config: CONFIG });
+    expect(fourth.amendments).toBe(0);
+    expect(sealedAmendments(fourth)).toHaveLength(1);
   });
 
   it('fails the build when a post references a missing asset', async () => {

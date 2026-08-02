@@ -11,7 +11,7 @@ try {
   process.exit(1);
 }
 
-const { chain, minted, amendments } = await buildChain({
+const { chain, minted, amendments, pending } = await buildChain({
   postsDir: 'content/posts',
   assetsDir: 'content/assets',
   lockPath: 'chain.lock.json',
@@ -25,6 +25,11 @@ const txCount = chain.blocks.reduce((s, b) => s + b.txCount, 0);
 console.log(`  clock       ${now}`);
 console.log(`  sealed      ${minted} new block(s)`);
 if (amendments > 0) console.log(`  amendments  ${amendments} sealed post(s) edited`);
+if (pending !== null) {
+  console.log(
+    `  pending     ${pending.transactions.length} txn(s) in the open ${pending.period} block`,
+  );
+}
 console.log(`  height      ${chain.blocks.length}`);
 console.log(`  txns        ${txCount}`);
 console.log(`  assets      ${chain.assets.length}`);

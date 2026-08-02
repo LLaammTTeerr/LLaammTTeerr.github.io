@@ -14,7 +14,7 @@ export function emptyChain(difficulty: number): Chain {
  * records its declared hours in `value`, and emitting a redundant `null`
  * beside it would bloat every transaction in the ledger.
  */
-function orderedTransaction(t: Transaction) {
+export function orderedTransaction(t: Transaction) {
   return {
     hash: t.hash,
     type: t.type,
