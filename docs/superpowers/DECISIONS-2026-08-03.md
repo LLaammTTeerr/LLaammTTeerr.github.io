@@ -41,3 +41,37 @@ if a size-split seals first, the number changes.
 of falsehood as a hash it has not mined. `/blocks` always exists and always shows it.
 
 **To reverse:** add a `/block/open` route in a later plan; the link target is one line.
+
+---
+
+## D3 — three tests would have broken the first time you published
+
+**Found:** `pending-render.test.ts` and `build-guarantees.test.ts` asserted the sandbox showed
+`pending 1 txn` — an exact count. The sandbox copies the real repo's `chain.pending.json`, so
+the first time you publish a post in the current month and commit that file, the test's own
+fixture becomes the *second* pending transaction and the assertion fails.
+
+**Decision:** fixed rather than deferred. Added `pendingIdsIn(dir)` to the test harness; each
+test now asserts *its own* transaction is pending instead of counting the block.
+
+**Reasoning:** it would have failed on your first real use of the feature this plan was built
+for, and it would have looked like the feature was broken rather than the test. Proved both
+ways before and after — with a pending transaction present, the old assertion threw and the
+new one passes.
+
+**To reverse:** nothing to reverse; this only removes a false failure.
+
+---
+
+## D4 — Task 5's implementer edited three files outside its brief
+
+**Found:** it fixed two count assertions in `homepage.test.ts` and an em-dash fixture in
+`build-guarantees.test.ts` — files its task did not own — because its own change would
+otherwise have broken them.
+
+**Decision:** accepted, and flagged for the whole-branch review to verify rather than reverting
+now.
+
+**Reasoning:** the alternative was leaving the branch red. The edits are small and in the same
+failure class as D3. I would rather a reviewer confirm them with fresh eyes than have me wave
+them through on the implementer's description.
