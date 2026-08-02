@@ -88,11 +88,30 @@ describe('getPosts', () => {
 });
 
 describe('getStats', () => {
-  it('counts blocks, post transactions and assets', () => {
-    const s = getStats();
-    expect(s.height).toBe(getChain().blocks.length);
-    expect(s.transactions).toBe(getPosts().length);
-    expect(s.assets).toBe(getChain().assets.length);
+  // These pin concrete numbers from the committed ledger. Re-deriving the
+  // expectation with the implementation's own expression cannot catch a
+  // conceptual error — it passed happily while `height` reported the block
+  // count (2) for a chain whose tip says #1, and while `transactions`
+  // reported the post count under a tile labelled Transactions.
+  it('reports the committed height of the tip, not the number of blocks', () => {
+    expect(getChain().blocks).toHaveLength(2);
+    expect(getStats().height).toBe(1);
+    expect(getStats().height).toBe(getBlocks()[0]!.height);
+  });
+
+  it("counts every transaction from the headers' committed txCount", () => {
+    // Amendments are transactions too (§3.9): committed to merkleRoot and
+    // counted in txCount. A post count agrees only while the ledger holds
+    // none, and would disagree with the block pages on the first one.
+    const committed = getChain().blocks.reduce((n, b) => n + b.txCount, 0);
+    expect(committed).toBe(1);
+    expect(getStats().transactions).toBe(1);
+    expect(getStats().transactions).toBe(committed);
+  });
+
+  it('counts the assets in the committed registry', () => {
+    expect(getStats().assets).toBe(0);
+    expect(getStats().assets).toBe(getChain().assets.length);
   });
 
   it('counts distinct addresses across from and to', () => {
@@ -114,6 +133,7 @@ describe('getStats', () => {
   });
 
   it('reports the chain difficulty', () => {
+    expect(getStats().difficulty).toBe(5);
     expect(getStats().difficulty).toBe(getChain().difficulty);
   });
 });

@@ -1,6 +1,8 @@
 ---
 import WorkMeter from './WorkMeter.astro';
 import type { BlockView } from '../site/chain-data';
+// The card's styles travel with the card — see the note in WorkMeter.astro.
+import '../styles/chain.css';
 
 interface Props { block: BlockView; isNewest: boolean; isOldest: boolean }
 const { block, isNewest, isOldest } = Astro.props;

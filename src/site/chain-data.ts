@@ -87,7 +87,18 @@ export function getAssets(): AssetRecord[] {
 }
 
 export interface NetworkStats {
+  /**
+   * The tip's committed height — not the block count. A two-block chain is
+   * at height 1, which is what the tip's own header says and what the gutter
+   * renders beside it. §14: every displayed field must be a committed one.
+   */
   height: number;
+  /**
+   * Every transaction in the ledger, from the headers' committed `txCount`.
+   * Not `getPosts().length`: amendments are transactions too (§3.9), they
+   * are committed to `merkleRoot` and counted in `txCount`, and a post count
+   * would disagree with the block pages the moment the first one lands.
+   */
   transactions: number;
   addresses: number;
   difficulty: number;
@@ -103,9 +114,10 @@ export function getStats(): NetworkStats {
       for (const to of tx.to) addresses.add(to);
     }
   }
+  const tipHeight = chain.blocks.reduce((max, b) => Math.max(max, b.height), 0);
   return {
-    height: chain.blocks.length,
-    transactions: getPosts().length,
+    height: tipHeight,
+    transactions: chain.blocks.reduce((n, b) => n + b.txCount, 0),
     addresses: addresses.size,
     difficulty: chain.difficulty,
     assets: chain.assets.length,

@@ -14,8 +14,7 @@
     "check:vietnamese": "tsx scripts/check-vietnamese.ts",
     "dev": "astro dev",
     "build": "astro build",
-    "preview": "astro preview",
-    "test:all": "astro build && vitest run"
+    "preview": "astro preview"
   },
   "devDependencies": {
     "@fontsource/be-vietnam-pro": "^5.3.0",

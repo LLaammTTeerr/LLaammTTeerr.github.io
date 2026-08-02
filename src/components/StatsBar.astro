@@ -1,5 +1,8 @@
 ---
 import { getStats } from '../site/chain-data';
+// The bar's styles travel with the bar — see the note in WorkMeter.astro.
+import '../styles/chain.css';
+
 const s = getStats();
 const cells = [
   { k: 'Chain height', v: String(s.height), tone: 'acc' },

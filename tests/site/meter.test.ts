@@ -41,6 +41,42 @@ describe('meterGeometry', () => {
     expect(barPct).toBe(100);
   });
 
+  // The span is one constant; the tick, the guide line and the `exp` segment
+  // are three renderings of the same 1× landmark. These tie each landmark to
+  // what the meter actually draws at ratio 1, so they stay true if the span
+  // changes — and fail if any consumer restates the constant instead.
+  describe('the 1x landmarks agree with what the meter draws at 1x', () => {
+    const difficulty = 5;
+    const expected = expectedAttempts(difficulty);
+
+    it('spans three times the expected attempts', () => {
+      expect(meterGeometry(expected, difficulty).span).toBe(3);
+    });
+
+    it('places the M1 tick exactly where a 1x bar ends', () => {
+      const { tickPct } = meterGeometry(expected, difficulty);
+      expect(meterGeometry(expected, difficulty).barPct).toBeCloseTo(tickPct, 9);
+    });
+
+    it('places the M3 guide line exactly where a 1x marker lands', () => {
+      const { guideX, markX } = meterGeometry(expected, difficulty);
+      expect(markX).toBeCloseTo(guideX, 9);
+    });
+
+    it("puts 1x expected on the exp segment's right edge", () => {
+      const { expectedSegmentIndex, perSegment } = meterGeometry(expected, difficulty);
+      expect(Number.isInteger(expectedSegmentIndex), 'no segment boundary lands on 1x').toBe(true);
+      expect((expectedSegmentIndex + 1) * perSegment).toBeCloseTo(expected, 6);
+    });
+
+    it('samples the curve across the full span, ending at the right edge', () => {
+      const { curve, span } = meterGeometry(expected, difficulty);
+      expect(curve[0]!.x).toBe(0);
+      expect(curve[curve.length - 1]!.x).toBeCloseTo(200, 9);
+      expect(meterGeometry(expected * span, difficulty).markX).toBeCloseTo(200, 9);
+    });
+  });
+
   it('marks a block that cost fewer attempts than expected as lucky', () => {
     const difficulty = 5;
     const expected = expectedAttempts(difficulty);

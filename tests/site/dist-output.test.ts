@@ -1,0 +1,152 @@
+import { describe, it, expect } from 'vitest';
+import { readDist, readDistCss } from './dist';
+import { parseRules, selectorParts, declaredValue, stripComments } from './css';
+import { METERS, DEFAULTS } from '../../src/site/themes';
+
+// Guards over what the build actually ships. Each of these covers a property
+// the branch claims but nothing else asserts: that a page load touches no
+// third party, that the vendored Vietnamese fonts reach `dist`, that the
+// component stylesheets reach `dist`, and that exactly one work meter is
+// visible at a time.
+
+describe('no external requests', () => {
+  it('the built page references no absolute http(s) url', () => {
+    // Not a style preference: §9 requires the page make no third-party
+    // request. A CDN font, an analytics tag or an external stylesheet would
+    // all show up here.
+    expect(readDist('index.html')).not.toMatch(/https?:\/\//);
+  });
+
+  it('the built css references no absolute http(s) url', () => {
+    expect(readDistCss()).not.toMatch(/https?:\/\//);
+  });
+});
+
+describe('fonts reach the build', () => {
+  const faces = () => [...stripComments(readDistCss()).matchAll(/@font-face\s*\{([^}]*)\}/g)].map((m) => m[1]!);
+
+  it('ships a @font-face for both families', () => {
+    const all = faces();
+    expect(all.length, 'no @font-face in the built css at all').toBeGreaterThan(0);
+    for (const family of ['Be Vietnam Pro', 'JetBrains Mono']) {
+      expect(
+        all.some((f) => new RegExp(`font-family:\\s*["']?${family}`).test(f)),
+        `built css declares no @font-face for ${family}`,
+      ).toBe(true);
+    }
+  });
+
+  it('ships a vietnamese subset for both families', () => {
+    // Deleting `import '../styles/fonts.css'` from Base.astro used to leave
+    // every font test green while the site rendered Vietnamese in whatever
+    // the system happened to provide. This is the assertion that notices.
+    for (const family of ['Be Vietnam Pro', 'JetBrains Mono']) {
+      const vietnamese = faces().filter(
+        (f) => new RegExp(`font-family:\\s*["']?${family}`).test(f) && /vietnamese/i.test(f),
+      );
+      expect(vietnamese.length, `no vietnamese @font-face for ${family} in the built css`).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe('component styles reach the build', () => {
+  it('ships the rules for every component the homepage renders', () => {
+    // chain.css is imported by StatsBar, BlockCard and WorkMeter rather than
+    // by the page, so that a future route cannot render them unstyled by
+    // forgetting an import. This checks the rules actually arrive.
+    const css = readDistCss();
+    for (const selector of ['.stat', '.card', '.work', '.meter']) {
+      expect(
+        parseRules(css).some((r) => selectorParts(r).some((p) => p.split(/\s+/).includes(selector))),
+        `built css has no rule for ${selector}`,
+      ).toBe(true);
+    }
+  });
+});
+
+/**
+ * All three meter markups are always rendered; CSS picks one. Nothing tested
+ * that selection, so deleting a single `display: none` rule would show two
+ * meters at once with a fully green suite.
+ *
+ * This evaluates the cascade for the meter container itself over the built
+ * CSS: the rules that select `.meter` / `.meter-mN` (optionally under
+ * `:root` or `[data-meter="…"]`), resolved by specificity then source order.
+ * What it models: those selector shapes, specificity, source order, and the
+ * UA default of `display: block` when no rule matches. What it does not
+ * model: media queries (it refuses to run if a meter-visibility rule sits
+ * inside one), `!important`, inline styles, and any selector shape outside
+ * the grammar below — which it also refuses rather than silently skips.
+ */
+// Quotes optional: the built CSS is minified, so `[data-meter="m2"]` ships
+// as `[data-meter=m2]`.
+const CONTAINER = /^(?:\[data-meter=["']?([a-z0-9-]+)["']?\]\s+|(:root)\s+)?\.meter(?:-([a-z0-9-]+))?$/;
+
+interface VisibilityRule {
+  /** Required `data-meter` value on the root, or null for any. */
+  context: string | null;
+  /** Meter id this rule targets, or null for every `.meter`. */
+  target: string | null;
+  display: string;
+  specificity: number;
+  order: number;
+}
+
+function visibilityRules(css: string): VisibilityRule[] {
+  const out: VisibilityRule[] = [];
+  for (const rule of parseRules(css)) {
+    for (const part of selectorParts(rule)) {
+      if (!/\.meter(-|\s|$)/.test(part)) continue;
+      const m = CONTAINER.exec(part);
+      if (!m) continue; // targets a descendant (`.meter .segs`), not the container
+      const display = declaredValue(rule.body, 'display');
+      if (display === null) continue;
+      if (rule.atRule !== null) {
+        throw new Error(
+          `meter visibility rule "${part}" sits inside ${rule.atRule}; this evaluator does not model at-rules`,
+        );
+      }
+      out.push({
+        context: m[1] ?? null,
+        target: m[3] ?? null,
+        display,
+        // Attribute selectors and pseudo-classes both count in the class column.
+        specificity: (part.match(/\.|\[|:/g) ?? []).length,
+        order: rule.order,
+      });
+    }
+  }
+  return out;
+}
+
+/** Resolved `display` of `.meter .meter-{id}` under `<html data-meter={context}>`. */
+function displayOf(rules: VisibilityRule[], context: string | null, id: string): string {
+  const winner = rules
+    .filter((r) => (r.context === null || r.context === context) && (r.target === null || r.target === id))
+    .sort((a, b) => a.specificity - b.specificity || a.order - b.order)
+    .pop();
+  return winner?.display ?? 'block'; // no rule matched: the UA default wins
+}
+
+describe('exactly one work meter is visible', () => {
+  const ids = METERS.map((m) => m.id);
+
+  it('finds the meter visibility rules in the built css', () => {
+    expect(visibilityRules(readDistCss()).length).toBeGreaterThan(0);
+  });
+
+  it('shows only the selected meter for each preference', () => {
+    const rules = visibilityRules(readDistCss());
+    for (const selected of ids) {
+      const visible = ids.filter((id) => displayOf(rules, selected, id) !== 'none');
+      expect(visible, `data-meter="${selected}" should show exactly that meter`).toEqual([selected]);
+    }
+  });
+
+  it('shows only the default meter with no preference attribute set', () => {
+    // The no-JS and first-paint case: nothing has written data-meter yet.
+    const rules = visibilityRules(readDistCss());
+    const visible = ids.filter((id) => displayOf(rules, null, id) !== 'none');
+    expect(visible).toEqual([DEFAULTS.meter]);
+  });
+});

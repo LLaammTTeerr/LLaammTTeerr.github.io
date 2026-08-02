@@ -1,8 +1,19 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { PALETTES, INTENSITIES, METERS, DEFAULTS } from '../../src/site/themes';
+import { hasSelectorContaining, propsDeclaredBy as propsFor } from './css';
 
 const CSS = readFileSync('src/styles/tokens.css', 'utf8');
+
+/**
+ * True when some *rule* selects on `attr`. Not `CSS.toContain(...)`: this
+ * file's header comment names `[data-palette="github-dark"]` in prose, so a
+ * bare substring assertion can be satisfied by a comment rather than by a
+ * rule. `hasSelectorContaining` parses the stylesheet with comments removed.
+ */
+function declaresSelector(attr: string): boolean {
+  return hasSelectorContaining(CSS, attr);
+}
 
 describe('palette catalogue', () => {
   it('offers eleven palettes', () => {
@@ -27,19 +38,10 @@ describe('palette catalogue', () => {
   });
 });
 
-/** Custom property names (`--foo`) declared inside every `{...}` block whose
- * selector matches `selector` verbatim (no nested braces in this file, so a
- * simple non-greedy match is sufficient). */
+/** Custom property names (`--foo`) declared by rules whose selector is
+ * exactly `selector`. */
 function propsDeclaredBy(selector: string): Set<string> {
-  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const blockPattern = new RegExp(`${escaped}\\s*\\{([^}]*)\\}`, 'g');
-  const props = new Set<string>();
-  for (const block of CSS.matchAll(blockPattern)) {
-    for (const decl of block[1]!.matchAll(/(--[\w-]+)\s*:/g)) {
-      props.add(decl[1]!);
-    }
-  }
-  return props;
+  return propsFor(CSS, selector);
 }
 
 describe('css agreement', () => {
@@ -52,20 +54,20 @@ describe('css agreement', () => {
     // that actually guards the default.
     for (const p of PALETTES) {
       if (p.id === DEFAULTS.palette) continue;
-      expect(CSS, `missing palette ${p.id}`).toContain(`[data-palette="${p.id}"]`);
+      expect(declaresSelector(`[data-palette="${p.id}"]`), `missing palette ${p.id}`).toBe(true);
     }
   });
 
   it('defines a selector for every non-default intensity', () => {
     for (const i of INTENSITIES) {
       if (i.id === DEFAULTS.intensity) continue;
-      expect(CSS, `missing intensity ${i.id}`).toContain(`[data-intensity="${i.id}"]`);
+      expect(declaresSelector(`[data-intensity="${i.id}"]`), `missing intensity ${i.id}`).toBe(true);
     }
   });
 
   it('defines a selector for every meter id', () => {
     for (const m of METERS) {
-      expect(CSS, `missing meter ${m.id}`).toContain(`[data-meter="${m.id}"]`);
+      expect(declaresSelector(`[data-meter="${m.id}"]`), `missing meter ${m.id}`).toBe(true);
     }
   });
 
@@ -79,6 +81,9 @@ describe('css agreement', () => {
     for (const p of PALETTES) {
       if (p.id === DEFAULTS.palette) continue;
       const paletteProps = propsDeclaredBy(`[data-palette="${p.id}"]`);
+      // Without this, a palette whose block failed to parse contributes an
+      // empty set and passes the subset check below having checked nothing.
+      expect(paletteProps.size, `no custom properties found for palette ${p.id}`).toBeGreaterThan(0);
       for (const prop of paletteProps) {
         expect(rootProps, `:root is missing ${prop}, defined by palette ${p.id}`).toContain(prop);
       }

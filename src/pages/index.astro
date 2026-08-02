@@ -3,7 +3,9 @@ import Base from '../layouts/Base.astro';
 import StatsBar from '../components/StatsBar.astro';
 import BlockCard from '../components/BlockCard.astro';
 import { getBlocks } from '../site/chain-data';
-import '../styles/chain.css';
+// No chain.css import here: StatsBar, BlockCard and WorkMeter each import
+// the styles they need, so a new route that renders them cannot ship
+// unstyled by forgetting a page-level import.
 
 const blocks = getBlocks();
 ---
