@@ -188,7 +188,7 @@ Create `src/pages/index.astro`:
 <html lang="vi">
   <head>
     <meta charset="utf-8" />
-    <title>Chain Blog</title>
+    <title>Blogchain</title>
   </head>
   <body>
     <p>Đang xây dựng.</p>
@@ -1274,7 +1274,7 @@ Replace `src/pages/index.astro` entirely:
 import Base from '../layouts/Base.astro';
 ---
 
-<Base title="Chain Blog">
+<Base title="Blogchain">
   <p>Đang xây dựng.</p>
   <div class="meter meter-m1">m1</div>
   <div class="meter meter-m2">m2</div>
@@ -1643,7 +1643,7 @@ import '../styles/chain.css';
 const blocks = getBlocks();
 ---
 
-<Base title="Chain Blog — lamter.eth">
+<Base title="Blogchain — lamter.eth">
   <StatsBar />
   <div class="chain">
     {blocks.map((block, i) => (

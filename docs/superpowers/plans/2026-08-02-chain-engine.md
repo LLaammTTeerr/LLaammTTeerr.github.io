@@ -47,7 +47,7 @@ This plan implements the spec at `docs/superpowers/specs/2026-08-02-blockchain-e
 
 ```json
 {
-  "name": "chain-blog",
+  "name": "blogchain",
   "version": "0.1.0",
   "private": true,
   "type": "module",

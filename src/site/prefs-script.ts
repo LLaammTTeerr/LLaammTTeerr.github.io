@@ -1,9 +1,9 @@
 import { DEFAULTS } from './themes';
 
 export const STORAGE_KEYS = {
-  palette: 'cb:palette',
-  intensity: 'cb:intensity',
-  meter: 'cb:meter',
+  palette: 'bc:palette',
+  intensity: 'bc:intensity',
+  meter: 'bc:meter',
 } as const;
 
 /**

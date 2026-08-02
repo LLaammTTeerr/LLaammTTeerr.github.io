@@ -1056,7 +1056,7 @@ Confirm idempotence: run it again and check `git diff --stat chain.lock.json` re
 This is the claim the addendum exists to support, so verify it by hand rather than trusting the unit tests:
 
 ```bash
-mkdir -p /tmp/asset-proof && cd /home/lamter/Projects/chain-blog
+mkdir -p /tmp/asset-proof && cd /home/lamter/Projects/blogchain
 npx tsx -e "$(cat <<'EOF'
 import { writeFileSync, mkdtempSync, cpSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';

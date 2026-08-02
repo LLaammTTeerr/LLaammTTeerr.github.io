@@ -1,4 +1,4 @@
-# Chain Blog — Design Spec
+# Blogchain — Design Spec
 
 **Date:** 2026-08-02
 **Status:** Approved for planning
@@ -62,8 +62,10 @@ other decision in this spec is subordinate to it.
 
 ## 3. Chain specification
 
-All format strings carry a version prefix (`tx/1`, `block/1`, `addr/1`) so the
-format can evolve later without ambiguity about how an old hash was derived.
+Each record type carries its own prefix and its own version — `post/1`,
+`amendment/1`, `block/1`, `addr/1` — bumped only when that type's format changes.
+They are different shapes, not versions of one another, so they never share a
+number. The version makes it unambiguous how any old hash was derived.
 
 ### 3.1 Content normalization
 
@@ -81,13 +83,14 @@ Rendering is a presentation concern and must never affect a hash.
 Canonical serialization of a transaction, joined with `\n`:
 
 ```
-tx/1
+post/1
 title:<title>
 date:<YYYY-MM-DD>
 tags:<comma-joined, sorted, lowercased slugs>
 series:<slug, or empty string>
 research:<hours, always exactly one decimal place>
 from:<author address>
+assets:<comma-joined, sorted asset content hashes; see §3.2b>
 body:<hex sha256 of the normalized body>
 ```
 
@@ -289,11 +292,10 @@ change the transaction hash while leaving the content hash untouched, and would
 be silently discarded.
 
 An amendment therefore carries the post's full metadata, in its own canonical
-form, versioned `tx/2` (the post form in §3.2 stays `tx/1`):
+form, versioned `amendment/1` (the post form in §3.2 is `post/1`):
 
 ```
-tx/2
-type:amendment
+amendment/1
 amends:<original txHash>
 date:<YYYY-MM-DD of the amended post>
 title:<new title>
@@ -301,6 +303,7 @@ tags:<comma-joined, sorted, lowercased slugs>
 series:<slug, or empty string>
 research:<hours, always exactly one decimal place>
 from:<author address>
+assets:<comma-joined, sorted asset content hashes; see §3.2b>
 body:<hex sha256 of the new normalized body>
 ```
 
