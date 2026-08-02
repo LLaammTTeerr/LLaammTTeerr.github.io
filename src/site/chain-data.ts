@@ -1,6 +1,11 @@
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { CHAIN_CONFIG } from '../../chain.config';
+import { normalizeBody } from '../chain/canonical';
+import { sha256Hex } from '../chain/hash';
 import { readLock } from '../chain/lock';
-import type { AssetRecord, Block, Chain, Transaction } from '../chain/types';
+import { parsePost } from '../chain/post';
+import type { AssetRecord, Block, Chain, Hex, Transaction } from '../chain/types';
 
 /**
  * The only module that reads the ledger. Templates import from here and never
@@ -80,6 +85,52 @@ export function getPosts(): Transaction[] {
     .blocks.flatMap((b) => b.transactions)
     .filter((t) => t.type === 'post')
     .sort((a, b) => b.date.localeCompare(a.date));
+}
+
+const POSTS_DIR = 'content/posts';
+
+export interface PostContent {
+  slug: string;
+  /** Normalized body — byte-for-byte what the chain committed. */
+  body: string;
+  contentHash: Hex;
+  tx: Transaction;
+}
+
+/**
+ * §3.1 — the ledger commits a `contentHash` and stores no body, so nothing
+ * structurally prevents the site rendering different text beside a hash that
+ * vouches for other text. This re-derives the hash from disk and refuses a
+ * mismatch, so a drifted file fails the build instead of shipping a page whose
+ * "Verify this transaction" button would contradict what the reader just read.
+ *
+ * `postsDir` is a parameter only so tests can point at a fixture; production
+ * callers use the default.
+ */
+export async function getPostContent(
+  slug: string,
+  postsDir: string = POSTS_DIR,
+): Promise<PostContent> {
+  const tx = getPosts().find((t) => t.slug === slug);
+  if (!tx) {
+    throw new Error(`no transaction on the chain for post "${slug}"`);
+  }
+
+  const path = join(postsDir, `${slug}.md`);
+  if (!existsSync(path)) {
+    throw new Error(`${path} not found, but "${slug}" is on the chain`);
+  }
+
+  const body = normalizeBody(parsePost(path, readFileSync(path, 'utf8')).body);
+  const actual = await sha256Hex(body);
+  if (actual !== tx.contentHash) {
+    throw new Error(
+      `${path} does not match the chain: committed ${tx.contentHash.slice(0, 10)}…, ` +
+        `on disk ${actual.slice(0, 10)}… — re-run \`npm run chain:build\` to record the edit as an amendment`,
+    );
+  }
+
+  return { slug, body, contentHash: tx.contentHash, tx };
 }
 
 export function getAssets(): AssetRecord[] {
