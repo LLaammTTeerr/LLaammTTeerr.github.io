@@ -34,6 +34,15 @@ a { color: inherit; }
   text-transform: uppercase; color: var(--dim); text-decoration: none;
 }
 .nav li a:hover, .nav li a:focus-visible { color: var(--txt); }
+/* A nav entry for a route that does not exist yet: same position and
+   wording as a real link, but never interactive — no hover colour change,
+   no pointer cursor — so it reads as "not yet available" rather than a
+   broken or disabled control. Dimmed further than an idle link, through
+   opacity alone; the colour underneath is still --dim, a token. */
+.nav li .soon {
+  font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--dim); opacity: 0.55; cursor: default;
+}
 
 main { padding: 1.25rem; max-width: 64rem; margin: 0 auto; }
 
@@ -57,6 +66,12 @@ main { padding: 1.25rem; max-width: 64rem; margin: 0 auto; }
 .notfound { max-width: 40rem; }
 .notfound p { color: var(--dim); }
 .notfound a { color: var(--acc); text-underline-offset: 3px; }
+
+/* The homepage's link to the full block list, once it has truncated the
+   list down to the latest few. Same treatment as .notfound's links: an
+   accent colour from the reader's own palette, never a literal one. */
+.more { margin: -0.35rem 0 1.5rem; }
+.more a { color: var(--acc); text-underline-offset: 3px; }
 
 :where(a, button, summary):focus-visible {
   outline: 2px solid var(--acc); outline-offset: 2px;

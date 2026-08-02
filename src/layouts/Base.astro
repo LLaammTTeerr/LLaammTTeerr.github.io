@@ -11,6 +11,29 @@ interface Props {
 }
 
 const { title, description = 'Blog của lamter, hiển thị như một trình duyệt blockchain.' } = Astro.props;
+
+/**
+ * The nav names the site's full shape, not just what this build produces —
+ * `/tx`, `/address`, `/assets`, `/mempool` and `/verify` belong to later
+ * plans and have no route yet. `built: false` is the only difference between
+ * an entry here and a real link: the label, order and position stay put, and
+ * the next plan lands a route by flipping one boolean rather than editing
+ * markup. Rendering it as a link anyway would send a reader to the 404 page.
+ */
+interface NavEntry {
+  href: string;
+  label: string;
+  built: boolean;
+}
+
+const NAV: NavEntry[] = [
+  { href: '/blocks', label: 'Blocks', built: true },
+  { href: '/tx', label: 'Transactions', built: false },
+  { href: '/address', label: 'Addresses', built: false },
+  { href: '/assets', label: 'Assets', built: false },
+  { href: '/mempool', label: 'Mempool', built: false },
+  { href: '/verify', label: 'Verify', built: false },
+];
 ---
 
 <html lang="vi">
@@ -25,12 +48,13 @@ const { title, description = 'Blog của lamter, hiển thị như một trình 
     <nav class="nav">
       <a class="brand" href="/">lamter<span>.eth</span></a>
       <ul>
-        <li><a href="/blocks">Blocks</a></li>
-        <li><a href="/tx">Transactions</a></li>
-        <li><a href="/address">Addresses</a></li>
-        <li><a href="/assets">Assets</a></li>
-        <li><a href="/mempool">Mempool</a></li>
-        <li><a href="/verify">Verify</a></li>
+        {NAV.map((entry) => (
+          <li>{entry.built ? (
+            <a href={entry.href}>{entry.label}</a>
+          ) : (
+            <span class="soon">{entry.label}</span>
+          )}</li>
+        ))}
       </ul>
       <Preferences />
     </nav>

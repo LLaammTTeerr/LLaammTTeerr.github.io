@@ -13,7 +13,17 @@ import type { AnyBlockView } from '../site/chain-data';
 // absent whenever nothing is unsealed, which is most of the time; the list is
 // then exactly what it was before.
 const pending = getPendingBlock();
-const blocks: AnyBlockView[] = pending === null ? getBlocks() : [pending, ...getBlocks()];
+const allBlocks: AnyBlockView[] = pending === null ? getBlocks() : [pending, ...getBlocks()];
+
+// The homepage is a landing page, not the ledger: it shows only the latest
+// few blocks so it does not grow without bound as the chain does. The open
+// block, when present, is the newest thing on the chain (see above) and so
+// is already first in `allBlocks` — slicing keeps it at the top, counted as
+// one of the five. `/blocks` (linked below when there is more to see) keeps
+// the complete list.
+const HOMEPAGE_BLOCK_COUNT = 5;
+const blocks = allBlocks.slice(0, HOMEPAGE_BLOCK_COUNT);
+const hasMore = allBlocks.length > blocks.length;
 ---
 
 <Base title="Blogchain — lamter.eth">
@@ -24,4 +34,7 @@ const blocks: AnyBlockView[] = pending === null ? getBlocks() : [pending, ...get
       <BlockCard block={block} isNewest={i === 0} isOldest={i === blocks.length - 1} />
     ))}
   </div>
+  {hasMore ? (
+    <p class="more"><a href="/blocks">Xem toàn bộ các khối</a></p>
+  ) : null}
 </Base>
