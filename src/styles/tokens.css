@@ -1,9 +1,11 @@
 /* §9.1 — palette, intensity and meter tokens.
    Structure: :root carries the default palette (github-dark). Each other
-   palette redefines the same custom properties under its own attribute,
-   including an explicit [data-palette="github-dark"] block that mirrors
-   :root, so every id in themes.ts has a matching selector here. Components
-   style through the tokens and never name a palette. */
+   palette redefines the same custom properties under its own attribute.
+   github-dark has no [data-palette="github-dark"] block: that would just
+   duplicate :root verbatim, and a duplicate can silently drift from :root
+   with no test to catch it. The default living on :root, unattributed, is
+   what makes it available with no stored preference and no JavaScript.
+   Components style through the tokens and never name a palette. */
 
 :root {
   --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -25,12 +27,6 @@
   --bad: #f85149;
 }
 
-[data-palette="github-dark"] {
-  --bg: #0d1117; --surf: #161b22; --line: #21262d; --line2: #30363d;
-  --txt: #e6edf3; --dim: #8b949e; --acc: #a371f7;
-  --h-hash: #7ee787; --h-addr: #79c0ff; --h-tag: #ff7b72; --h-num: #ffa657;
-  --good: #3fb950; --warn: #d29922; --bad: #f85149;
-}
 [data-palette="tokyo-night"] {
   --bg: #1a1b26; --surf: #1f2335; --line: #292e42; --line2: #3b4261;
   --txt: #c0caf5; --dim: #565f89; --acc: #7aa2f7;

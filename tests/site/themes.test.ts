@@ -27,9 +27,31 @@ describe('palette catalogue', () => {
   });
 });
 
+/** Custom property names (`--foo`) declared inside every `{...}` block whose
+ * selector matches `selector` verbatim (no nested braces in this file, so a
+ * simple non-greedy match is sufficient). */
+function propsDeclaredBy(selector: string): Set<string> {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const blockPattern = new RegExp(`${escaped}\\s*\\{([^}]*)\\}`, 'g');
+  const props = new Set<string>();
+  for (const block of CSS.matchAll(blockPattern)) {
+    for (const decl of block[1]!.matchAll(/(--[\w-]+)\s*:/g)) {
+      props.add(decl[1]!);
+    }
+  }
+  return props;
+}
+
 describe('css agreement', () => {
-  it('defines a selector for every palette id', () => {
+  it('defines a selector for every non-default palette id', () => {
+    // github-dark (DEFAULTS.palette) is intentionally absent here: it lives
+    // on :root, unattributed, so it applies with no stored preference and no
+    // JavaScript. A [data-palette="github-dark"] block would just duplicate
+    // :root verbatim with nothing to keep the two in sync — see the
+    // ":root carries the full default token set" test below for the check
+    // that actually guards the default.
     for (const p of PALETTES) {
+      if (p.id === DEFAULTS.palette) continue;
       expect(CSS, `missing palette ${p.id}`).toContain(`[data-palette="${p.id}"]`);
     }
   });
@@ -49,6 +71,18 @@ describe('css agreement', () => {
 
   it('sets the base token block on :root so the default palette needs no attribute', () => {
     expect(CSS).toMatch(/:root\s*\{/);
+  });
+
+  it(':root carries the full default token set — every property a non-default palette defines also exists on :root', () => {
+    const rootProps = propsDeclaredBy(':root');
+    expect(rootProps.size, 'no custom properties found on :root — check the CSS parses').toBeGreaterThan(0);
+    for (const p of PALETTES) {
+      if (p.id === DEFAULTS.palette) continue;
+      const paletteProps = propsDeclaredBy(`[data-palette="${p.id}"]`);
+      for (const prop of paletteProps) {
+        expect(rootProps, `:root is missing ${prop}, defined by palette ${p.id}`).toContain(prop);
+      }
+    }
   });
 });
 
