@@ -62,19 +62,29 @@ export interface BuildResult {
    * `chain.pending.json`.
    */
   pending: PendingLock | null;
+  /** §3.6 — periods this build sealed as empty blocks, in seal order. */
+  mintedEmpty: string[];
   /**
-   * Transactions this build had to place with no record covering them, at a
-   * point where a record should have existed — the tip's month is already
-   * over, so anything still open was placed by an earlier build and ought to
-   * have been written down.
+   * Transactions this build had to place with no record covering them, *and*
+   * whose placement this build could actually have denied — i.e. it sealed at
+   * least one empty block for a month at or after where they might have been
+   * waiting, and the tip's month is already over.
    *
-   * Non-empty means the guarantee is not in force for these transactions: if
+   * Non-empty means the guarantee may not have held for these transactions: if
    * `chain.pending.json` was deleted, `git clean`ed, or lost in a merge, their
-   * placement is being reassigned from the clock right now, and the month they
-   * were really waiting in will seal as an empty block that denies them. The
-   * build cannot tell that apart from a genuinely new transaction, so it
-   * reports rather than fails — but it must not stay silent, because silence
-   * is exactly how the pre-fix sliding bug returns.
+   * placement was reassigned from the clock in this very build, and a month
+   * that really held them has just sealed as a permanent, mined empty block
+   * denying it. The build cannot tell that apart from a genuinely new
+   * transaction, so it reports rather than fails.
+   *
+   * Both conditions are load-bearing, and dropping either makes the warning
+   * fire on ordinary publishing. Without the empty-block condition it fires on
+   * the first post of every new month — the single most ordinary thing an
+   * author does — because a brand-new transaction is by definition unrecorded
+   * and the tip is by then a month behind. Nothing is denied there: no month
+   * sealed empty, so no month that held the transaction was reported silent.
+   * A data-loss warning that cries wolf trains the reader to ignore it, which
+   * is the exact failure it exists to prevent.
    */
   unrecorded: Transaction[];
 }
@@ -320,6 +330,7 @@ export async function buildChain(opts: BuildOptions): Promise<BuildResult> {
   let prev: Block | null = lastBlock;
   let minted = 0;
   let amendmentsSealed = 0;
+  const mintedEmpty: string[] = [];
 
   for (const draft of drafts) {
     // planChain walks from the last sealed period inclusive, so it re-proposes
@@ -353,6 +364,7 @@ export async function buildChain(opts: BuildOptions): Promise<BuildResult> {
     sealedPeriods.add(block.period);
     prev = block;
     minted++;
+    if (block.txCount === 0) mintedEmpty.push(block.period);
     amendmentsSealed += draft.transactions.filter((t) => t.type === 'amendment').length;
   }
 
@@ -427,21 +439,28 @@ export async function buildChain(opts: BuildOptions): Promise<BuildResult> {
         };
   writePending(pendingPath, openBlock);
 
-  // Measured against the tip as it stands AFTER sealing, not the one this build
-  // started from. If this build just sealed into the current month, the
-  // transactions still open are plainly its own work and there is nothing to
-  // report — five new posts sealing four and leaving one open is the ordinary
-  // case. Using the pre-build tip fired there and, because the message reports
-  // the post-build tip, claimed a month that had just been sealed was "over".
+  // Report the loss this build could actually have caused, not every build in
+  // which something is unrecorded.
   //
-  // A tip still in a past month is the suspicious shape: nothing sealed into
-  // the current month, yet transactions are open with no record naming them.
+  // The harm the warning exists to prevent is precise: a month sealing as an
+  // empty block while it in fact held a transaction whose placement record was
+  // lost. That is observable right here — it happens only when this build mints
+  // an empty block for a month at or after where such a transaction could have
+  // been waiting. When no empty block was minted, a reassigned placement lands
+  // in the same still-open month it was already waiting in, and nothing is
+  // denied.
+  //
+  // Both conditions were measured against the false positives they remove:
+  // publishing the first post of a new month (unrecorded by definition, tip a
+  // month behind, no empty block) and five new posts sealing four in the
+  // current month (an empty block for an older silent month, but the tip is
+  // this build's own work in the current month). Neither denies anything.
   const tipPeriod = prev !== null ? prev.period : null;
   const tipMonthIsPast = tipPeriod !== null && tipPeriod < monthOf(opts.now);
   const unrecorded =
-    openBlock === null || !tipMonthIsPast
+    openBlock === null || mintedEmpty.length === 0 || !tipMonthIsPast
       ? []
       : openBlock.transactions.filter((t) => !recordedPeriods.has(txIdentity(t)));
 
-  return { chain, minted, amendments: amendmentsSealed, pending: openBlock, unrecorded };
+  return { chain, minted, mintedEmpty, amendments: amendmentsSealed, pending: openBlock, unrecorded };
 }

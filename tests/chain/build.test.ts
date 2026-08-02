@@ -31,6 +31,25 @@ function workspace(): { postsDir: string; assetsDir: string; lockPath: string } 
   return { postsDir, assetsDir, lockPath: join(dir, 'chain.lock.json') };
 }
 
+/**
+ * A snapshot of a workspace — posts, assets, the lock and the pending record —
+ * in a directory of its own, so a control build can be run from the same state
+ * without disturbing the sequence the test is driving.
+ */
+function workspaceCopy(
+  postsDir: string,
+  assetsDir: string,
+  lockPath: string,
+  pendingPath: string,
+): { postsDir: string; assetsDir: string; lockPath: string } {
+  const dir = mkdtempSync(join(tmpdir(), 'chain-copy-'));
+  cpSync(postsDir, join(dir, 'posts'), { recursive: true });
+  cpSync(assetsDir, join(dir, 'assets'), { recursive: true });
+  cpSync(lockPath, join(dir, 'chain.lock.json'));
+  if (existsSync(pendingPath)) cpSync(pendingPath, join(dir, 'chain.pending.json'));
+  return { postsDir: join(dir, 'posts'), assetsDir: join(dir, 'assets'), lockPath: join(dir, 'chain.lock.json') };
+}
+
 describe('buildChain', () => {
   it('seals past months and mints empty blocks for silent ones', async () => {
     const { postsDir, assetsDir, lockPath } = workspace();
@@ -488,10 +507,63 @@ describe('buildChain', () => {
     expect(result.unrecorded).toEqual([]);
   });
 
-  it('reports unsealed transactions that no record accounts for', async () => {
-    // The whole guarantee rests on a sibling file a user can delete, `git
-    // clean`, or lose in a merge. Losing it silently reinstates the sliding
-    // bug, so the build must say so rather than quietly re-placing them.
+  it('stays silent when a new month opens with its first post', async () => {
+    // The single most ordinary publishing action there is: the previous month
+    // has sealed, the author writes the first post of this one. It is
+    // unrecorded by definition — nothing has written it down yet — and the tip
+    // is by then a month behind, which is exactly the shape the warning used
+    // to fire on, every month, forever.
+    //
+    // Nothing is denied here: no month sealed empty, so no month that could
+    // have held this transaction was reported silent. A data-loss warning
+    // firing on ordinary use trains the reader to ignore it.
+    const { postsDir, assetsDir, lockPath } = workspace();
+    const before = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
+    // The precondition that made this fire: the tip is in a month already over.
+    expect(before.chain.blocks.at(-1)!.period).toBe('2026-08');
+
+    writeFileSync(
+      join(postsDir, '2026-09-05-moi.md'),
+      '---\ntitle: "Bài mới"\ndate: 2026-09-05\ntags: [essay]\n---\n\nNội dung.\n',
+    );
+    const result = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-20', config: CONFIG });
+
+    // It really is unrecorded and really is open — this is silence about a
+    // transaction the warning's old condition matched, not silence because
+    // nothing happened.
+    expect(result.pending!.period).toBe('2026-09');
+    expect(result.pending!.transactions).toHaveLength(1);
+    expect(result.mintedEmpty).toEqual([]);
+    expect(result.unrecorded).toEqual([]);
+  });
+
+  it('stays silent when a lost record cannot have denied any month', async () => {
+    // The record is genuinely gone and the placement is genuinely reassigned —
+    // but into the same still-open month the transaction was already waiting
+    // in, because no month elapsed in between. Nothing sealed empty, so
+    // nothing was denied and there is nothing to report.
+    const { postsDir, assetsDir, lockPath } = workspace();
+    const pendingPath = join(dirname(lockPath), 'chain.pending.json');
+    await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
+    const target = join(postsDir, '2026-06-15-first.md');
+    writeFileSync(target, readFileSync(target, 'utf8') + '\nMột dòng sửa lại.\n');
+
+    const opened = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-15', config: CONFIG });
+    expect(opened.pending!.period).toBe('2026-09');
+
+    rmSync(pendingPath);
+    const lost = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-25', config: CONFIG });
+    // Reassigned — and to the same month, which is why it is harmless.
+    expect(lost.pending!.period).toBe('2026-09');
+    expect(lost.mintedEmpty).toEqual([]);
+    expect(lost.unrecorded).toEqual([]);
+  });
+
+  it('reports an unsealed transaction whose lost record let its month seal empty', async () => {
+    // The harm the warning exists for, driven end to end. The guarantee rests
+    // on a sibling file a user can delete, `git clean`, or lose in a merge;
+    // losing it reinstates the sliding bug, and the month the transaction was
+    // really waiting in seals as a permanent, mined empty block denying it.
     const { postsDir, assetsDir, lockPath } = workspace();
     const pendingPath = join(dirname(lockPath), 'chain.pending.json');
     await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
@@ -499,19 +571,29 @@ describe('buildChain', () => {
     const target = join(postsDir, '2026-06-15-first.md');
     writeFileSync(target, readFileSync(target, 'utf8') + '\nMột dòng sửa lại.\n');
 
-    // First placement: nothing has recorded it yet, so it is reported. A build
-    // cannot tell a genuinely new transaction from one whose record was lost —
-    // both are "placed now, with nothing accounting for them".
-    const fresh = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-10-10', config: CONFIG });
-    expect(fresh.unrecorded).toHaveLength(1);
+    // The amendment enters the chain and is recorded in the open 2026-09 block.
+    const opened = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-15', config: CONFIG });
+    expect(opened.pending!.period).toBe('2026-09');
+    expect(opened.unrecorded).toEqual([]);
 
-    // Once recorded, the next build is quiet: the record accounts for it.
-    const recorded = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-10-20', config: CONFIG });
-    expect(recorded.unrecorded).toEqual([]);
+    // Control: with the record intact, September seals holding the amendment
+    // and nothing is reported. Without this the test below passes for any
+    // reason the build reports something, and stops testing the loss.
+    const control = workspaceCopy(postsDir, assetsDir, lockPath, pendingPath);
+    const kept = await buildChain({ ...control, now: '2026-10-25', config: CONFIG });
+    expect(kept.chain.blocks.find((b) => b.period === '2026-09')!.txCount).toBe(1);
+    expect(kept.mintedEmpty).toEqual([]);
+    expect(kept.unrecorded).toEqual([]);
 
-    // The operator deletes / git-cleans / loses the file in a merge.
+    // The operator deletes / git-cleans / loses the file in a merge, and the
+    // next build lands after September has ended.
     rmSync(pendingPath);
     const lost = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-10-25', config: CONFIG });
+
+    // September sealed empty although it held the amendment — the exact loss.
+    expect(lost.mintedEmpty).toContain('2026-09');
+    expect(lost.chain.blocks.find((b) => b.period === '2026-09')!.txCount).toBe(0);
+    expect(lost.pending!.period).toBe('2026-10');
     expect(lost.unrecorded).toHaveLength(1);
     expect(lost.unrecorded[0]!.type).toBe('amendment');
 

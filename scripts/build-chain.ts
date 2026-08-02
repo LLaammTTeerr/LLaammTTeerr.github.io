@@ -11,7 +11,7 @@ try {
   process.exit(1);
 }
 
-const { chain, minted, amendments, pending, unrecorded } = await buildChain({
+const { chain, minted, mintedEmpty, amendments, pending, unrecorded } = await buildChain({
   postsDir: 'content/posts',
   assetsDir: 'content/assets',
   lockPath: 'chain.lock.json',
@@ -46,10 +46,18 @@ if (pending !== null) {
 // no memory of earlier runs, so it cannot tell a transaction created just now
 // from one whose record was deleted — and a warning that asserts the wrong
 // cause is worse than none, because it teaches the reader to discount it.
+//
+// `buildChain` only reports these when this build also sealed an empty block,
+// so the loss it describes is one that has just happened rather than one that
+// merely could. Ordinary publishing — the first post of a new month, or five
+// posts sealing four — no longer reaches here.
 if (unrecorded.length > 0) {
   console.error('');
   console.error(
-    `  WARNING  ${unrecorded.length} unsealed transaction(s) were placed with no record naming them:`,
+    `  WARNING  ${unrecorded.length} unsealed transaction(s) were placed with no record naming them,`,
+  );
+  console.error(
+    `           in the same build that sealed ${mintedEmpty.join(', ')} as an empty block:`,
   );
   for (const t of unrecorded) {
     console.error(`    ${t.type} ${t.slug ?? `amending ${t.amends}`}`);
@@ -57,8 +65,9 @@ if (unrecorded.length > 0) {
   console.error(
     '  This build cannot tell whether they are new or whether chain.pending.json was lost.\n' +
       '  If they are new, the record just written covers them from the next build on.\n' +
-      '  If it was lost, their placement has been reassigned and the month they were\n' +
-      '  waiting in may seal as an empty block. Committing chain.pending.json prevents this.',
+      '  If it was lost, their placement has just been reassigned and a month that\n' +
+      '  really held them has sealed empty — permanently, since sealed blocks are\n' +
+      '  frozen. Committing chain.pending.json prevents this.',
   );
 }
 
