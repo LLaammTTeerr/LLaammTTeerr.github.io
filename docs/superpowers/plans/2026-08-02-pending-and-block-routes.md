@@ -4,7 +4,9 @@
 
 **Goal:** Make a post published into the current, unsealed month a first-class citizen of the site — real hash, real page, real URL — and give the chain the block-browsing routes it has been missing.
 
-**Architecture:** `getPendingBlock` stops returning a stub shape and returns real `Transaction` objects built through the engine's own `toTransaction`, so a pending post's hash is the same value its sealed hash will be. Sealed and pending blocks then share one view type discriminated by a `sealed` boolean, letting `BlockCard` render both. Two bugs found by running the amendment flow end-to-end are fixed first, because both make the pending block unreachable in exactly the case it matters most.
+**Architecture:** `npm run chain:build` gains a second output, `chain.pending.json`, recording the open block — real transactions with real hashes, including amendments awaiting the next seal. The site reads that file instead of recomputing pending state from disk, which is what makes a pending hash verifiable rather than merely recalculated, and what lets the drift check ask the question it actually needs to ask: *does this body match what `chain:build` last recorded?* Sealed and pending blocks then share one view type discriminated by a `sealed` boolean, letting `BlockCard` render both.
+
+**Revised 2026-08-03.** The first attempt at Task 1 was blocked, correctly. `firstOpenPeriod` does two jobs in `planBlocks` — it starts the month walk that mints empty blocks for silent months, and it floors where transactions may land. Raising both created permanent chain gaps. Separating them is right, but it also stops amendments sealing on the spot, which is what §3.9 wants and what broke the original Task 2: a pending amendment is not in the lock, so reading amendments from `getChain()` cannot see it. Hence the new file. Task numbering below reflects the revision.
 
 **Tech Stack:** Astro 7 static output, TypeScript, Vitest. No new dependencies.
 
@@ -23,7 +25,7 @@
 
 ## Scope
 
-**In:** the two amendment bugs, pending transactions with real hashes, the C+A pending treatment on `BlockCard` and `TxPanel`, `/blocks`, `/block/[height]`, `/404`.
+**In:** the sealing-placement bug, the recorded open block, the edit dead end, pending transactions with real hashes, the C+A pending treatment on `BlockCard` and `TxPanel`, `/blocks`, `/block/[height]`, `/404`.
 
 **Out, deferred to Plan 2b-iii:** `/address/[name]`, `/about`, `/assets`, `/asset/[tokenId]`, `/mempool`. Deferred to 2b-iv: RSS, `/contracts`. This plan is everything about *blocks*; addresses and assets are a separate subsystem with their own data shapes.
 
@@ -31,8 +33,11 @@
 
 | File | Responsibility |
 |---|---|
-| `src/chain/build.ts` (modify) | `fromPeriod` must be the first *still-open* month, not the tip's own period |
-| `src/site/chain-data.ts` (modify) | `getPostContent` accepts an amended body; `getPendingBlock` returns real transactions; `PendingBlockView` |
+| `src/chain/seal.ts` (modify) | Separate the month-walk start from the transaction membership floor |
+| `src/chain/pending.ts` (create) | Read/write `chain.pending.json`; shape, validation, staleness |
+| `src/chain/build.ts` (modify) | Emit `chain.pending.json` beside the lock |
+| `chain.pending.json` (generated, committed) | The open block: period, tip hash, real transactions |
+| `src/site/chain-data.ts` (modify) | `getPendingBlock` reads the pending file; `getPostContent` accepts a body recorded there; `PendingBlockView` |
 | `src/components/PendingState.astro` (create) | The C+A state row, one component, caller supplies the trailing payload |
 | `src/components/BlockCard.astro` (modify) | Renders sealed and pending blocks; stamp and meter become conditional |
 | `src/components/TxPanel.astro` (modify) | `~` prefix, derived stamp, block link for pending transactions |
@@ -44,186 +49,166 @@
 
 ---
 
-### Task 1: An amendment must not seal into a month that already closed
+### Task 1: Separate the month walk from the membership floor
 
-**Why this is first:** running the documented edit flow end to end shows the amendment landing in a *newly sealed* block whose period is the tip's period (`2026-07`), not the open month (`2026-08`). Two consequences: the chain grows a second block for a month that already ended, and the pending block never receives amendments at all — so the thing the rest of this plan builds stays empty in the one case that matters most. Spec §3.6: "A transaction dated earlier than the first still-open month … is placed in that open month." With a tip at `2026-07` and a clock in `2026-08`, the first still-open month is `2026-08`.
+**Why this is first:** with the tip at `2026-07` and the clock in `2026-08`, editing a sealed post mints a *second* `2026-07` block — a month that already closed — instead of joining the open `2026-08` one. Spec §3.6: "Block membership is when a transaction entered the chain, not the date it claims."
+
+**A previous attempt at this task was blocked, correctly. Read this before you start.** `firstOpenPeriod` in `planBlocks` is used for two different things:
+
+1. `monthRange(firstOpenPeriod, endExclusive)` — the months to walk, which is what mints empty blocks for silent months.
+2. `minPeriod(maxPeriod(monthOf(tx.date), firstOpenPeriod), latestOpenPeriod)` — the floor for placing a transaction.
+
+Raising **both** (the obvious fix, and the one the earlier attempt was told to make) skips silent months between the tip and now, so they never mint their empty blocks — permanent gaps in the chain. Only role 2 may move.
 
 **Files:**
-- Modify: `src/chain/build.ts:229`
-- Modify: `src/chain/seal.ts` (export `maxPeriod` if not already exported)
+- Modify: `src/chain/seal.ts` (`planBlocks`)
 - Test: `tests/chain/seal.test.ts`
 
 **Interfaces:**
-- Consumes: `planBlocks(pending, opts)`, `monthOf(date)` from `src/chain/period.ts`.
-- Produces: no signature change. Behaviour change only.
+- Consumes: `monthOf`, `minPeriod`, `maxPeriod`, `monthRange`, `nextMonth` from `src/chain/period.ts`; `PlanOptions` with `fromPeriod: string | null`.
+- Produces: no signature change. Behaviour change only. `build.ts` is **not** modified by this task.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the failing tests**
 
-In `tests/chain/seal.test.ts`:
+The existing helper in this file is `tx(date, slug)` — there is **no** `txFixture()`. Check its real signature before using it.
 
 ```ts
 it('places a transaction entering the chain today in the open month, not the tip month', () => {
-  // Tip is 2026-07 and already sealed. An amendment carrying an old date
-  // enters the chain on 2026-08-02. §3.6: block membership is when a
-  // transaction entered the chain, so it belongs to 2026-08 — the first
-  // still-open month — and must NOT mint a second 2026-07 block after
-  // 2026-07 has closed.
-  const drafts = planBlocks(
-    [{ ...txFixture(), date: '2026-06-15' }],
-    { now: '2026-08-02', maxTxPerBlock: 4, fromPeriod: firstOpenPeriod('2026-07', '2026-08-02') },
+  // Tip 2026-07 is sealed; an amendment carrying an old date enters on 2026-08-02.
+  const drafts = planBlocks([tx('2026-06-15', 'old')], {
+    now: '2026-08-02', maxTxPerBlock: 4, fromPeriod: '2026-07',
+  });
+  const withTxs = drafts.filter((d) => d.transactions.length > 0);
+  expect(withTxs.map((d) => d.period)).not.toContain('2026-07');
+});
+
+it('still mints empty blocks for silent months between the tip and now', () => {
+  // The regression that blocked the first attempt. Tip 2026-05, clock 2026-08:
+  // 2026-06 and 2026-07 were silent but complete, so each must still get its
+  // block. A month with no block is not "closed" — it is a hole in the chain.
+  const drafts = planBlocks([tx('2026-06-15', 'old')], {
+    now: '2026-08-02', maxTxPerBlock: 4, fromPeriod: '2026-05',
+  });
+  expect(drafts.map((d) => d.period)).toEqual(
+    expect.arrayContaining(['2026-05', '2026-06', '2026-07']),
   );
-  expect(drafts.map((d) => d.period)).not.toContain('2026-07');
-  expect(drafts.every((d) => d.period <= '2026-08')).toBe(true);
 });
 
 it('still lets a busy current month split into two blocks of the same period', () => {
-  // The size rule legitimately produces two blocks in one period. Raising the
-  // floor must not break that: this is intra-build splitting, not a closed
-  // month being reopened across builds.
-  const five = Array.from({ length: 5 }, (_, i) => ({ ...txFixture(), date: `2026-08-0${i + 1}` }));
-  const drafts = planBlocks(five, {
-    now: '2026-08-20', maxTxPerBlock: 4, fromPeriod: firstOpenPeriod('2026-08', '2026-08-20'),
-  });
+  // 8, not 5: a PARTIAL group in the open month stays pending (see the
+  // `isFull || isPast` rule below), so 5 transactions yield ONE block. Eight
+  // is the smallest input that actually produces two full groups.
+  const many = Array.from({ length: 8 }, (_, i) =>
+    tx(`2026-08-${String(i + 1).padStart(2, '0')}`, `p${i}`));
+  const drafts = planBlocks(many, { now: '2026-08-20', maxTxPerBlock: 4, fromPeriod: '2026-08' });
   expect(drafts.filter((d) => d.period === '2026-08').length).toBe(2);
 });
 ```
 
-- [ ] **Step 2: Run it and confirm it fails**
+- [ ] **Step 2: Run and confirm each fails for its own reason**
 
-Run: `npx vitest run tests/chain/seal.test.ts -t 'open month'`
-Expected: FAIL — `firstOpenPeriod is not defined`.
+Run: `npx vitest run tests/chain/seal.test.ts`
+Expected: test 1 FAILS (the transaction lands in `2026-07`). Tests 2 and 3 should **already pass** — they are regression guards for behaviour you must not break. If either fails now, stop and report: the baseline is not what this plan assumes.
 
-- [ ] **Step 3: Add `firstOpenPeriod` to `src/chain/seal.ts`**
+- [ ] **Step 3: Implement in `planBlocks`**
 
-```ts
-/**
- * The earliest period a transaction entering the chain now may join.
- *
- * Blocks are non-decreasing, so it can never precede the tip. But it must also
- * never precede the current month: once a month has ended AND the tip has
- * sealed a block in it, that month is closed, and appending another block to it
- * later would mean a completed month silently gained a transaction after the
- * fact. Taking the later of the two satisfies both — and leaves a tip already
- * inside the current month alone, so the size rule can still split a busy month
- * into two blocks of the same period.
- */
-export function firstOpenPeriod(tipPeriod: string | null, now: string): string | null {
-  const current = monthOf(now);
-  if (tipPeriod === null) return null;
-  return tipPeriod > current ? tipPeriod : current;
-}
-```
-
-Import `monthOf` from `./period` if `seal.ts` does not already.
-
-- [ ] **Step 4: Use it in `src/chain/build.ts:229`**
-
-Replace:
+Leave `firstOpenPeriod` and the `monthRange(firstOpenPeriod, endExclusive)` walk exactly as they are. Add, directly after `latestOpenPeriod`:
 
 ```ts
-    fromPeriod: lastBlock ? lastBlock.period : null,
+  // Where a transaction ENTERING the chain now may land, as distinct from the
+  // months this build walks. The walk must still start at the tip so silent
+  // completed months mint their empty blocks (§3.6); placement must not, or a
+  // month that already sealed would quietly gain a transaction afterwards.
+  //
+  // On an empty chain there is no tip and genesis bootstraps at the earliest
+  // transaction's own month, so the floor stays where `firstOpenPeriod` put it.
+  const membershipFloor =
+    opts.fromPeriod === null ? firstOpenPeriod : maxPeriod(firstOpenPeriod, currentPeriod);
 ```
 
-with:
+Then in the bucketing loop only, replace `firstOpenPeriod` with `membershipFloor`:
 
 ```ts
-    fromPeriod: firstOpenPeriod(lastBlock ? lastBlock.period : null, opts.now),
+    const period = minPeriod(maxPeriod(monthOf(tx.date), membershipFloor), latestOpenPeriod);
 ```
 
-and add `firstOpenPeriod` to the existing `./seal` import.
-
-- [ ] **Step 5: Run the full suite**
+- [ ] **Step 4: Run the full suite**
 
 Run: `npm test`
-Expected: PASS. **If a golden-file snapshot test fails, stop and report it** — it means this changes the output of an existing fixture chain, and whether that is correct needs a human decision, not a snapshot update.
 
-- [ ] **Step 6: Commit**
+**Expect failures in `tests/chain/build.test.ts`, and do not "fix" them by editing assertions.** Amendments now stay in the open block instead of sealing immediately — that is the intended change, and Task 2 is what makes it usable. Report exactly which tests fail and what each asserted. Tests that assert `amendments === 1` encode the old behaviour and need rewriting to assert the amendment is *pending*; do that only where the assertion is plainly about sealing timing. **If the determinism golden-file snapshot changes, STOP and report** — do not re-record it.
+
+- [ ] **Step 5: Commit**
 
 ```bash
-git add src/chain/seal.ts src/chain/build.ts tests/chain/seal.test.ts
-git commit -m "fix(chain): place new transactions in the open month, not the tip's"
+git add src/chain/seal.ts tests/chain/seal.test.ts tests/chain/build.test.ts
+git commit -m "fix(chain): place entering transactions in the open month, keep minting silent ones"
 ```
 
 ---
 
-### Task 2: Editing a sealed post must not brick the build
+### Task 2: Record the open block in `chain.pending.json`
 
-**Why:** the current behaviour is a dead end. Edit a sealed post → the site build fails with "re-run `npm run chain:build` to record the edit as an amendment" → you run it, it records the amendment → **the site build fails with the identical message, forever.** `getPostContent` compares the file on disk against the *sealed* transaction's `contentHash`, which by design never changes. The advice the error gives does not work, and no post can ever be edited.
+**Why:** everything unsealed is currently recomputed from disk on every build, so disk can never disagree with it — which is exactly why the drift check cannot catch an edit to an unsealed post, and why a pending hash today is merely recalculated rather than verifiable. Recording the open block to a committed file makes it real: the site reads what `chain:build` wrote, and an edit shows up as a diff.
 
-The fix: a body matches the chain if it matches the sealed `contentHash` **or** the `contentHash` of the most recent amendment to that post. Both are committed values, so nothing unverified is introduced.
+The sealed ledger stays pristine. `chain.lock.json` remains an immutable record of sealed history; the churn lives in a sibling file that is openly provisional.
 
 **Files:**
-- Modify: `src/site/chain-data.ts` (`getPostContent`)
-- Test: `tests/site/chain-data.test.ts`
+- Create: `src/chain/pending.ts`
+- Modify: `src/chain/build.ts`
+- Test: `tests/chain/pending.test.ts`
 
 **Interfaces:**
-- Consumes: `getChain()`, `getPosts()`, `Transaction.amends`, `Transaction.contentHash`.
-- Produces: `getPostContent(slug, postsDir?)` — unchanged signature, returns `PostContent` whose `contentHash` is now **the currently valid one** (the amendment's if amended, else the sealed one).
-
-- [ ] **Step 1: Write the failing test**
-
-In `tests/site/chain-data.test.ts`:
+- Consumes: `Transaction`, `Hex` from `./types`; `planBlocks` from `./seal`; the lock's serialization conventions in `src/chain/lock.ts` (read `writeLock`/`readLock` and match their style — stable key order, trailing newline, 2-space indent).
+- Produces:
 
 ```ts
-it('accepts a body whose hash matches an amendment, not just the sealed post', async () => {
-  // Reproduces the dead end: chain:build records an edit as an amendment, but
-  // getPostContent still compares against the frozen sealed contentHash, so
-  // the build fails with advice that has already been followed.
-  const dir = mkdtempSync(join(tmpdir(), 'bc-amend-'));
-  const tx = getPosts()[0]!;
-  const amended = 'Thân bài đã được sửa sau khi khối niêm phong.\n';
-  writeFileSync(
-    join(dir, `${tx.slug}.md`),
-    `---\ntitle: ${tx.title}\ndate: ${tx.date}\ntags: [${tx.tags.join(', ')}]\n---\n\n${amended}`,
-  );
-  // An amendment on the chain committing to the edited body.
-  const amendment = { amends: tx.hash, contentHash: await sha256Hex(normalizeBody(amended)) };
-  await expect(getPostContent(tx.slug!, dir, [amendment])).resolves.toMatchObject({
-    contentHash: amendment.contentHash,
-  });
+export interface PendingLock {
+  version: 1;
+  period: string;          // YYYY-MM
+  height: number;          // the height this block will take once sealed
+  prevHash: Hex;           // the tip's hash when this was written
+  transactions: Transaction[];
+}
+export const PENDING_PATH = 'chain.pending.json';
+export function readPending(path: string): PendingLock | null;
+export function writePending(path: string, pending: PendingLock | null): void;
+```
+
+`writePending(path, null)` **deletes** the file — an empty open block must not leave a stale one behind.
+
+- [ ] **Step 1: Write the failing tests**
+
+```ts
+it('round-trips a pending block through the file', () => { /* write then read, deep equal */ });
+
+it('reports a pending file as stale when the tip has moved on', () => {
+  // prevHash is what makes the file honest. Without it a pending block written
+  // against one history could be displayed against another, and the hashes
+  // would be real but attached to the wrong chain.
+  const stale = { ...fixture(), prevHash: '0x' + 'ff'.repeat(32) };
+  expect(isStale(stale, tipHash)).toBe(true);
+});
+
+it('deletes the file rather than leaving a stale open block', () => {
+  writePending(path, fixture());
+  writePending(path, null);
+  expect(existsSync(path)).toBe(false);
+});
+
+it('returns null rather than throwing on a corrupt file', () => {
+  writeFileSync(path, '{ not json');
+  expect(readPending(path)).toBeNull();
 });
 ```
 
-**Note for the implementer:** the third parameter above is a seam for the test. Decide the real shape while implementing — the requirement is that the amendment set comes from the chain, not from the caller in production. If injecting it is the only testable route, default it to a function that reads the chain, and say so in your report.
+- [ ] **Step 2: Run and confirm failure.** Run: `npx vitest run tests/chain/pending.test.ts`
 
-- [ ] **Step 2: Run it and confirm it fails**
+- [ ] **Step 3: Implement `src/chain/pending.ts`.** Validate on read the way `readLock` does — a malformed or wrong-version file returns `null` rather than throwing, because a corrupt provisional file must never take the build down.
 
-Run: `npx vitest run tests/site/chain-data.test.ts -t 'amendment'`
-Expected: FAIL — the error message names the sealed `contentHash`.
+- [ ] **Step 4: Emit it from `build.ts`.** After the sealing loop, the transactions that `planBlocks` left unsealed are the open block. Write them with `prevHash` = the final tip's hash and `height` = tip height + 1. Report the count in the build summary alongside `sealed` and `amendments`, so running `chain:build` tells you what is waiting.
 
-- [ ] **Step 3: Implement**
-
-In `getPostContent`, replace the single-hash comparison with a set of accepted hashes:
-
-```ts
-  // §3.9: a sealed post's contentHash is frozen forever, so an edited post can
-  // only match through the amendment that records the edit. Both are committed
-  // to the chain, so accepting either introduces nothing unverified — while
-  // accepting only the first makes editing any sealed post impossible.
-  const amendments = getChain()
-    .blocks.flatMap((b) => b.transactions)
-    .filter((t) => t.type === 'amendment' && t.amends === tx.hash);
-  const current = amendments[amendments.length - 1]?.contentHash ?? tx.contentHash;
-
-  if (actual !== current) {
-    throw new Error(
-      `${path} does not match the chain: committed ${current.slice(0, 10)}…, ` +
-        `on disk ${actual.slice(0, 10)}… — re-run \`npm run chain:build\` to record the edit as an amendment`,
-    );
-  }
-  return { slug, body, contentHash: current, tx };
-```
-
-**Ordering matters:** amendments must be taken in chain order (block height, then position within the block), so the *latest* wins. `flatMap` over `getChain().blocks` preserves that order because the lock stores blocks ascending — confirm this by reading `getChain`, and if `getBlocks()` is newest-first, do **not** use it here.
-
-- [ ] **Step 4: Run the test**
-
-Run: `npx vitest run tests/site/chain-data.test.ts -t 'amendment'`
-Expected: PASS.
-
-- [ ] **Step 5: Prove the whole flow end to end**
-
-This is the actual deliverable, and a unit test cannot demonstrate it. In a **copy** of the repo outside the working tree:
+- [ ] **Step 5: Prove the end-to-end flow.** In a **copy** of the repo outside the working tree:
 
 ```bash
 SB=$(mktemp -d)
@@ -231,163 +216,107 @@ tar -c --exclude=node_modules --exclude=dist --exclude=.git . | tar -x -C "$SB"
 ln -s "$PWD/node_modules" "$SB/node_modules"
 cd "$SB"
 printf '\nMột câu bổ sung.\n' >> content/posts/2026-06-15-genesis.md
-npm run chain:build && npm run build
+npm run chain:build
+cat chain.pending.json
 ```
 
-Expected: **both succeed.** Before this task, the second one fails. Paste the evidence into your report. Do not commit the sandbox, and leave the real working tree clean.
+Expected: the amendment appears in `chain.pending.json`, and `chain.lock.json` is **unchanged** (`git diff --stat chain.lock.json` empty). Paste both into your report. Leave the real working tree clean.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/site/chain-data.ts tests/site/chain-data.test.ts
-git commit -m "fix(site): accept a post body committed by an amendment"
+git add src/chain/pending.ts src/chain/build.ts tests/chain/pending.test.ts chain.pending.json
+git commit -m "feat(chain): record the open block in chain.pending.json"
 ```
 
 ---
 
-### Task 3: Pending transactions carry their real hash
+### Task 3: The site reads the recorded open block
 
 **Files:**
 - Modify: `src/site/chain-data.ts`
 - Test: `tests/site/chain-data.test.ts`
 
 **Interfaces:**
-- Consumes: `toTransaction(post, from, assets)` and `parsePost(path, raw)` from `src/chain/post.ts`; `identityAddress(handle)` from `src/chain/address.ts`; `hashAssetFile(assetsDir, file, path)` and `referencedAssets(body)` from `src/chain/asset.ts`; `CHAIN_CONFIG` from `chain.config.ts`.
+- Consumes: `readPending`, `PENDING_PATH`, `PendingLock` from `src/chain/pending.ts`.
 - Produces:
 
 ```ts
 export interface PendingBlockView {
   sealed: false;
-  height: number;          // tip height + 1
-  period: string;          // monthOf(now)
+  height: number;
+  period: string;
   transactions: Transaction[];
   txCount: number;
   gasUsed: number;         // sum over transactions
   value: number;           // sum over transactions
-  isEmpty: boolean;
   maxTxPerBlock: number;   // for the "1/4 giao dịch" fill
   sealsOn: string;         // last calendar day of `period`, YYYY-MM-DD
 }
 export type AnyBlockView = (BlockView & { sealed: true }) | PendingBlockView;
-export function getPendingBlock(now: string, postsDir?: string, assetsDir?: string): Promise<PendingBlockView | null>;
+export function getPendingBlock(): PendingBlockView | null;
 ```
 
-`BlockView` gains `sealed: true` in `toView`, so `AnyBlockView` discriminates cleanly.
+`getPendingBlock` takes **no arguments** now. It reads a recorded file; it does not need `now`, and must not read the clock. Delete the old `PendingPost` and `PendingBlock` interfaces and the disk-walking implementation — nothing consumes them.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the failing tests**
 
 ```ts
-it('gives a pending post the same hash it will have once sealed', async () => {
-  // The whole decision rests on this: sealing commits a hash into a Merkle
-  // root, it does not create the hash. If these two differ, every pending
-  // hash shown on the site is a lie that changes at month-end for no reason
-  // the reader can see.
-  const dir = mkdtempSync(join(tmpdir(), 'bc-pending-'));
-  writeFileSync(
-    join(dir, '2026-08-01-lazy.md'),
-    '---\ntitle: Lazy propagation\ndate: 2026-08-01\ntags: [cp]\nresearch: 3.5\n---\n\nThân bài.\n',
-  );
-  const pending = await getPendingBlock('2026-08-02', dir);
-  const viaEngine = await toTransaction(
-    parsePost(join(dir, '2026-08-01-lazy.md'), readFileSync(join(dir, '2026-08-01-lazy.md'), 'utf8')),
-    await identityAddress(CHAIN_CONFIG.authorHandle),
-    [],
-  );
-  expect(pending!.transactions[0]!.hash).toBe(viaEngine.hash);
+it('returns null when no pending file exists', () => { /* … */ });
+
+it('exposes the recorded transactions with their recorded hashes', () => {
+  // Not recomputed. The point of the file is that the site shows what
+  // chain:build committed, so a hash on the page is one you can diff.
 });
 
-it('reports the open block one above the tip and seals at month end', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'bc-pending2-'));
-  writeFileSync(join(dir, '2026-08-01-x.md'), '---\ntitle: X\ndate: 2026-08-01\ntags: [cp]\n---\n\nY.\n');
-  const p = (await getPendingBlock('2026-08-02', dir))!;
-  expect(p.height).toBe(getBlocks()[0]!.height + 1);
-  expect(p.period).toBe('2026-08');
-  expect(p.sealsOn).toBe('2026-08-31');   // February and leap years must work too
-  expect(p.sealed).toBe(false);
+it('refuses a pending file written against a different tip', () => {
+  // A stale file must not render as though it belonged to this chain.
 });
 
-it('returns null when every post on disk is already sealed', async () => {
-  expect(await getPendingBlock('2026-08-02')).toBeNull();
+it('reports the month end as the seal date', () => {
+  expect(getPendingBlock()!.sealsOn).toBe('2026-08-31');   // February and leap years too
 });
 ```
 
-- [ ] **Step 2: Run and confirm failure**
-
-Run: `npx vitest run tests/site/chain-data.test.ts -t 'pending'`
-Expected: FAIL — `getPendingBlock` is synchronous and returns `PendingPost[]`.
-
-- [ ] **Step 3: Implement**
-
-Replace the body of `getPendingBlock`. Delete the `PendingPost` and `PendingBlock` interfaces — nothing else consumes them yet, which is the whole reason this task exists.
-
-```ts
-/** Last calendar day of `YYYY-MM`. Day 0 of the next month is the last of this one. */
-function lastDayOf(period: string): string {
-  const [y, m] = period.split('-').map(Number) as [number, number];
-  const d = new Date(Date.UTC(y, m, 0));   // month is 1-based here, so this is *this* month's end
-  return d.toISOString().slice(0, 10);
-}
-
-export async function getPendingBlock(
-  now: string,
-  postsDir: string = POSTS_DIR,
-  assetsDir: string = ASSETS_DIR,
-): Promise<PendingBlockView | null> {
-  const sealed = new Set(getPosts().map((t) => t.slug));
-  const from = await identityAddress(CHAIN_CONFIG.authorHandle);
-
-  const names = readdirSync(postsDir).filter((f) => f.endsWith('.md')).sort();
-  const transactions: Transaction[] = [];
-  for (const name of names) {
-    const path = join(postsDir, name);
-    const post = parsePost(path, readFileSync(path, 'utf8'));
-    if (sealed.has(post.slug)) continue;
-    const assets = [];
-    for (const file of referencedAssets(post.body)) {
-      assets.push(await hashAssetFile(assetsDir, file, path));
-    }
-    transactions.push(await toTransaction(post, from, assets));
-  }
-  if (transactions.length === 0) return null;
-
-  // Same ordering rule the miner uses (§3.5): by date, ties by slug, so what
-  // the site shows now is the order the block will actually seal in.
-  transactions.sort((a, b) => a.date.localeCompare(b.date) || (a.slug ?? '').localeCompare(b.slug ?? ''));
-
-  const period = now.slice(0, 7);
-  return {
-    sealed: false,
-    height: (getBlocks()[0]?.height ?? -1) + 1,
-    period,
-    transactions,
-    txCount: transactions.length,
-    gasUsed: transactions.reduce((s, t) => s + t.gasUsed, 0),
-    value: transactions.reduce((s, t) => s + t.value, 0),
-    isEmpty: false,
-    maxTxPerBlock: CHAIN_CONFIG.maxTxPerBlock,
-    sealsOn: lastDayOf(period),
-  };
-}
-```
-
-`new Date(Date.UTC(...))` here is arithmetic on an explicit period, **not a clock read** — it never observes the current time. Keep the comment saying so, or a later reader will "fix" it.
-
-- [ ] **Step 4: Add `sealed: true` to `toView`** in the same file, so `AnyBlockView` discriminates.
-
-- [ ] **Step 5: Run the tests**
-
-Run: `npm test` — expected PASS, including the determinism snapshot.
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add src/site/chain-data.ts tests/site/chain-data.test.ts
-git commit -m "feat(site): build real transactions for the open block"
-```
+- [ ] **Step 2: Run and confirm failure.**
+- [ ] **Step 3: Implement.** Deep-freeze what you return, as `getChain` does. `sealsOn` is arithmetic on the recorded period string — `new Date(Date.UTC(y, m, 0))` reads no clock, and say so in a comment or someone will "fix" it later.
+- [ ] **Step 4: Add `sealed: true` to `toView`** so `AnyBlockView` discriminates.
+- [ ] **Step 5: Run the suite, then commit** — `feat(site): read the recorded open block`
 
 ---
 
-### Task 4: The pending treatment on the two components
+### Task 4: Editing a sealed post must not brick the build
+
+**Why:** the current behaviour is a closed loop. Edit a sealed post → the site build fails with *"re-run `npm run chain:build` to record the edit as an amendment"* → you run it, it records the amendment → **the build fails with the identical message, forever.** `getPostContent` compares the file on disk against the *sealed* transaction's `contentHash`, which by design never changes.
+
+With Tasks 1–3 done the amendment is recorded in `chain.pending.json`, so the check can finally ask the right question: does this body match what `chain:build` last recorded — whether that was a sealed transaction or a pending amendment? Both are recorded, committed values, so nothing unverified is admitted.
+
+**Files:**
+- Modify: `src/site/chain-data.ts` (`getPostContent`)
+- Test: `tests/site/chain-data.test.ts`, `tests/site/build-guarantees.test.ts`
+
+- [ ] **Step 1: Write the failing test** — a body matching a pending amendment's `contentHash` is accepted; a body matching **neither** the sealed nor the pending hash is still rejected with the existing message. The second half is the guarantee; do not lose it.
+
+- [ ] **Step 2: Run and confirm failure.**
+
+- [ ] **Step 3: Implement.** Accept the body if its hash equals the sealed `contentHash`, or the `contentHash` of the latest amendment to this post — searching the pending block first, then sealed blocks in chain order so the most recent wins. Return the hash that actually matched as `PostContent.contentHash`.
+
+- [ ] **Step 4: Prove the flow end to end** in a sandbox copy, exactly as in Task 2 but continuing to `npm run build`:
+
+```bash
+printf '\nMột câu bổ sung.\n' >> content/posts/2026-06-15-genesis.md
+npm run chain:build && npm run build
+```
+
+Expected: **both succeed.** Before this task the second fails. This is the deliverable; paste the evidence.
+
+- [ ] **Step 5: Confirm the guarantee still bites.** `tests/site/build-guarantees.test.ts` must still fail the build for a body edited *without* running `chain:build`. Run it and say so explicitly in your report — a fix that accepts every body would pass Step 4 and be worthless.
+
+- [ ] **Step 6: Commit** — `fix(site): accept a post body recorded by an amendment`
+
+---
+
+### Task 5: The pending treatment on the two components
 
 **Design, already settled with the user — implement exactly this:**
 
@@ -491,7 +420,7 @@ git commit -m "feat(site): render the open block and its provisional hashes"
 
 ---
 
-### Task 5: Pending posts get pages
+### Task 6: Pending posts get pages
 
 **Files:**
 - Modify: `src/pages/tx/[slug].astro`, `src/pages/index.astro`
@@ -511,7 +440,7 @@ git commit -m "feat(site): render the open block and its provisional hashes"
 
 ---
 
-### Task 6: `/blocks`, `/block/[height]`, and 404
+### Task 7: `/blocks`, `/block/[height]`, and 404
 
 **Files:**
 - Create: `src/pages/blocks.astro`, `src/pages/block/[height].astro`, `src/pages/404.astro`
@@ -538,10 +467,10 @@ it('has a 404 page that links back to the chain', () => { /* … */ });
 
 ## Self-Review
 
-**Spec coverage.** §3.6 open block → Tasks 1, 3, 4. §3.9 amendments → Task 2. §3.2 hash display → Task 6. §6 block pages → Task 6. §9 visual direction → Task 4. §14 committed fields only → Task 4's "no invented placeholder" rule. Addresses, assets, mempool, RSS and `/contracts` are explicitly out of scope above, not omissions.
+**Spec coverage.** §3.6 open block → Tasks 1, 2, 3. §3.9 amendments → Tasks 1, 2, 4. §3.2 hash display → Task 6. §6 block pages → Task 6. §9 visual direction → Task 4. §14 committed fields only → Task 4's "no invented placeholder" rule. Addresses, assets, mempool, RSS and `/contracts` are explicitly out of scope above, not omissions.
 
 **Known gap carried forward.** `summary` is still parsed from frontmatter and hashed nowhere. No task here displays it. If Plan 2b-iii puts it on a listing page, it must not sit next to a hash as though committed.
 
-**Type consistency.** `PendingBlockView.sealed: false` and `BlockView.sealed: true` discriminate `AnyBlockView` (Task 3), consumed under those exact names in Tasks 4–6. `getPendingBlock` is async from Task 3 onward — every later caller awaits it.
+**Type consistency.** `PendingBlockView.sealed: false` and `BlockView.sealed: true` discriminate `AnyBlockView` (Task 3), consumed under those exact names in Tasks 4–6. `getPendingBlock()` takes no arguments and is synchronous from Task 3 onward, because it reads a recorded file rather than rebuilding from disk.
 
 **Risk flagged for the implementer of Task 1.** Changing `fromPeriod` alters where transactions land. If the determinism snapshot changes, that is a signal, not a chore — stop and report rather than re-recording it.
