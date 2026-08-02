@@ -39,8 +39,8 @@ const populated: Chain = {
           from: '0x' + '22'.repeat(20),
           to: ['0x' + '33'.repeat(20), '0x' + '44'.repeat(20)],
           contentHash: '0x' + '55'.repeat(32),
-          gasUsed: 2840,
-          value: 12.5,
+          gasUsed: 1900,
+          value: 9.5,
           amends: null,
         },
         {
@@ -54,8 +54,8 @@ const populated: Chain = {
           from: '0x' + '22'.repeat(20),
           to: [],
           contentHash: '0x' + '77'.repeat(32),
-          gasUsed: 0,
-          value: 0,
+          gasUsed: 940,
+          value: 2.8,
           amends: '0x' + '88'.repeat(32),
         },
       ],
@@ -91,12 +91,48 @@ describe('serializeChain', () => {
 
   it('does not depend on block/transaction key insertion order', () => {
     const block = populated.blocks[0]!;
+    const tx0 = block.transactions[0]!;
+    const tx1 = block.transactions[1]!;
+
+    // Construct scrambled transactions with keys in deliberately different order
+    const scrambledTx0 = {
+      amends: tx0.amends,
+      value: tx0.value,
+      gasUsed: tx0.gasUsed,
+      contentHash: tx0.contentHash,
+      to: tx0.to,
+      from: tx0.from,
+      series: tx0.series,
+      tags: tx0.tags,
+      date: tx0.date,
+      title: tx0.title,
+      slug: tx0.slug,
+      type: tx0.type,
+      hash: tx0.hash,
+    } as any;
+
+    const scrambledTx1 = {
+      amends: tx1.amends,
+      value: tx1.value,
+      gasUsed: tx1.gasUsed,
+      contentHash: tx1.contentHash,
+      to: tx1.to,
+      from: tx1.from,
+      series: tx1.series,
+      tags: tx1.tags,
+      date: tx1.date,
+      title: tx1.title,
+      slug: tx1.slug,
+      type: tx1.type,
+      hash: tx1.hash,
+    } as any;
+
     const scrambled: Chain = {
       version: 1,
       difficulty: 5,
       blocks: [
         {
-          transactions: block.transactions,
+          transactions: [scrambledTx0, scrambledTx1],
           hash: block.hash,
           nonce: block.nonce,
           difficulty: block.difficulty,
@@ -114,12 +150,18 @@ describe('serializeChain', () => {
     expect(serializeChain(scrambled)).toBe(serializeChain(populated));
   });
 
-  it('includes all field names in serialized output', () => {
+  it('serializes all fields at each object level with correct key order', () => {
     const output = serializeChain(populated);
-    const expectedFields = [
-      'version',
-      'difficulty',
-      'blocks',
+    const parsed = JSON.parse(output);
+
+    // Verify chain-level keys and order
+    const chainKeys = Object.keys(parsed);
+    expect(chainKeys).toEqual(['version', 'difficulty', 'blocks']);
+
+    // Verify block-level keys and order
+    const block = parsed.blocks[0];
+    const blockKeys = Object.keys(block);
+    expect(blockKeys).toEqual([
       'height',
       'period',
       'prevHash',
@@ -128,9 +170,17 @@ describe('serializeChain', () => {
       'txCount',
       'gasUsed',
       'value',
+      'difficulty',
       'nonce',
       'hash',
       'transactions',
+    ]);
+
+    // Verify transaction-level keys and order for post transaction
+    const postTx = block.transactions[0];
+    const postTxKeys = Object.keys(postTx);
+    expect(postTxKeys).toEqual([
+      'hash',
       'type',
       'slug',
       'title',
@@ -140,11 +190,40 @@ describe('serializeChain', () => {
       'from',
       'to',
       'contentHash',
+      'gasUsed',
+      'value',
       'amends',
-    ];
-    for (const field of expectedFields) {
-      expect(output).toContain(`"${field}"`);
-    }
+    ]);
+
+    // Verify transaction-level keys and order for amendment transaction
+    const amendmentTx = block.transactions[1];
+    const amendmentTxKeys = Object.keys(amendmentTx);
+    expect(amendmentTxKeys).toEqual([
+      'hash',
+      'type',
+      'slug',
+      'title',
+      'date',
+      'tags',
+      'series',
+      'from',
+      'to',
+      'contentHash',
+      'gasUsed',
+      'value',
+      'amends',
+    ]);
+
+    // Verify distinct field values to catch any level confusion
+    expect(block.gasUsed).toBe(2840);
+    expect(postTx.gasUsed).toBe(1900);
+    expect(amendmentTx.gasUsed).toBe(940);
+
+    expect(block.value).toBe(12.5);
+    expect(postTx.value).toBe(9.5);
+    expect(amendmentTx.value).toBe(2.8);
+
+    expect(block.difficulty).toBe(5);
   });
 });
 
