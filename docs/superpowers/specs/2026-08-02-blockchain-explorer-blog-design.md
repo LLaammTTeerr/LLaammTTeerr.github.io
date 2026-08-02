@@ -397,20 +397,37 @@ the reader's tab, so the two cannot drift.
 
 ```
 src/chain/
-  canonical.ts   post → canonical byte string (§3.2)
-  hash.ts        sha256, isomorphic (node:crypto | crypto.subtle)
+  types.ts       shared interfaces; no logic
+  canonical.ts   post/amendment/header → canonical byte string (§3.2, §3.4, §3.9)
+  hash.ts        sha256 via Web Crypto — browser-safe, imports nothing
+  hash.node.ts   synchronous sha256; Node-only, imported ONLY by mine.ts
   merkle.ts      root and proofs (§3.3)
   mine.ts        proof-of-work nonce search (§3.4)
+  period.ts      calendar arithmetic over YYYY-MM periods
   seal.ts        block sealing rules, incl. empty-block minting (§3.6);
                  takes the clock as an explicit parameter, never reads it
   address.ts     tag/author → address and name (§3.7)
+  post.ts        frontmatter parsing → PostInput → Transaction (§5)
   verify.ts      pure verification — used by build AND browser (§7)
   lock.ts        read and write chain.lock.json (§2)
+  build.ts       orchestration; the only module that reads post files
+
+scripts/
+  resolve-now.ts  the ONLY clock read in the project
+  build-chain.ts  CLI entry point
 ```
 
 Every module is independently testable, depends only on `hash.ts` and its own
-inputs, and has one clear purpose. `verify.ts` depending on nothing but `hash.ts`
-and `merkle.ts` is precisely what allows the browser to reuse it unchanged.
+inputs, and has one clear purpose.
+
+`verify.ts` and its whole transitive closure — `canonical.ts`, `hash.ts`,
+`merkle.ts`, `types.ts` — must never reach a Node built-in or a bare package
+specifier, since that closure is bundled for the browser. A test walks the import
+graph and asserts it, rather than trusting a hand-maintained list.
+
+Four modules deliberately use `node:` and all sit outside that closure:
+`hash.node.ts` (synchronous hashing for the miner, which performs ~1M hashes per
+block) and `lock.ts`, `post.ts`, `build.ts` (build-time file IO).
 
 **Framework: Astro.** Content Collections provide schema-validated frontmatter,
 zero JavaScript ships by default, and islands cover the only two interactive
