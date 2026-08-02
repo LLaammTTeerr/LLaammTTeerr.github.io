@@ -1,11 +1,12 @@
 ---
 import WorkMeter from './WorkMeter.astro';
+import PendingState from './PendingState.astro';
 import { researchHours, shortHash, splitHashWork } from '../site/chain-data';
-import type { BlockView } from '../site/chain-data';
+import type { AnyBlockView } from '../site/chain-data';
 // The card's styles travel with the card — see the note in WorkMeter.astro.
 import '../styles/chain.css';
 
-interface Props { block: BlockView; isNewest: boolean; isOldest: boolean }
+interface Props { block: AnyBlockView; isNewest: boolean; isOldest: boolean }
 const { block, isNewest, isOldest } = Astro.props;
 
 // Middle-truncated per the design spec (§9's "Type" rule), with the block's
@@ -13,29 +14,40 @@ const { block, isNewest, isOldest } = Astro.props;
 // actually the proof of work, not just whatever digits happened to follow.
 // The merkle root gets the same truncation but no highlight: it was never
 // mined against a difficulty target, so no prefix of it is "proven" zeros.
-const hashWork = splitHashWork(block.shortHash, block.difficulty);
-const merkleShort = shortHash(block.merkleRoot);
+// Neither exists yet on the open block — nothing has been mined — so both
+// stay `null` there rather than being computed against fields that don't exist.
+const hashWork = block.sealed ? splitHashWork(block.shortHash, block.difficulty) : null;
+const merkleShort = block.sealed ? shortHash(block.merkleRoot) : null;
+const isEmpty = block.sealed && block.isEmpty;
 ---
 
 <div class="row" data-block={block.height}>
   <div class="gutter">
     <span class="spine" data-first={isNewest} data-last={isOldest}></span>
-    <span class={`n${block.isEmpty ? ' q' : ''}`}>#{block.height}</span>
-    <span class={`dot${block.isEmpty ? ' q' : ''}`}></span>
+    <span class={`n${isEmpty ? ' q' : ''}`}>#{block.height}</span>
+    <span class={`dot${block.sealed ? (isEmpty ? ' q' : '') : ' open'}`}></span>
   </div>
-  <article class={`card${block.isEmpty ? ' empty' : ''}`} aria-labelledby={`block-${block.height}-heading`}>
+  <article class={`card${isEmpty ? ' empty' : ''}`} aria-labelledby={`block-${block.height}-heading`}>
     <h2 id={`block-${block.height}-heading`} class="sr-only">Block #{block.height} · {block.period}</h2>
     <div class="card-top">
-      <span class="per">{block.period}{block.isGenesis ? ' · genesis' : ''}</span>
-      <span class="stamp">Sealed</span>
+      <span class="per">{block.period}{block.sealed && block.isGenesis ? ' · genesis' : ''}</span>
+      <span class={`stamp${block.sealed ? '' : ' open'}`}>{block.sealed ? 'Sealed' : 'Chưa niêm phong'}</span>
     </div>
     <dl class="meta">
       <dt>Hash</dt>
-      <dd><span class="hash">{hashWork.marker}<mark class="zeros">{hashWork.zeros}</mark>{hashWork.rest}</span></dd>
+      <dd>{hashWork ? (
+        <span class="hash">{hashWork.marker}<mark class="zeros">{hashWork.zeros}</mark>{hashWork.rest}</span>
+      ) : (
+        <span class="hash">— chưa có, khối chưa đào</span>
+      )}</dd>
       <dt>Merkle</dt>
-      <dd><span class="hash">{merkleShort}</span></dd>
+      <dd>{merkleShort ? (
+        <span class="hash">{merkleShort}</span>
+      ) : (
+        <span class="hash">— chưa có, khối chưa đào</span>
+      )}</dd>
     </dl>
-    <WorkMeter nonce={block.nonce} difficulty={block.difficulty} />
+    {block.sealed ? <WorkMeter nonce={block.nonce} difficulty={block.difficulty} /> : null}
     {block.transactions.length > 0 ? (
       <ul class="txs">
         {block.transactions.map((tx) => {
@@ -52,5 +64,11 @@ const merkleShort = shortHash(block.merkleRoot);
     ) : (
       <p class="silent">Không có bài viết nào trong tháng này. Khối vẫn được đào.</p>
     )}
+    {!block.sealed ? (
+      <PendingState
+        fill={`${block.txCount}/${block.maxTxPerBlock} giao dịch · chốt ${block.sealsOn}`}
+        segments={{ on: block.txCount, of: block.maxTxPerBlock }}
+      />
+    ) : null}
   </article>
 </div>

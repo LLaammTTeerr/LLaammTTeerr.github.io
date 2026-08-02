@@ -91,3 +91,20 @@
   .gutter .n { width: 1.2rem; }
   .meta { grid-template-columns: 1fr; }
 }
+
+.a-hash { color: var(--dim); }
+.a-hash .tilde { color: var(--warn); font-weight: 700; }
+.stamp.open { color: var(--warn); border-color: var(--warn); border-style: dashed; }
+.gutter .dot.open { border-style: dashed; border-color: var(--warn); }
+.c-state { display: flex; flex-wrap: wrap; gap: 0.4rem 0.55rem; align-items: center;
+  font-family: var(--mono); font-size: 0.64rem; letter-spacing: 0.09em; text-transform: uppercase;
+  margin-top: 0.8rem; padding-top: 0.7rem; border-top: 1px solid var(--line); }
+.c-step { display: inline-flex; align-items: center; gap: 0.35rem; color: var(--good); }
+.c-step.todo { color: var(--dim); }
+.c-step .b { width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--good); }
+.c-step.todo .b { background: none; border: 1.5px solid var(--dim); }
+.c-arrow { color: var(--line2); }
+.c-fill { margin-left: auto; color: var(--dim); text-transform: none; letter-spacing: 0.04em; }
+.seg { display: inline-flex; gap: 2px; margin-left: 0.4rem; vertical-align: -1px; }
+.seg s { width: 0.5rem; height: 0.5rem; background: var(--line2); border-radius: 1px; display: block; }
+.seg s.on { background: var(--acc); }

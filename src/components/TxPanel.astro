@@ -1,6 +1,7 @@
 ---
 import type { Transaction } from '../chain/types';
 import { getBlocks, researchHours } from '../site/chain-data';
+import PendingState from './PendingState.astro';
 // `.meta`, `.hash` and `.num` are BlockCard's dense-metadata classes
 // (src/styles/chain.css) — reused verbatim here rather than redefined, so
 // the transaction panel and the block cards read as the same monospace,
@@ -8,8 +9,8 @@ import { getBlocks, researchHours } from '../site/chain-data';
 import '../styles/chain.css';
 import '../styles/post.css';
 
-interface Props { tx: Transaction }
-const { tx } = Astro.props;
+interface Props { tx: Transaction; pending?: boolean }
+const { tx, pending = false } = Astro.props;
 
 const block = getBlocks().find((b) => b.transactions.some((t) => t.hash === tx.hash));
 const readMinutes = Math.max(1, Math.round(tx.gasUsed / 200));
@@ -21,10 +22,15 @@ const hours = researchHours(tx.value);
 <div class="txpanel">
   <div class="txpanel-head">
     <span class="lbl">Transaction</span>
-    <span class="stamp">Confirmed</span>
+    <span class={`stamp${pending ? ' open' : ''}`}>{pending ? 'Chưa niêm phong' : 'Sealed'}</span>
   </div>
   <dl class="meta">
-    <dt>Hash</dt><dd><span class="hash">{tx.hash}</span></dd>
+    <dt>Hash</dt>
+    <dd>{pending ? (
+      <span class="a-hash"><span class="tilde">~</span>{tx.hash}</span>
+    ) : (
+      <span class="hash">{tx.hash}</span>
+    )}</dd>
     <dt>Block</dt>
     <dd>{block ? <a href={`/block/${block.height}`}>#{block.height}</a> : '—'} · {block?.period}</dd>
     <dt>Timestamp</dt><dd>{tx.date}</dd>
@@ -44,4 +50,10 @@ const hours = researchHours(tx.value);
       </>
     ) : null}
   </dl>
+  {pending ? (
+    <PendingState
+      fill="sửa bài lúc này sẽ đổi hash, chưa sinh bản đính chính"
+      segments={null}
+    />
+  ) : null}
 </div>

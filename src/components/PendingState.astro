@@ -1,0 +1,17 @@
+---
+interface Props { fill: string; segments: { on: number; of: number } | null }
+const { fill, segments } = Astro.props;
+---
+<div class="c-state">
+  <span class="c-step"><span class="b"></span>Đã băm</span>
+  <span class="c-arrow">→</span>
+  <span class="c-step todo"><span class="b"></span>Chờ niêm phong</span>
+  <span class="c-fill">
+    {fill}
+    {segments ? (
+      <span class="seg">
+        {Array.from({ length: segments.of }, (_, i) => <s class={i < segments.on ? 'on' : ''}></s>)}
+      </span>
+    ) : null}
+  </span>
+</div>
