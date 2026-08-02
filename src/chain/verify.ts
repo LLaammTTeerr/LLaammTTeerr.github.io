@@ -106,6 +106,46 @@ export function blockStructuralProblem(block: unknown): string | null {
 }
 
 /**
+ * §3.2b — a single asset record's own shape, independent of whether it agrees
+ * with the transactions. Exported for exactly the reason
+ * `blockStructuralProblem` is: the Node-side lock reader and the browser-side
+ * verifier must agree on what a valid record is, and two implementations of
+ * "valid" drift the moment one of them is edited. Total over untrusted input —
+ * returns a descriptive string or null, never throws, for `null`, a
+ * non-object, or any missing or wrong-typed field.
+ */
+export function assetRecordProblem(rec: unknown): string | null {
+  if (!isRecord(rec)) return 'is not an object';
+  if (typeof rec.tokenId !== 'number' || !Number.isInteger(rec.tokenId) || rec.tokenId < 1) {
+    return 'field "tokenId" is not a positive integer';
+  }
+  if (!isHexOfLength(rec.hash, 64)) {
+    return 'field "hash" is not a 0x-prefixed 64-hex-digit string';
+  }
+  // `file` and `mime` are the two fields a page interpolates — `file` into an
+  // `/assets/<file>` URL, `mime` into an attribute — and neither is committed
+  // to any hash, so "non-empty string" is not a useful check on them. Require
+  // instead exactly the shape the minting side can produce: `referencedAssets`
+  // captures `[A-Za-z0-9._-]+` and `hashAssetFile` rejects `.` and `..`, and
+  // `mimeTypeFor` returns a type/subtype from a fixed table. No honestly minted
+  // record can fail this; a hand-edited `<script>` or `../../../etc/passwd`
+  // cannot pass it.
+  if (typeof rec.file !== 'string' || !/^[A-Za-z0-9._-]+$/.test(rec.file) || rec.file === '.' || rec.file === '..') {
+    return 'field "file" is not a plain asset filename';
+  }
+  if (typeof rec.mime !== 'string' || !/^[a-z0-9.+-]+\/[a-z0-9.+-]+$/.test(rec.mime)) {
+    return 'field "mime" is not a type/subtype media type';
+  }
+  if (typeof rec.bytes !== 'number' || !Number.isFinite(rec.bytes) || rec.bytes < 0) {
+    return 'field "bytes" is not a non-negative number';
+  }
+  if (typeof rec.mintedIn !== 'number' || !Number.isInteger(rec.mintedIn) || rec.mintedIn < 0) {
+    return 'field "mintedIn" is not a non-negative integer';
+  }
+  return null;
+}
+
+/**
  * Recompute a transaction's hash from the fields the ledger records. Returns
  * null when the record cannot produce a canonical form at all, which is itself
  * a verification failure.
@@ -228,6 +268,11 @@ export async function verifyBlock(
  * entry is referenced, mint blocks match first appearance, and token ids run
  * 1..n in that same order. Total over untrusted input, like the rest of this
  * module.
+ *
+ * Note the limit of what this proves: `file`, `mime` and `bytes` are committed
+ * to no hash anywhere on the chain — only the asset's content hash is — so they
+ * are shape-checked here but not authenticatable, and `/verify` reporting clean
+ * says nothing about whether they were edited.
  */
 function registryProblem(chain: Chain): string | null {
   if (!Array.isArray(chain.assets)) return 'assets is not an array';
@@ -254,19 +299,30 @@ function registryProblem(chain: Chain): string | null {
   }
   for (let i = 0; i < order.length; i++) {
     const rec = chain.assets[i];
-    if (!rec || typeof rec !== 'object') return `asset #${i} is not a record`;
-    if (rec.hash !== order[i]) return `asset #${i} is out of first-appearance order`;
-    if (rec.tokenId !== i + 1) return `asset #${i} has tokenId ${String(rec.tokenId)}, expected ${i + 1}`;
-    if (rec.mintedIn !== firstSeen.get(order[i]!)) {
-      return `asset ${order[i]} claims mintedIn ${String(rec.mintedIn)} but first appears in block #${String(firstSeen.get(order[i]!))}`;
+    const shape = assetRecordProblem(rec);
+    if (shape !== null) return `asset #${i} ${shape}`;
+    if (rec!.hash !== order[i]) return `asset #${i} is out of first-appearance order`;
+    if (rec!.tokenId !== i + 1) return `asset #${i} has tokenId ${String(rec!.tokenId)}, expected ${i + 1}`;
+    if (rec!.mintedIn !== firstSeen.get(order[i]!)) {
+      return `asset ${order[i]} claims mintedIn ${String(rec!.mintedIn)} but first appears in block #${String(firstSeen.get(order[i]!))}`;
     }
   }
   return null;
 }
 
-export async function verifyChain(
-  chain: Chain,
-): Promise<{ ok: boolean; blocks: BlockVerification[] }> {
+export interface ChainVerification {
+  ok: boolean;
+  blocks: BlockVerification[];
+  /**
+   * Set only when the asset registry itself is inconsistent. Without it a
+   * registry-only failure reports `ok: false` with every block green and no
+   * stated cause anywhere — the worst failure state for a project whose whole
+   * premise is legible verification.
+   */
+  registry?: string;
+}
+
+export async function verifyChain(chain: Chain): Promise<ChainVerification> {
   if (!isRecord(chain) || !Array.isArray(chain.blocks)) {
     return { ok: false, blocks: [] };
   }
@@ -282,5 +338,6 @@ export async function verifyChain(
     if (result.reason === undefined) prev = block;
   }
   const registry = registryProblem(chain);
-  return { ok: blocks.every((b) => b.ok) && registry === null, blocks };
+  const ok = blocks.every((b) => b.ok) && registry === null;
+  return registry === null ? { ok, blocks } : { ok, blocks, registry };
 }

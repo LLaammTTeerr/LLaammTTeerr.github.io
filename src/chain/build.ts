@@ -11,9 +11,22 @@ import { mine } from './mine';
 import { parsePost, toTransaction } from './post';
 import { blockTimestamp, planBlocks } from './seal';
 import type { Block, Chain, Hex, Transaction } from './types';
-import { verifyChain } from './verify';
+import { verifyChain, type ChainVerification } from './verify';
 
 const ZERO_HASH = '0x' + '00'.repeat(32);
+
+/**
+ * Name what actually failed. A registry-only fault leaves every block `ok`, so
+ * reporting the failing block list alone produced an empty message with no
+ * cause — the operator saw "failed verification at block  —" and nothing else.
+ */
+function failureDetail(result: ChainVerification): string {
+  const parts: string[] = [];
+  const bad = result.blocks.filter((b) => !b.ok).map((b) => `#${b.height}`);
+  if (bad.length > 0) parts.push(`block ${bad.join(', ')}`);
+  if (result.registry !== undefined) parts.push(`asset registry: ${result.registry}`);
+  return parts.length > 0 ? parts.join('; ') : 'an unreported fault';
+}
 
 export interface BuildOptions {
   postsDir: string;
@@ -181,9 +194,8 @@ export async function buildChain(opts: BuildOptions): Promise<BuildResult> {
   // fail before appending rather than building on top of a broken ledger.
   const existing = await verifyChain(chain);
   if (!existing.ok) {
-    const bad = existing.blocks.filter((b) => !b.ok).map((b) => `#${b.height}`);
     throw new Error(
-      `${opts.lockPath} failed verification at block ${bad.join(', ')} — refusing to extend a broken chain`,
+      `${opts.lockPath} failed verification at ${failureDetail(existing)} — refusing to extend a broken chain`,
     );
   }
 
@@ -303,9 +315,8 @@ export async function buildChain(opts: BuildOptions): Promise<BuildResult> {
   // refuse to start at all — requiring a manual revert to recover.
   const final = await verifyChain(chain);
   if (!final.ok) {
-    const bad = final.blocks.filter((b) => !b.ok).map((b) => `#${b.height}`);
     throw new Error(
-      `build produced an invalid chain at block ${bad.join(', ')} — refusing to write ${opts.lockPath}`,
+      `build produced an invalid chain at ${failureDetail(final)} — refusing to write ${opts.lockPath}`,
     );
   }
 

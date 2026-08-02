@@ -31,6 +31,11 @@ console.log(`  assets      ${chain.assets.length}`);
 console.log(`  integrity   ${result.ok ? 'OK' : 'FAILED'}`);
 
 if (!result.ok) {
+  // A registry-only failure has no failing block to print, so without this the
+  // operator got the word FAILED and nothing else.
+  if (result.registry !== undefined) {
+    console.error(`  registry    ${result.registry}`);
+  }
   for (const b of result.blocks.filter((b) => !b.ok)) {
     console.error(
       `  block #${b.height}  hash:${b.hashOk} merkle:${b.merkleOk} link:${b.linkOk} pow:${b.powOk} tx:${b.txOk}` +

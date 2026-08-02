@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
-import { verifyChain } from '../../src/chain/verify';
+import { assetRecordProblem, verifyChain } from '../../src/chain/verify';
 import { canonicalAmendmentTx, canonicalPostTx } from '../../src/chain/canonical';
 import { sha256Hex } from '../../src/chain/hash';
 import { merkleRootHex } from '../../src/chain/merkle';
@@ -572,6 +572,149 @@ describe('asset registry', () => {
     (chain as unknown as { assets: unknown }).assets = 'not an array';
     await expect(verifyChain(chain)).resolves.toBeDefined();
     expect((await verifyChain(chain)).ok).toBe(false);
+  });
+
+  /** Two assets, first-seen in transaction order within one block. */
+  async function chainWithTwoAssets() {
+    const h1 = '0x' + '1a'.repeat(32);
+    const h2 = '0x' + '2b'.repeat(32);
+    const b0 = await makeBlock(0, ZERO, [await tx('a', [h1]), await tx('b', [h2])]);
+    return {
+      chain: {
+        version: 1 as const,
+        difficulty: DIFFICULTY,
+        blocks: [b0],
+        assets: [
+          { tokenId: 1, hash: h1, file: 'a.svg', mime: 'image/svg+xml', bytes: 10, mintedIn: 0 },
+          { tokenId: 2, hash: h2, file: 'b.svg', mime: 'image/svg+xml', bytes: 20, mintedIn: 0 },
+        ],
+      },
+      h1,
+      h2,
+    };
+  }
+
+  it('accepts a two-asset registry in first-appearance order', async () => {
+    const { chain } = await chainWithTwoAssets();
+    expect((await verifyChain(chain)).ok).toBe(true);
+  });
+
+  it('rejects two entries whose hashes are swapped but whose token ids are not', async () => {
+    // Both records stay individually well-formed, both token ids still read
+    // 1,2, and both were minted in the same block — so neither the sequence
+    // check nor the mint-block check fires. Only the first-appearance-order
+    // line catches this.
+    const { chain, h1, h2 } = await chainWithTwoAssets();
+    chain.assets[0]!.hash = h2;
+    chain.assets[1]!.hash = h1;
+    const result = await verifyChain(chain);
+    expect(result.ok).toBe(false);
+    expect(result.registry).toMatch(/asset #0 is out of first-appearance order/);
+  });
+
+  it('requires token ids to run 1..n across multiple entries', async () => {
+    const { chain } = await chainWithTwoAssets();
+    chain.assets[1]!.tokenId = 3;
+    const result = await verifyChain(chain);
+    expect(result.ok).toBe(false);
+    expect(result.registry).toMatch(/asset #1 has tokenId 3, expected 2/);
+  });
+});
+
+describe('asset record shape (shared with the lock reader)', () => {
+  // §3.2b — `registryProblem` used to check only `hash`, `tokenId` and
+  // `mintedIn`, so a record whose `file` was a script tag or whose `bytes`
+  // was negative verified clean in the browser while the Node reader refused
+  // it. `/asset/[tokenId]` interpolates `file` into a URL and `mime` into an
+  // attribute, so the loose side was the one shipping to readers.
+  async function chainWithAsset() {
+    const t = await tx('a', ['0x' + '1a'.repeat(32)]);
+    const b0 = await makeBlock(0, ZERO, [t]);
+    return {
+      version: 1 as const,
+      difficulty: DIFFICULTY,
+      blocks: [b0],
+      assets: [{
+        tokenId: 1, hash: '0x' + '1a'.repeat(32), file: 'a.svg',
+        mime: 'image/svg+xml', bytes: 10, mintedIn: 0,
+      }],
+    };
+  }
+
+  async function reject(mutate: (rec: Record<string, unknown>) => void, pattern: RegExp) {
+    const chain = await chainWithAsset();
+    mutate(chain.assets[0] as unknown as Record<string, unknown>);
+    await expect(verifyChain(chain)).resolves.toBeDefined();
+    const result = await verifyChain(chain);
+    expect(result.ok).toBe(false);
+    expect(result.registry).toMatch(pattern);
+    expect(result.blocks.every((b) => b.ok)).toBe(true);
+  }
+
+  it('rejects a script tag smuggled into "file"', async () => {
+    await reject((r) => { r.file = '<script>alert(1)</script>'; }, /"file"/);
+  });
+
+  it('rejects a traversal path with a negative byte count', async () => {
+    await reject((r) => { r.file = '../../../etc/passwd'; r.bytes = -5; }, /"file"/);
+  });
+
+  it('rejects a negative byte count on its own', async () => {
+    await reject((r) => { r.bytes = -5; }, /"bytes"/);
+  });
+
+  it('rejects a record with file, mime and bytes absent entirely', async () => {
+    await reject((r) => { delete r.file; delete r.mime; delete r.bytes; }, /"file"/);
+  });
+
+  it('rejects wrong-typed "mime" and "bytes"', async () => {
+    await reject((r) => { r.mime = {}; r.bytes = { a: 1 }; }, /"mime"/);
+  });
+
+  it('rejects an empty "file" string', async () => {
+    await reject((r) => { r.file = ''; }, /"file"/);
+  });
+
+  it('rejects a record that is not an object at all', async () => {
+    const chain = await chainWithAsset();
+    (chain.assets as unknown[])[0] = null;
+    await expect(verifyChain(chain)).resolves.toBeDefined();
+    const result = await verifyChain(chain);
+    expect(result.ok).toBe(false);
+    expect(result.registry).toMatch(/asset #0 is not an object/);
+  });
+
+  it('is total over hostile scalars', () => {
+    for (const bad of [null, undefined, 0, '', 'x', [], true]) {
+      expect(assetRecordProblem(bad)).toEqual(expect.any(String));
+    }
+  });
+});
+
+describe('registry diagnostics', () => {
+  it('reports the registry reason when every block is fine', async () => {
+    const t = await tx('a', ['0x' + '1a'.repeat(32)]);
+    const b0 = await makeBlock(0, ZERO, [t]);
+    const chain = {
+      version: 1 as const,
+      difficulty: DIFFICULTY,
+      blocks: [b0],
+      assets: [{
+        tokenId: 7, hash: '0x' + '1a'.repeat(32), file: 'a.svg',
+        mime: 'image/svg+xml', bytes: 10, mintedIn: 0,
+      }],
+    };
+
+    const result = await verifyChain(chain);
+    expect(result.ok).toBe(false);
+    expect(result.blocks.every((b) => b.ok)).toBe(true);
+    expect(result.registry).toBe('asset #0 has tokenId 7, expected 1');
+  });
+
+  it('leaves "registry" unset on a clean chain', async () => {
+    const result = await verifyChain(await validChain());
+    expect(result.ok).toBe(true);
+    expect(result.registry).toBeUndefined();
   });
 });
 

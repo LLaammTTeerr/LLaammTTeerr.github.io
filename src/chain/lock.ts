@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import type { AssetRecord, Block, Chain, Transaction } from './types';
-import { blockStructuralProblem } from './verify';
+import { assetRecordProblem, blockStructuralProblem } from './verify';
 
 export function emptyChain(difficulty: number): Chain {
   return { version: 1, difficulty, blocks: [], assets: [] };
@@ -100,36 +100,16 @@ function validateBlocks(path: string, blocks: unknown[]): void {
 }
 
 /**
- * §3.2b — a single asset record's own shape, independent of whether it
- * agrees with the transactions. Named in the same style as
- * `blockStructuralProblem`/`transactionProblem` in `verify.ts`.
- */
-function assetRecordProblem(rec: unknown): string | null {
-  if (typeof rec !== 'object' || rec === null) return 'is not an object';
-  const r = rec as Record<string, unknown>;
-  if (typeof r.tokenId !== 'number' || !Number.isInteger(r.tokenId) || r.tokenId < 1) {
-    return 'field "tokenId" is not a positive integer';
-  }
-  if (typeof r.hash !== 'string' || !/^0x[0-9a-f]{64}$/.test(r.hash)) {
-    return 'field "hash" is not a 0x-prefixed 64-hex-digit string';
-  }
-  if (typeof r.file !== 'string' || r.file === '') return 'field "file" is not a non-empty string';
-  if (typeof r.mime !== 'string' || r.mime === '') return 'field "mime" is not a non-empty string';
-  if (typeof r.bytes !== 'number' || !Number.isFinite(r.bytes) || r.bytes < 0) {
-    return 'field "bytes" is not a non-negative number';
-  }
-  if (typeof r.mintedIn !== 'number' || !Number.isInteger(r.mintedIn) || r.mintedIn < 0) {
-    return 'field "mintedIn" is not a non-negative integer';
-  }
-  return null;
-}
-
-/**
  * §10 / §3.2b — `Array.isArray` alone is not a structural check: a hand-edited
  * `assets: [null]` or `assets: [{tokenId: "x"}]` would pass it, seed the mint
  * loop's `known` set with `undefined`, and then lose fields silently when
  * `serializeChain`'s `JSON.stringify` drops them. Name the offending index
  * and field, in the same style as `validateBlocks`.
+ *
+ * The per-record shape comes from `verify.ts` for the same reason
+ * `validateBlocks` takes `blockStructuralProblem` from there: a second copy of
+ * "valid record" here would let the Node reader and the browser verifier drift,
+ * and the browser is the one holding untrusted input.
  */
 function validateAssets(path: string, assets: unknown[]): void {
   for (const [index, rec] of assets.entries()) {
@@ -170,13 +150,17 @@ export function readLock(path: string, difficulty: number): Chain {
     throw new Error(`${path} is missing a valid "blocks" array — refusing to use a corrupt ledger`);
   }
   validateBlocks(path, chain.blocks);
-  // An absent key and a wrong-typed key are different faults: the first is an
-  // older ledger that predates this addendum (re-mine it), the second is a
-  // hand-edited or truncated one (refuse it). Defaulting the absent case to
-  // `[]` would let an older lock be silently extended, and the mint loop
-  // would then back-fill tokens for already-sealed transactions — making
-  // `tokenId` depend on when the migration ran rather than on first
-  // appearance.
+  // An absent key and a wrong-typed key are different faults, and both must
+  // refuse rather than default to `[]`: silently extending a lock with no
+  // registry would make the mint loop back-fill tokens for already-sealed
+  // transactions, so `tokenId` would depend on when the migration ran rather
+  // than on first appearance.
+  //
+  // In practice a *populated* pre-addendum ledger never reaches this line —
+  // `validateBlocks` above rejects it first, because its transactions have no
+  // `assets` array either. What survives to here is a ledger with no blocks
+  // (an empty pre-addendum lock) or one whose `assets` key was deleted by
+  // hand. The message still points at the right remedy for both.
   if (chain.assets === undefined) {
     throw new Error(`${path} predates the asset registry (§3.2b) — re-mine the ledger`);
   }

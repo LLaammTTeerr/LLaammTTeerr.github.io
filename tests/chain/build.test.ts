@@ -50,7 +50,16 @@ describe('buildChain', () => {
 
   it('is byte-identical when re-run at the same clock', async () => {
     const { postsDir, assetsDir, lockPath } = workspace();
+    // §3.2b — the registry is serialized too, so determinism must be pinned
+    // with at least one minted token present. On an asset-free workspace this
+    // test could not have caught an unstable `assets` array at all.
+    writeFileSync(join(assetsDir, 'a.svg'), 'A');
+    writeFileSync(
+      join(postsDir, '2026-07-20-hinh-xac-dinh.md'),
+      '---\ntitle: "Hình"\ndate: 2026-07-20\ntags: [cp]\n---\n\n![a](/assets/a.svg)\n',
+    );
     const first = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
+    expect(first.chain.assets).toHaveLength(1);
     const second = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
     expect(serializeChain(second.chain)).toBe(serializeChain(first.chain));
     expect(second.minted).toBe(0);
@@ -504,9 +513,42 @@ describe('buildChain', () => {
   });
 
   it('leaves an unreferenced file off the chain entirely', async () => {
+    // With only the unreferenced file present, `assets === []` holds even if
+    // reference discovery is broken outright, so the assertion proved nothing
+    // about discovery. Write both kinds and pin which one got minted.
     const { postsDir, assetsDir, lockPath } = workspace();
     writeFileSync(join(assetsDir, 'unused.png'), 'nobody links to me');
+    writeFileSync(join(assetsDir, 'used.svg'), 'referenced');
+    writeFileSync(
+      join(postsDir, '2026-07-20-dung.md'),
+      '---\ntitle: "Dùng"\ndate: 2026-07-20\ntags: [cp]\n---\n\n![u](/assets/used.svg)\n',
+    );
+
     const { chain } = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
-    expect(chain.assets).toEqual([]);
+
+    expect(chain.assets).toHaveLength(1);
+    expect(chain.assets[0]!.file).toBe('used.svg');
+    expect(chain.assets.map((a) => a.file)).not.toContain('unused.png');
+  });
+
+  it('names the registry fault when the lock is inconsistent only there', async () => {
+    // A hand-edited `tokenId` passes `readLock` (it is still a positive
+    // integer) and then fails `verifyChain` with every block green. The guard
+    // used to print an empty block list and no cause at all.
+    const { postsDir, assetsDir, lockPath } = workspace();
+    writeFileSync(join(assetsDir, 'a.svg'), 'A');
+    writeFileSync(
+      join(postsDir, '2026-07-20-mot.md'),
+      '---\ntitle: "Một"\ndate: 2026-07-20\ntags: [cp]\n---\n\n![a](/assets/a.svg)\n',
+    );
+    await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
+
+    const lock = JSON.parse(readFileSync(lockPath, 'utf8'));
+    lock.assets[0].tokenId = 7;
+    writeFileSync(lockPath, JSON.stringify(lock, null, 2) + '\n');
+
+    await expect(
+      buildChain({ postsDir, assetsDir, lockPath, now: '2026-11-10', config: CONFIG }),
+    ).rejects.toThrow(/asset registry: asset #0 has tokenId 7, expected 1/);
   });
 });
