@@ -17,7 +17,7 @@ export interface PlanOptions {
    * It is deliberately not where a transaction may *land*. Once the tip's
    * month has also ended it is closed, and a transaction entering the chain
    * now goes to the first still-open month instead — see `membershipFloor` in
-   * `planBlocks`. Within a single build a busy month can still split into two
+   * `planChain`. Within a single build a busy month can still split into two
    * blocks of the same period; what cannot happen is a closed month gaining
    * another block on a later build.
    */
@@ -26,8 +26,14 @@ export interface PlanOptions {
   now: string;
   maxTxPerBlock: number;
   /**
-   * Transaction hash to the period it was *already* recorded in, from
-   * `chain.pending.json`.
+   * Stable transaction identity (see `txIdentity`) to the period it was
+   * *already* recorded in, from `chain.pending.json`.
+   *
+   * Keyed on identity and NOT on `tx.hash`: the hash is content-derived, so
+   * editing a post that is still pending mints a new hash, orphans its record,
+   * and re-places the replacement in the current month — leaving the month it
+   * vacated to be walked as silent and sealed as a permanently empty block that
+   * denies a transaction which was in fact sitting in it.
    *
    * Placement has to be a recorded fact rather than something recomputed from
    * the clock on every build. Recomputed, a partial block never seals at any
@@ -40,7 +46,24 @@ export interface PlanOptions {
    * Recorded, `2026-07` stays `2026-07`, and the month-end rule fires normally
    * the moment that month is past.
    */
-  recordedPeriods?: ReadonlyMap<Hex, string>;
+  recordedPeriods?: ReadonlyMap<string, string>;
+}
+
+/**
+ * What identifies a transaction across an edit.
+ *
+ * A transaction hash commits to content, so it changes the moment the post
+ * behind it changes — it cannot identify "the same pending thing" between
+ * builds. What survives an edit is the post's `slug`, and for an amendment the
+ * `amends` hash of the sealed transaction it targets (that target is immutable,
+ * so successive amendments to one post share an identity, which is also what
+ * makes a re-edit supersede rather than stack).
+ *
+ * The prefix keeps the two namespaces apart so a slug can never collide with a
+ * hash.
+ */
+export function txIdentity(tx: Transaction): string {
+  return tx.type === 'amendment' ? `amends:${tx.amends ?? ''}` : `slug:${tx.slug ?? ''}`;
 }
 
 /**
@@ -111,6 +134,9 @@ export interface ChainPlan {
  * calendar month has ended. Complete months with no posts still mint an empty
  * block. The current month is never sealed on the time rule, because it is
  * still open.
+ *
+ * Production code calls `planChain`, which also reports the block left open;
+ * this drops that half for the many callers that only assert on sealed drafts.
  */
 export function planBlocks(pending: Transaction[], opts: PlanOptions): BlockDraft[] {
   return planChain(pending, opts).drafts;
@@ -173,12 +199,27 @@ export function planChain(pending: Transaction[], opts: PlanOptions): ChainPlan 
     // may reopen a sealed month or open an unstarted one.
     // A period already recorded for this transaction wins: it is where the
     // transaction entered the chain, and re-deriving it from the clock is what
-    // makes a partial block slide forward forever. It is still floored by
-    // `firstOpenPeriod`, so a stale pending file naming a since-sealed month
-    // cannot reopen it.
-    const recorded = opts.recordedPeriods?.get(tx.hash);
-    const period = recorded !== undefined
-      ? maxPeriod(recorded, firstOpenPeriod)
+    // makes a partial block slide forward forever.
+    //
+    // Unless it names a month strictly *before* the tip. That month is sealed
+    // and gone, so the record describes a chain this one no longer is. It must
+    // not be floored up either: `firstOpenPeriod` IS the tip's own month, so
+    // clamping would mint a second block in a month that had already closed —
+    // the exact bug this rule exists to prevent. Such a record is dropped and
+    // the transaction placed as if new.
+    //
+    // A record AT the tip is kept, and deliberately so: an open block recorded
+    // while its month was still current shares the tip's period (five posts in
+    // one month seal four and leave one open at that same period), and honouring
+    // it is how that remainder seals once the month ends. That is a month still
+    // being completed, not a closed one being reopened.
+    const recorded = opts.recordedPeriods?.get(txIdentity(tx));
+    const usable = recorded !== undefined && recorded >= firstOpenPeriod ? recorded : undefined;
+    const period = usable !== undefined
+      // Capped by `latestOpenPeriod` for the same reason a claimed date is: a
+      // hand-edited record naming a month that has not started must not open
+      // one, nor be re-persisted as the open block's period on the way out.
+      ? minPeriod(usable, latestOpenPeriod)
       : minPeriod(maxPeriod(monthOf(tx.date), membershipFloor), latestOpenPeriod);
     const bucket = byPeriod.get(period);
     if (bucket) bucket.push(tx);

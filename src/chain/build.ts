@@ -15,8 +15,9 @@ import {
   writePending,
   type PendingLock,
 } from './pending';
+import { monthOf } from './period';
 import { parsePost, toTransaction } from './post';
-import { blockTimestamp, planChain } from './seal';
+import { blockTimestamp, planChain, txIdentity } from './seal';
 import type { Block, Chain, Hex, Transaction } from './types';
 import { verifyChain, type ChainVerification } from './verify';
 
@@ -39,8 +40,6 @@ export interface BuildOptions {
   postsDir: string;
   assetsDir: string;
   lockPath: string;
-  /** The open block's file. Defaults to `chain.pending.json` beside the lock. */
-  pendingPath?: string;
   /** Injected clock, YYYY-MM-DD. */
   now: string;
   config: ChainConfig;
@@ -63,6 +62,21 @@ export interface BuildResult {
    * `chain.pending.json`.
    */
   pending: PendingLock | null;
+  /**
+   * Transactions this build had to place with no record covering them, at a
+   * point where a record should have existed — the tip's month is already
+   * over, so anything still open was placed by an earlier build and ought to
+   * have been written down.
+   *
+   * Non-empty means the guarantee is not in force for these transactions: if
+   * `chain.pending.json` was deleted, `git clean`ed, or lost in a merge, their
+   * placement is being reassigned from the clock right now, and the month they
+   * were really waiting in will seal as an empty block that denies them. The
+   * build cannot tell that apart from a genuinely new transaction, so it
+   * reports rather than fails — but it must not stay silent, because silence
+   * is exactly how the pre-fix sliding bug returns.
+   */
+  unrecorded: Transaction[];
 }
 
 async function readPostTransactions(
@@ -252,20 +266,16 @@ export async function buildChain(opts: BuildOptions): Promise<BuildResult> {
   // this chain no longer has, so it is ignored rather than trusted; the worst
   // case is that its transactions are placed afresh, which is exactly what
   // would have happened without the file at all.
-  const pendingPath = opts.pendingPath ?? join(dirname(opts.lockPath), PENDING_PATH);
+  const pendingPath = join(dirname(opts.lockPath), PENDING_PATH);
   const recordedFile = readPending(pendingPath);
   const usable =
     recordedFile !== null && !isStale(recordedFile, tipHash) ? recordedFile : null;
 
-  // We only ever record the then-current month, so a recorded period in the
-  // future means a hand-edited file. Clamp it here, where the clock legitimately
-  // lives: `planChain` walks every month up to the latest bucket, and an
-  // unclamped `9999-12` would walk it literally.
-  const currentPeriod = opts.now.slice(0, 7);
-  const recordedPeriod =
-    usable === null ? '' : usable.period < currentPeriod ? usable.period : currentPeriod;
-  const recordedPeriods = new Map<Hex, string>(
-    usable === null ? [] : usable.transactions.map((t) => [t.hash, recordedPeriod]),
+  // Keyed on stable identity, not on the transaction hash: the hash is derived
+  // from content, so editing a still-pending post re-keys it and orphans its
+  // placement. `planChain` bounds these values; nothing is clamped here.
+  const recordedPeriods = new Map<string, string>(
+    usable === null ? [] : usable.transactions.map((t) => [txIdentity(t), usable.period]),
   );
 
   const { drafts, open } = planChain(pending, {
@@ -280,7 +290,7 @@ export async function buildChain(opts: BuildOptions): Promise<BuildResult> {
   let amendmentsSealed = 0;
 
   for (const draft of drafts) {
-    // planBlocks walks from the last sealed period inclusive, so it re-proposes
+    // planChain walks from the last sealed period inclusive, so it re-proposes
     // empty blocks for months already on the chain. Drop those. A draft WITH
     // transactions for an already-sealed period is legitimate — it is the
     // remainder of a size-limit split, or a post backdated into that month.
@@ -385,5 +395,14 @@ export async function buildChain(opts: BuildOptions): Promise<BuildResult> {
         };
   writePending(pendingPath, openBlock);
 
-  return { chain, minted, amendments: amendmentsSealed, pending: openBlock };
+  // A transaction left open once the tip's month is over was placed by some
+  // earlier build, so a record for it should already exist. If none covers it,
+  // the record was lost and its placement has just been reassigned.
+  const tipPeriodIsPast = lastBlock !== null && lastBlock.period < monthOf(opts.now);
+  const unrecorded =
+    openBlock === null || !tipPeriodIsPast
+      ? []
+      : openBlock.transactions.filter((t) => !recordedPeriods.has(txIdentity(t)));
+
+  return { chain, minted, amendments: amendmentsSealed, pending: openBlock, unrecorded };
 }

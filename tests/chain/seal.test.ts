@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { planBlocks, blockTimestamp } from '../../src/chain/seal';
+import { planBlocks, planChain, txIdentity, blockTimestamp } from '../../src/chain/seal';
 import type { Transaction } from '../../src/chain/types';
 
 function tx(date: string, slug: string): Transaction {
@@ -316,7 +316,7 @@ describe('planBlocks', () => {
     const t = tx('2026-07-05', 'p');
     const drafts = planBlocks([t], {
       now: '2026-08-10', maxTxPerBlock: 4, fromPeriod: '2026-07',
-      recordedPeriods: new Map([[t.hash, '2026-07']]),
+      recordedPeriods: new Map([[txIdentity(t), '2026-07']]),
     });
     const withTxs = drafts.filter((d) => d.transactions.length > 0);
     expect(withTxs.map((d) => d.period)).toEqual(['2026-07']);
@@ -326,7 +326,7 @@ describe('planBlocks', () => {
     const t = tx('2026-07-05', 'p');
     const drafts = planBlocks([t], {
       now: '2026-08-10', maxTxPerBlock: 4, fromPeriod: '2026-07',
-      recordedPeriods: new Map([[t.hash, '2026-07']]),
+      recordedPeriods: new Map([[txIdentity(t), '2026-07']]),
     });
     expect(drafts.filter((d) => d.period === '2026-07' && d.transactions.length === 0)).toEqual([]);
   });
@@ -338,15 +338,53 @@ describe('planBlocks', () => {
   });
 
   it('never lets a recorded period reopen a month the chain has already sealed', () => {
-    // A stale pending file could name a period that has since sealed. The
-    // recorded value wins over the clock, but never over the sealed floor.
+    // A stale or hand-edited file can name a month strictly before the tip —
+    // sealed and gone. Such a record is dropped rather than clamped: clamping
+    // it up to `firstOpenPeriod` would land the transaction in the TIP's own
+    // month, minting a second block in a month that had already closed, which
+    // is precisely what this test's name forbids.
     const t = tx('2026-05-05', 'p');
-    const drafts = planBlocks([t], {
+    const plan = planChain([t], {
       now: '2026-08-10', maxTxPerBlock: 4, fromPeriod: '2026-07',
-      recordedPeriods: new Map([[t.hash, '2026-05']]),
+      recordedPeriods: new Map([[txIdentity(t), '2026-05']]),
     });
-    expect(drafts.map((d) => d.period)).not.toContain('2026-05');
-    expect(drafts.filter((d) => d.transactions.length > 0).map((d) => d.period)).toEqual(['2026-07']);
+    // Nothing seals: neither 2026-05 nor the tip's 2026-07 gains a block.
+    expect(plan.drafts.filter((d) => d.transactions.length > 0)).toEqual([]);
+    expect(plan.drafts.map((d) => d.period)).not.toContain('2026-05');
+    // It is placed in the open month instead, exactly as if it were new.
+    expect(plan.open!.period).toBe('2026-08');
+    expect(plan.open!.transactions).toEqual([t]);
+  });
+
+  it('honours a recorded period equal to the tip, so a size-split remainder seals', () => {
+    // Reached by an entirely honest sequence: five posts in one month seal four
+    // and leave one open at that SAME period, so the record legitimately equals
+    // the tip. Once the month ends that remainder must seal there — a month
+    // being completed, not a closed one being reopened. Rejecting every record
+    // at or below the tip would strand it forever.
+    const t = tx('2026-07-05', 'e');
+    const plan = planChain([t], {
+      now: '2026-08-10', maxTxPerBlock: 4, fromPeriod: '2026-07',
+      recordedPeriods: new Map([[txIdentity(t), '2026-07']]),
+    });
+    expect(plan.drafts.filter((d) => d.transactions.length > 0).map((d) => d.period)).toEqual([
+      '2026-07',
+    ]);
+    expect(plan.open).toBeNull();
+  });
+
+  it('caps a recorded period that names a month which has not started', () => {
+    // A hand-edited far-future period must not open an unstarted month, and
+    // must not be re-persisted as the open block's period on the way out.
+    const t = tx('2026-08-05', 'p');
+    for (const recorded of ['2027-03', '9999-12']) {
+      const plan = planChain([t], {
+        now: '2026-08-20', maxTxPerBlock: 4, fromPeriod: '2026-07',
+        recordedPeriods: new Map([[txIdentity(t), recorded]]),
+      });
+      expect(plan.open!.period).toBe('2026-08');
+      expect(plan.drafts.every((d) => d.period <= '2026-08')).toBe(true);
+    }
   });
 
   it('throws when maxTxPerBlock is zero', () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { mkdtempSync, cpSync, writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, cpSync, writeFileSync, readFileSync, existsSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { buildChain, type BuildResult } from '../../src/chain/build';
@@ -233,13 +233,20 @@ describe('buildChain', () => {
 
     writeFileSync(target, readFileSync(target, 'utf8').replace('(v2)"', '(v3)"'));
     const third = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-12-10', config: CONFIG });
-    expect(pendingAmendments(third).map((t) => t.title)).toEqual(['Bài viết đầu tiên (v3)']);
-    expect(sealedAmendments(third)).toHaveLength(0);
 
-    const fourth = await buildChain({ postsDir, assetsDir, lockPath, now: '2027-01-10', config: CONFIG });
-    const sealed = sealedAmendments(fourth);
-    expect(sealed.map((t) => t.title)).toEqual(['Bài viết đầu tiên (v3)']);
-    expect((await verifyChain(fourth.chain)).ok).toBe(true);
+    // The replacement INHERITS 2026-11 — the month its predecessor was really
+    // waiting in — because placement is keyed on identity, not on the content
+    // hash that the edit changed. 2026-11 has now ended, so it seals there.
+    expect(sealedAmendments(third).map((t) => t.title)).toEqual(['Bài viết đầu tiên (v3)']);
+    expect(third.pending).toBeNull();
+
+    const block = third.chain.blocks.find((b) =>
+      b.transactions.some((t) => t.type === 'amendment'),
+    )!;
+    expect(block.period).toBe('2026-11');
+    // And 2026-11 did NOT also mint an empty block denying it.
+    expect(third.chain.blocks.filter((b) => b.period === '2026-11')).toHaveLength(1);
+    expect((await verifyChain(third.chain)).ok).toBe(true);
   });
 
   it('refuses a reused filename carrying a different date', async () => {
@@ -318,6 +325,135 @@ describe('buildChain', () => {
       .map((t) => t.slug);
     expect(new Set(postSlugs).size).toBe(postSlugs.length);
     expect(sealedAmendments(after)).toHaveLength(2);
+  });
+
+  it('never seals a month empty that was holding a pending transaction', async () => {
+    // The transaction hash is content-derived, so editing a still-pending post
+    // mints a new hash. Keyed on the hash, the placement record was orphaned:
+    // the replacement was re-placed in the current month and the month it had
+    // really been sitting in sealed EMPTY — a permanent, mined block asserting
+    // that nothing entered the chain that month. Two ordinary edits a month
+    // apart, no tampering.
+    const { postsDir, assetsDir, lockPath } = workspace();
+    await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
+    const target = join(postsDir, '2026-06-15-first.md');
+
+    writeFileSync(target, readFileSync(target, 'utf8') + '\nSửa lần một.\n');
+    const first = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-10-10', config: CONFIG });
+    expect(first.pending!.period).toBe('2026-10');
+
+    writeFileSync(target, readFileSync(target, 'utf8') + '\nSửa lần hai.\n');
+    const second = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-11-10', config: CONFIG });
+
+    const october = second.chain.blocks.filter((b) => b.period === '2026-10');
+    expect(october).toHaveLength(1);
+    expect(october[0]!.txCount).toBe(1);
+    expect(october[0]!.transactions[0]!.type).toBe('amendment');
+    expect((await verifyChain(second.chain)).ok).toBe(true);
+  });
+
+  it('keeps a pending post in its recorded month when it is edited within that month', async () => {
+    // Same root cause, but with no month boundary crossed: the placement must
+    // be *unchanged*, not re-derived to the same answer by luck. A second
+    // sealed block is what proves the record was carried, since a fresh
+    // placement would put it in the current month too.
+    const { postsDir, assetsDir, lockPath } = workspace();
+    await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
+    const target = join(postsDir, '2026-06-15-first.md');
+
+    writeFileSync(target, readFileSync(target, 'utf8') + '\nSửa lần một.\n');
+    const before = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-10-02', config: CONFIG });
+    expect(before.pending!.period).toBe('2026-10');
+    const recordedHeight = before.pending!.height;
+
+    // Edited again, same month, later in the month.
+    writeFileSync(target, readFileSync(target, 'utf8') + '\nSửa lần hai.\n');
+    const after = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-10-28', config: CONFIG });
+
+    expect(after.pending!.period).toBe('2026-10');
+    expect(after.pending!.height).toBe(recordedHeight);
+    expect(after.unrecorded).toEqual([]);
+    // The hash did change — so this is the carried record, not a coincidence.
+    expect(after.pending!.transactions[0]!.hash).not.toBe(before.pending!.transactions[0]!.hash);
+  });
+
+  it('reports unsealed transactions that no record accounts for', async () => {
+    // The whole guarantee rests on a sibling file a user can delete, `git
+    // clean`, or lose in a merge. Losing it silently reinstates the sliding
+    // bug, so the build must say so rather than quietly re-placing them.
+    const { postsDir, assetsDir, lockPath } = workspace();
+    const pendingPath = join(dirname(lockPath), 'chain.pending.json');
+    await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
+
+    const target = join(postsDir, '2026-06-15-first.md');
+    writeFileSync(target, readFileSync(target, 'utf8') + '\nMột dòng sửa lại.\n');
+
+    // First placement: nothing has recorded it yet, so it is reported. A build
+    // cannot tell a genuinely new transaction from one whose record was lost —
+    // both are "placed now, with nothing accounting for them".
+    const fresh = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-10-10', config: CONFIG });
+    expect(fresh.unrecorded).toHaveLength(1);
+
+    // Once recorded, the next build is quiet: the record accounts for it.
+    const recorded = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-10-20', config: CONFIG });
+    expect(recorded.unrecorded).toEqual([]);
+
+    // The operator deletes / git-cleans / loses the file in a merge.
+    rmSync(pendingPath);
+    const lost = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-10-25', config: CONFIG });
+    expect(lost.unrecorded).toHaveLength(1);
+    expect(lost.unrecorded[0]!.type).toBe('amendment');
+
+    // The rewritten record covers it again.
+    const recovered = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-10-26', config: CONFIG });
+    expect(recovered.unrecorded).toEqual([]);
+  });
+
+  it('writes a byte-identical pending file when re-run at the same clock', async () => {
+    // The lock has this guarantee; the open block is the artifact this task
+    // added and it is rewritten on every build.
+    const { postsDir, assetsDir, lockPath } = workspace();
+    const pendingPath = join(dirname(lockPath), 'chain.pending.json');
+    await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
+    const target = join(postsDir, '2026-06-15-first.md');
+    writeFileSync(target, readFileSync(target, 'utf8') + '\nMột dòng sửa lại.\n');
+
+    await buildChain({ postsDir, assetsDir, lockPath, now: '2026-11-10', config: CONFIG });
+    const once = readFileSync(pendingPath, 'utf8');
+    await buildChain({ postsDir, assetsDir, lockPath, now: '2026-11-10', config: CONFIG });
+    expect(readFileSync(pendingPath, 'utf8')).toBe(once);
+  });
+
+  it('seals the open block on the size rule while its recorded month is still current', () => {
+    // The month-end half of `isFull || isPast` has many build-level guards;
+    // the size half has none with a recorded period present.
+    return (async () => {
+      const { postsDir, assetsDir, lockPath } = workspace();
+      await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
+
+      // One post now, recorded in 2026-10...
+      writeFileSync(
+        join(postsDir, '2026-10-01-mot.md'),
+        '---\ntitle: "Một"\ndate: 2026-10-01\ntags: [essay]\n---\n\nNội dung.\n',
+      );
+      const opened = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-10-05', config: CONFIG });
+      expect(opened.pending!.period).toBe('2026-10');
+
+      // ...then three more in the same still-current month fill the block.
+      for (const d of ['02', '03', '04']) {
+        writeFileSync(
+          join(postsDir, `2026-10-${d}-them.md`),
+          `---\ntitle: "Thêm ${d}"\ndate: 2026-10-${d}\ntags: [essay]\n---\n\nNội dung.\n`,
+        );
+      }
+      const filled = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-10-20', config: CONFIG });
+
+      const october = filled.chain.blocks.filter((b) => b.period === '2026-10');
+      expect(october).toHaveLength(1);
+      expect(october[0]!.txCount).toBe(4);
+      expect(filled.pending).toBeNull();
+      expect((await verifyChain(filled.chain)).ok).toBe(true);
+    })();
   });
 
   it('ignores a pending file recorded against a different tip', async () => {

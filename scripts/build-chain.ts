@@ -11,7 +11,7 @@ try {
   process.exit(1);
 }
 
-const { chain, minted, amendments, pending } = await buildChain({
+const { chain, minted, amendments, pending, unrecorded } = await buildChain({
   postsDir: 'content/posts',
   assetsDir: 'content/assets',
   lockPath: 'chain.lock.json',
@@ -34,6 +34,29 @@ console.log(`  height      ${chain.blocks.length}`);
 console.log(`  txns        ${txCount}`);
 console.log(`  assets      ${chain.assets.length}`);
 console.log(`  integrity   ${result.ok ? 'OK' : 'FAILED'}`);
+
+// The open block lives in a second artifact. Committing chain.lock.json alone
+// loses it, and losing it silently restores the sliding bug this design exists
+// to remove — so say so every time one is written.
+if (pending !== null) {
+  console.log(`  →  chain.pending.json records the open ${pending.period} block; commit it beside chain.lock.json`);
+}
+
+if (unrecorded.length > 0) {
+  console.error('');
+  console.error(
+    `  WARNING  ${unrecorded.length} unsealed transaction(s) had no recorded placement, ` +
+      `though the tip's month (${chain.blocks.at(-1)!.period}) is already over:`,
+  );
+  for (const t of unrecorded) {
+    console.error(`    ${t.type} ${t.slug ?? `amending ${t.amends}`}`);
+  }
+  console.error(
+    '  If chain.pending.json was deleted or lost, their placement has just been reassigned\n' +
+      '  to the current month, and the month they were really waiting in will seal empty.\n' +
+      '  If they are simply new, this is expected — commit chain.pending.json to record them.',
+  );
+}
 
 if (!result.ok) {
   // A registry-only failure has no failing block to print, so without this the
