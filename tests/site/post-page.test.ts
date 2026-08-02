@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readDist } from './dist';
 import { getBlocks, getPosts } from '../../src/site/chain-data';
+import { PREFS_INLINE_SCRIPT } from '../../src/site/prefs-script';
 
 const slug = () => getPosts()[0]!.slug!;
 const page = () => readDist(`tx/${slug()}/index.html`);
@@ -63,8 +64,25 @@ describe('post page', () => {
     expect(page()).toContain('Khối đầu tiên');
   });
 
-  it('carries the reader preference attributes like every other page', () => {
-    expect(page()).toContain('data-palette');
+  it('runs the blocking preferences script before its first stylesheet', () => {
+    // This replaces `expect(page()).toContain('data-palette')`, which was
+    // vacuous: the only `data-palette` in a served page is inside Base.astro's
+    // inline script, which every page carries whether or not it renders a
+    // TxPanel — `dist/index.html` matches it too — and the served
+    // `<html lang="vi">` tag has no such attribute at all, since the script
+    // writes it at runtime. It could not fail for any reason to do with this
+    // page.
+    //
+    // What the post page actually has to do is what prefs.test.ts pins for the
+    // homepage: carry that script, in the head, ahead of any stylesheet, so
+    // the reader's palette is set before first paint and there is no flash.
+    const html = page();
+    const script = html.indexOf(PREFS_INLINE_SCRIPT);
+    expect(script, 'the post page does not carry the preferences script').toBeGreaterThan(-1);
+    const firstStylesheet = html.indexOf('<link rel="stylesheet"');
+    expect(firstStylesheet, 'the post page links no stylesheet at all').toBeGreaterThan(-1);
+    expect(script).toBeLessThan(firstStylesheet);
+    expect(script).toBeLessThan(html.indexOf('<body'));
   });
 
   it('sets a per-post title and description', () => {
