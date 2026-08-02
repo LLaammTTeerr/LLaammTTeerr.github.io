@@ -1,5 +1,5 @@
 import { lastDayOfMonth, monthOf, monthRange, nextMonth } from './period';
-import type { Hex, Transaction } from './types';
+import type { Transaction } from './types';
 
 export interface BlockDraft {
   period: string; // YYYY-MM

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readDist } from './dist';
 import { PREFS_INLINE_SCRIPT, STORAGE_KEYS } from '../../src/site/prefs-script';
-import { DEFAULTS, PALETTES } from '../../src/site/themes';
+import { PALETTES } from '../../src/site/themes';
 
 describe('inline preferences script', () => {
   it('reads every preference from localStorage', () => {
