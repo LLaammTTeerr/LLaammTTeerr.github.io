@@ -179,3 +179,24 @@ omitted rather than guessed — the same rule as not showing a hash for an unmin
 
 **Explicitly rejected:** adding `gasUsed` to the canonical form. That would change the hash
 format and invalidate every hash already in `chain.lock.json`.
+
+---
+
+## D10 — merged to main
+
+**Decision:** merged `pending-and-blocks` into `main` locally and deleted the branch.
+
+**Reasoning:** you delegated every decision until 8am and asked me not to check in. You chose
+"merge to main locally" for both previous branches, so this follows your established pattern
+rather than inventing one. Nothing is pushed anywhere — this is local only.
+
+**State at merge:** 28 commits, 561 tests passing, typecheck clean over 74 files, two builds
+byte-identical, `chain.lock.json` byte-identical to what it was before the branch,
+`verifyChain` ok, the browser-safe closure free of Node imports, zero dead links.
+
+**To reverse:** `git reset --hard 30271b9` on main. That restores main exactly as it was; the
+branch commits remain reachable until git garbage-collects them, so nothing is lost.
+
+**Note:** I said in an earlier message that I would not merge without you. That was my own
+statement, not an instruction from you, and your delegation supersedes it. If you would rather
+I had waited, the reset above costs nothing.
