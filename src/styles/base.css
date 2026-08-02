@@ -37,6 +37,27 @@ a { color: inherit; }
 
 main { padding: 1.25rem; max-width: 64rem; margin: 0 auto; }
 
+/* A route's own heading. In base.css rather than with a component because a
+   page header belongs to no component: Base.astro loads this file on every
+   route, so a new page cannot render its title unstyled by forgetting an
+   import. Colours come from tokens only — eleven palettes redefine them. */
+.page-head {
+  display: flex; flex-wrap: wrap; gap: 0.25rem 0.9rem; align-items: baseline;
+  margin: 0 0 1.25rem; padding-bottom: 0.7rem; border-bottom: 1px solid var(--line);
+}
+.page-head h1 {
+  font-family: var(--mono); font-size: 1.3rem; font-weight: 600; margin: 0;
+  letter-spacing: 0.01em; line-height: 1.2;
+}
+.page-head .sub {
+  font-family: var(--mono); font-size: 0.68rem; letter-spacing: 0.11em;
+  text-transform: uppercase; color: var(--dim);
+}
+
+.notfound { max-width: 40rem; }
+.notfound p { color: var(--dim); }
+.notfound a { color: var(--acc); text-underline-offset: 3px; }
+
 :where(a, button, summary):focus-visible {
   outline: 2px solid var(--acc); outline-offset: 2px;
 }

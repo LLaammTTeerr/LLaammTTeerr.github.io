@@ -1,0 +1,37 @@
+---
+import Base from '../layouts/Base.astro';
+import BlockCard from '../components/BlockCard.astro';
+import { getBlocks, getPendingBlock, getStats } from '../site/chain-data';
+import type { AnyBlockView } from '../site/chain-data';
+// No chain.css import here: BlockCard imports the styles it needs and
+// `.page-head` lives in base.css, which Base.astro always loads — so this
+// route cannot ship unstyled by forgetting an import.
+
+/**
+ * §6 — every block on the chain, newest first, with the open one at the top.
+ *
+ * The open block has no page of its own (see the note in BlockCard on why a
+ * predicted height must not become a URL), so this is where it is reachable.
+ * It is absent whenever nothing is unsealed, which is most of the time; the
+ * list is then exactly the sealed history.
+ *
+ * `height` on the stats line is the tip's committed height, not the number of
+ * cards below — a chain whose tip is at height 1 has two blocks, and the
+ * header must say what the block itself says (§14).
+ */
+const pending = getPendingBlock();
+const blocks: AnyBlockView[] = pending === null ? getBlocks() : [pending, ...getBlocks()];
+const stats = getStats();
+---
+
+<Base title="Blocks — Blogchain" description="Mọi khối trên chuỗi, mới nhất trước.">
+  <div class="page-head">
+    <h1>Blocks</h1>
+    <span class="sub">Chain height <span class="num">{stats.height}</span></span>
+  </div>
+  <div class="chain">
+    {blocks.map((block, i) => (
+      <BlockCard block={block} isNewest={i === 0} isOldest={i === blocks.length - 1} />
+    ))}
+  </div>
+</Base>

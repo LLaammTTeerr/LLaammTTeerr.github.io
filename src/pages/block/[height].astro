@@ -1,0 +1,96 @@
+---
+import Base from '../../layouts/Base.astro';
+import WorkMeter from '../../components/WorkMeter.astro';
+import { getBlocks, researchHours, splitHashWork } from '../../site/chain-data';
+// `.card`, `.meta`, `.hash`, `.num` and `.txs` are BlockCard's classes, used
+// verbatim here so the detail page reads as the same chrome as the list
+// rather than drifting into a second style.
+import '../../styles/chain.css';
+
+/**
+ * §6 — one sealed block.
+ *
+ * Sealed blocks only. The open block's height is a prediction that a size
+ * split can still change, so a `/block/<height>` for it would be a URL naming
+ * a height the chain has not committed to; it lives on `/blocks` instead.
+ *
+ * No clock is read here or passed in: the routes are a function of
+ * `chain.lock.json` alone (§14), so the same chain builds the same pages on
+ * any day.
+ */
+export function getStaticPaths() {
+  return getBlocks().map((block) => ({ params: { height: String(block.height) }, props: { block } }));
+}
+
+const { block } = Astro.props;
+
+// The whole hash, not a `shortHash`: this page exists to be verified from,
+// and verification has to work with JavaScript off — so the value is present
+// as text rather than behind a copy control. The mined leading zeros are
+// marked, because those are the proof of work.
+const work = splitHashWork(block.hash, block.difficulty);
+
+// The merkle root gets no such marking, at any length. It is computed from
+// the transactions, never mined against a target, so no prefix of it is
+// proven — and block 1's root is 64 zeros, which highlighting would dress up
+// as the most spectacular proof of work on the chain.
+
+// Matched by hash rather than by `height - 1`: the parent is whichever block
+// this one's committed `prevHash` names. Genesis names the zero hash, which
+// is no block, and gets no link.
+const parent = getBlocks().find((b) => b.hash === block.prevHash) ?? null;
+
+// §3.8 — an undeclared research figure is an em dash, not `0.0 giờ`.
+const hours = researchHours(block.value);
+---
+
+<Base
+  title={`Block #${block.height} — Blogchain`}
+  description={`Khối #${block.height} · ${block.period} · ${block.txCount} giao dịch`}
+>
+  <div class="page-head">
+    <h1 id="block-heading">Block #{block.height}</h1>
+    <span class="sub">{block.period}{block.isGenesis ? ' · genesis' : ''}</span>
+  </div>
+
+  <article class={`card${block.isEmpty ? ' empty' : ''}`} data-block-height={block.height} aria-labelledby="block-heading">
+    <div class="card-top">
+      <span class="per">Block header</span>
+      <span class="stamp">Sealed</span>
+    </div>
+    <dl class="meta">
+      <dt>Hash</dt>
+      <dd><span class="hash">{work.marker}<mark class="zeros">{work.zeros}</mark>{work.rest}</span></dd>
+      <dt>Merkle root</dt>
+      <dd><span class="hash">{block.merkleRoot}</span></dd>
+      <dt>Prev hash</dt>
+      <dd>{parent ? (
+        <a class="hash" href={`/block/${parent.height}`}>{block.prevHash}</a>
+      ) : (
+        <span class="hash">{block.prevHash}</span>
+      )}</dd>
+      <dt>Timestamp</dt><dd>{block.timestamp}</dd>
+      <dt>Txns</dt><dd><span class="num">{block.txCount}</span></dd>
+      <dt>Gas used</dt><dd><span class="num">{block.gasUsed}</span> từ</dd>
+      <dt>Value</dt>
+      <dd>{hours ? <Fragment><span class="num">{hours}</span> giờ nghiên cứu</Fragment> : '—'}</dd>
+      <dt>Difficulty</dt><dd><span class="num">{block.difficulty}</span></dd>
+    </dl>
+    <WorkMeter nonce={block.nonce} difficulty={block.difficulty} />
+    {block.transactions.length > 0 ? (
+      <ul class="txs">
+        {block.transactions.map((tx) => {
+          const txHours = researchHours(tx.value);
+          return (
+            <li>
+              <h2 class="t">{tx.slug ? <a href={`/tx/${tx.slug}`}>{tx.title}</a> : (tx.title ?? 'Amendment')}</h2>
+              <span class="g">{tx.gasUsed} từ · {txHours ? `${txHours} giờ` : '—'}</span>
+            </li>
+          );
+        })}
+      </ul>
+    ) : (
+      <p class="silent">Không có bài viết nào trong tháng này. Khối vẫn được đào.</p>
+    )}
+  </article>
+</Base>

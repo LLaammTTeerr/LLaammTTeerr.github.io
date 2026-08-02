@@ -19,12 +19,24 @@ const { block, isNewest, isOldest } = Astro.props;
 const hashWork = block.sealed ? splitHashWork(block.shortHash, block.difficulty) : null;
 const merkleShort = block.sealed ? shortHash(block.merkleRoot) : null;
 const isEmpty = block.sealed && block.isEmpty;
+
+// The gutter number is the block's identity, so it is what links to the
+// block's own page — but only once the block is sealed. The open block's
+// height is a prediction: a size split can seal a block ahead of it and move
+// it. `/block/<height>` exists for sealed blocks alone, so linking the open
+// one there would name a height the chain has not committed to, which is the
+// same class of falsehood as printing a hash it has not mined. The open block
+// is already on this page, which is where it stays reachable.
 ---
 
 <div class="row" data-block={block.height}>
   <div class="gutter">
     <span class="spine" data-first={isNewest} data-last={isOldest}></span>
-    <span class={`n${isEmpty ? ' q' : ''}`}>#{block.height}</span>
+    <span class={`n${isEmpty ? ' q' : ''}`}>{block.sealed ? (
+      <a href={`/block/${block.height}`}>#{block.height}</a>
+    ) : (
+      <Fragment>#{block.height}</Fragment>
+    )}</span>
     <span class={`dot${block.sealed ? (isEmpty ? ' q' : '') : ' open'}`}></span>
   </div>
   <article class={`card${isEmpty ? ' empty' : ''}`} aria-labelledby={`block-${block.height}-heading`}>

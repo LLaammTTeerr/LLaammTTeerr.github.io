@@ -1,0 +1,31 @@
+---
+import Base from '../layouts/Base.astro';
+
+/**
+ * The chrome stays English — `404`, `Not found` — and the prose is
+ * author-facing, so it is Vietnamese, like every other sentence addressed to
+ * a reader on this site.
+ *
+ * Both links go to pages this build actually produces. A "did you mean" list
+ * of routes that do not exist yet would be a nicer-looking dead end.
+ */
+---
+
+<Base
+  title="404 — Blogchain"
+  description="Không có gì ở địa chỉ này trên chuỗi."
+>
+  <div class="page-head">
+    <h1>404</h1>
+    <span class="sub">Not found</span>
+  </div>
+  <div class="notfound">
+    <p>
+      Không có gì ở địa chỉ này trên chuỗi. Có thể liên kết đã cũ, hoặc khối và giao
+      dịch bạn tìm chưa từng được ghi vào sổ.
+    </p>
+    <p>
+      <a href="/">Về trang chủ</a> · <a href="/blocks">Xem toàn bộ các khối</a>
+    </p>
+  </div>
+</Base>

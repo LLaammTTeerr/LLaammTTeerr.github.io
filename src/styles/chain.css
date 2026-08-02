@@ -18,6 +18,10 @@
 .gutter .n { position: absolute; left: 0; top: 0.48rem; width: 2.15rem; text-align: right;
   font-family: var(--mono); font-size: 0.92rem; line-height: 1; color: var(--acc); }
 .gutter .n.q { color: var(--dim); }
+/* The height is the link to the block's own page (sealed blocks only), and
+   inherits the gutter's accent rather than declaring a colour of its own. */
+.gutter .n a { color: inherit; text-decoration: none; }
+.gutter .n a:hover { text-decoration: underline; text-underline-offset: 3px; }
 .gutter .dot { position: absolute; left: calc(2.6rem + 1.5px - 0.35rem); top: 0.6rem;
   width: 0.7rem; height: 0.7rem; border-radius: 50%; background: var(--bg);
   border: 2px solid var(--acc); }
@@ -45,6 +49,11 @@
    from the reader's own palette carries the emphasis instead, so it reads
    correctly under all eleven themes rather than fighting one of them. */
 .hash mark.zeros { background: none; color: var(--acc); font-weight: 700; }
+/* A hash that is itself a link (a block's `prevHash`, on its detail page)
+   keeps the hash colour and takes its underline from the rule lines, so it
+   reads as a hash first and a link second — until it is hovered. */
+a.hash { text-underline-offset: 3px; text-decoration-color: var(--line2); }
+a.hash:hover { text-decoration-color: currentColor; }
 .num { color: var(--c-num); font-variant-numeric: tabular-nums; }
 
 .txs { list-style: none; margin: 0.9rem 0 0; padding: 0.8rem 0 0; border-top: 1px solid var(--line); }

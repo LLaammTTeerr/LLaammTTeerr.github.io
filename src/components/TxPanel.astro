@@ -44,7 +44,14 @@ const hours = researchHours(tx.value);
       <span class="hash">{tx.hash}</span>
     )}</dd>
     <dt>Block</dt>
-    <dd>{block ? <a href={`/block/${block.height}`}>#{block.height}</a> : '—'} · {block?.period}{pending ? ' · đang mở' : ''}</dd>
+    <dd>{block ? (
+      // A sealed block has a page of its own; the open block does not. Its
+      // height is a prediction — a size split can seal a block ahead of it and
+      // move it — so `/block/<height>` names a height the chain has not
+      // committed to. The open block lives on `/blocks`, and that is where a
+      // pending transaction points: an honest link rather than a dead one.
+      <a href={pending ? '/blocks' : `/block/${block.height}`}>#{block.height}</a>
+    ) : '—'} · {block?.period}{pending ? ' · đang mở' : ''}</dd>
     <dt>Timestamp</dt><dd>{tx.date}</dd>
     <dt>From</dt><dd><span class="addr">{tx.from}</span></dd>
     <dt>To</dt>

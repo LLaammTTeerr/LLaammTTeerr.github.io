@@ -217,8 +217,15 @@ describe('a post published into the open block', () => {
     // getBlocks() is sealed-only, so a pending transaction found its block
     // there as `undefined` and the field rendered `—`. Height and period are
     // read from the record the build wrote, not written down here.
+    //
+    // The link goes to `/blocks`, not to `/block/<height>`: the open block has
+    // no page of its own, because its height is a prediction a size split can
+    // still change (see the note in TxPanel.astro). That the field *names* the
+    // predicted height is the point of this test; where it points is pinned in
+    // tests/site/block-routes.test.ts, against a build that shows no such page
+    // exists.
     expect(pendingPage()).toContain(
-      `<dd><a href="/block/${record.height}">#${record.height}</a> · ${record.period} · đang mở</dd>`,
+      `<dd><a href="/blocks">#${record.height}</a> · ${record.period} · đang mở</dd>`,
     );
   });
 
