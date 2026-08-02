@@ -26,9 +26,13 @@ export interface Transaction {
   to: Hex[];                // tag/series addresses; empty for amendments
   contentHash: Hex;
   /**
-   * §3.2b — content hashes of the files this transaction's body references,
-   * sorted. Committed to the transaction hash, so swapping a published
-   * diagram invalidates the post that uses it.
+   * §3.2b — content hashes of the files this transaction's body references.
+   * Committed to the transaction hash, so swapping a published diagram
+   * invalidates the post that uses it. `toTransaction` stores these sorted
+   * as a side effect of building the canonical form, but nothing downstream
+   * depends on that — canonicalization sorts independently, so a caller
+   * (e.g. one round-tripping through the lock) must not assume the stored
+   * order is significant.
    */
   assets: Hex[];
   gasUsed: number;          // word count; 0 for amendments
@@ -62,8 +66,20 @@ export interface Block extends BlockHeader {
   transactions: Transaction[];
 }
 
+/** §3.2b — a minted asset's frozen identity on the chain. */
+export interface AssetRecord {
+  tokenId: number;
+  hash: Hex;
+  file: string;
+  mime: string;
+  bytes: number;
+  /** Height of the block whose transaction first referenced this asset. */
+  mintedIn: number;
+}
+
 export interface Chain {
   version: 1;
   difficulty: number;
   blocks: Block[];
+  assets: AssetRecord[];
 }

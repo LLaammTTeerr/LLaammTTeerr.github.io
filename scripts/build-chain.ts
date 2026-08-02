@@ -13,6 +13,7 @@ try {
 
 const { chain, minted, amendments } = await buildChain({
   postsDir: 'content/posts',
+  assetsDir: 'content/assets',
   lockPath: 'chain.lock.json',
   now,
   config: CHAIN_CONFIG,
@@ -26,6 +27,7 @@ console.log(`  sealed      ${minted} new block(s)`);
 if (amendments > 0) console.log(`  amendments  ${amendments} sealed post(s) edited`);
 console.log(`  height      ${chain.blocks.length}`);
 console.log(`  txns        ${txCount}`);
+console.log(`  assets      ${chain.assets.length}`);
 console.log(`  integrity   ${result.ok ? 'OK' : 'FAILED'}`);
 
 if (!result.ok) {

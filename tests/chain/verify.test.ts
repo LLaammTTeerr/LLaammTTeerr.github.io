@@ -104,7 +104,7 @@ async function makeBlock(
 async function validChain(): Promise<Chain> {
   const b0 = await makeBlock(0, ZERO, [await tx('a')]);
   const b1 = await makeBlock(1, b0.hash, [await tx('b'), await tx('c')]);
-  return { version: 1, difficulty: DIFFICULTY, blocks: [b0, b1] };
+  return { version: 1, difficulty: DIFFICULTY, blocks: [b0, b1], assets: [] };
 }
 
 describe('verifyChain', () => {
@@ -117,12 +117,12 @@ describe('verifyChain', () => {
 
   it('accepts an empty block', async () => {
     const b0 = await makeBlock(0, ZERO, []);
-    const result = await verifyChain({ version: 1, difficulty: DIFFICULTY, blocks: [b0] });
+    const result = await verifyChain({ version: 1, difficulty: DIFFICULTY, blocks: [b0], assets: [] });
     expect(result.ok).toBe(true);
   });
 
   it('accepts a chain with no blocks', async () => {
-    const result = await verifyChain({ version: 1, difficulty: DIFFICULTY, blocks: [] });
+    const result = await verifyChain({ version: 1, difficulty: DIFFICULTY, blocks: [], assets: [] });
     expect(result.ok).toBe(true);
     expect(result.blocks).toEqual([]);
   });
@@ -181,7 +181,7 @@ describe('verifyChain', () => {
 
     // Delete the middle block. b2's own header is untouched and still hashes
     // correctly — only its linkage to a parent is now wrong.
-    const spliced = { version: 1 as const, difficulty: DIFFICULTY, blocks: [b0, b2] };
+    const spliced = { version: 1 as const, difficulty: DIFFICULTY, blocks: [b0, b2], assets: [] };
     const result = await verifyChain(spliced);
 
     expect(result.ok).toBe(false);
@@ -245,7 +245,7 @@ describe('transaction verification', () => {
     const post = await tx('a');
     const b0 = await makeBlock(0, ZERO, [post]);
     const b1 = await makeBlock(1, b0.hash, [await amendmentTx(post.hash, 'Tiêu đề mới')]);
-    const result = await verifyChain({ version: 1, difficulty: DIFFICULTY, blocks: [b0, b1] });
+    const result = await verifyChain({ version: 1, difficulty: DIFFICULTY, blocks: [b0, b1], assets: [] });
     expect(result.ok).toBe(true);
   });
 
@@ -254,7 +254,7 @@ describe('transaction verification', () => {
     const b0 = await makeBlock(0, ZERO, [post]);
     const b1 = await makeBlock(1, b0.hash, [await amendmentTx(post.hash, 'Tiêu đề mới')]);
     b1.transactions[0]!.title = 'HACKED';
-    const result = await verifyChain({ version: 1, difficulty: DIFFICULTY, blocks: [b0, b1] });
+    const result = await verifyChain({ version: 1, difficulty: DIFFICULTY, blocks: [b0, b1], assets: [] });
     expect(result.ok).toBe(false);
     expect(result.blocks[1]!.txOk).toBe(false);
   });
@@ -266,14 +266,14 @@ describe('difficulty', () => {
     // Proof of work is checked against the target each block committed to.
     const b0 = await makeBlock(0, ZERO, [await tx('a')], 1);
     const b1 = await makeBlock(1, b0.hash, [await tx('b')], 3);
-    const result = await verifyChain({ version: 1, difficulty: 1, blocks: [b0, b1] });
+    const result = await verifyChain({ version: 1, difficulty: 1, blocks: [b0, b1], assets: [] });
     expect(result.ok).toBe(true);
     expect(result.blocks.every((b) => b.powOk)).toBe(true);
   });
 
   it('rejects a block mined below the chain floor', async () => {
     const b0 = await makeBlock(0, ZERO, [await tx('a')], 1);
-    const result = await verifyChain({ version: 1, difficulty: 2, blocks: [b0] });
+    const result = await verifyChain({ version: 1, difficulty: 2, blocks: [b0], assets: [] });
     expect(result.ok).toBe(false);
     expect(result.blocks[0]!.powOk).toBe(false);
     expect(result.blocks[0]!.hashOk).toBe(true);
@@ -284,7 +284,7 @@ describe('difficulty', () => {
     // Claim difficulty 3 in the header and re-derive nothing: the recorded
     // hash no longer has enough leading zeros for what it claims.
     const forged = { ...b0, difficulty: 3 };
-    const result = await verifyChain({ version: 1, difficulty: 1, blocks: [forged] });
+    const result = await verifyChain({ version: 1, difficulty: 1, blocks: [forged], assets: [] });
     expect(result.ok).toBe(false);
     expect(result.blocks[0]!.powOk).toBe(false);
   });
@@ -306,6 +306,7 @@ describe('structurally invalid input', () => {
       version: 1,
       difficulty: DIFFICULTY,
       blocks: [null as unknown as Block],
+      assets: [],
     });
     expect(result.ok).toBe(false);
     expect(result.blocks[0]!.reason).toMatch(/not an object/);
@@ -332,6 +333,7 @@ describe('structurally invalid input', () => {
       version: 1,
       difficulty: DIFFICULTY,
       blocks: 'nope' as unknown as Block[],
+      assets: [],
     });
     expect(result.ok).toBe(false);
     expect(result.blocks).toEqual([]);
@@ -435,7 +437,7 @@ describe('structurally invalid input', () => {
     const b1 = await makeBlock(1, b0.hash, [await amendmentTx(post.hash, 'Tiêu đề mới')]);
     delete (b1.transactions[0] as unknown as { research?: unknown }).research;
 
-    const chain = { version: 1 as const, difficulty: DIFFICULTY, blocks: [b0, b1] };
+    const chain = { version: 1 as const, difficulty: DIFFICULTY, blocks: [b0, b1], assets: [] };
     await expect(verifyChain(chain)).resolves.toBeDefined();
     const result = await verifyChain(chain);
     expect(result.ok).toBe(false);

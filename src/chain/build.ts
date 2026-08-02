@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ChainConfig } from '../../chain.config';
 import { identityAddress } from './address';
+import { hashAssetFile, referencedAssets, type AssetFile } from './asset';
 import { canonicalAmendmentTx, canonicalPostTx } from './canonical';
 import { sha256Hex } from './hash';
 import { readLock, writeLock } from './lock';
@@ -16,6 +17,7 @@ const ZERO_HASH = '0x' + '00'.repeat(32);
 
 export interface BuildOptions {
   postsDir: string;
+  assetsDir: string;
   lockPath: string;
   /** Injected clock, YYYY-MM-DD. */
   now: string;
@@ -30,20 +32,35 @@ export interface BuildResult {
   amendments: number;
 }
 
-function readPostTransactions(postsDir: string, from: Hex): Promise<Transaction[]> {
-  const files = readdirSync(postsDir)
+async function readPostTransactions(
+  postsDir: string,
+  assetsDir: string,
+  from: Hex,
+): Promise<{ txs: Transaction[]; files: Map<Hex, AssetFile> }> {
+  const names = readdirSync(postsDir)
     .filter((f) => f.endsWith('.md'))
     .sort();
-  return Promise.all(
-    files.map((file) => {
-      const path = join(postsDir, file);
-      return toTransaction(parsePost(path, readFileSync(path, 'utf8')), from);
-    }),
-  );
+
+  const txs: Transaction[] = [];
+  const files = new Map<Hex, AssetFile>();
+
+  for (const name of names) {
+    const path = join(postsDir, name);
+    const post = parsePost(path, readFileSync(path, 'utf8'));
+    const resolved: AssetFile[] = [];
+    for (const file of referencedAssets(post.body)) {
+      const asset = await hashAssetFile(assetsDir, file, path);
+      resolved.push(asset);
+      files.set(asset.hash, asset);
+    }
+    txs.push(await toTransaction(post, from, resolved));
+  }
+
+  return { txs, files };
 }
 
 /**
- * The state a transaction asserts a post is in, as a `tx/1` hash.
+ * The state a transaction asserts a post is in, as a `post/1` hash.
  *
  * For a post that is its own hash. For an amendment it is the hash the post
  * *would* have if it were published today with the amended metadata and body —
@@ -73,7 +90,7 @@ function stateHash(tx: Transaction): Promise<Hex> | null {
  * amendment transaction rather than a rewrite. Amendments already recorded in
  * the lock are not re-emitted.
  *
- * Detection is on the full `tx/1` hash, not the content hash: a retitle, a tag
+ * Detection is on the full `post/1` hash, not the content hash: a retitle, a tag
  * change or a corrected research figure leaves the body untouched, and
  * comparing content hashes would let every such edit vanish — no amendment, no
  * transaction, no warning, and stale metadata on the chain forever.
@@ -123,7 +140,7 @@ async function detectAmendments(
         research: live.value,
         from,
         contentHash: live.contentHash,
-        assets: [],
+        assets: live.assets,
       }),
     );
     out.push({
@@ -137,7 +154,7 @@ async function detectAmendments(
       from,
       to: [],
       contentHash: live.contentHash,
-      assets: [],
+      assets: live.assets,
       // §3.9 — an amendment is worth 0 gas and 0 value on purpose, so block
       // aggregation cannot re-charge the word count and research hours already
       // counted in the block that sealed the original. It looks inconsistent
@@ -177,7 +194,11 @@ export async function buildChain(opts: BuildOptions): Promise<BuildResult> {
     sealedTxs.filter((t) => t.type === 'post').map((t) => t.slug),
   );
 
-  const live = await readPostTransactions(opts.postsDir, from);
+  const { txs: live, files: assetFiles } = await readPostTransactions(
+    opts.postsDir,
+    opts.assetsDir,
+    from,
+  );
   const amendments = await detectAmendments(sealedTxs, live, from, opts.postsDir);
 
   // §3.9 — a sealed post's later edits are represented by amendments, not by
@@ -235,6 +256,34 @@ export async function buildChain(opts: BuildOptions): Promise<BuildResult> {
     prev = block;
     minted++;
     amendmentsSealed += draft.transactions.filter((t) => t.type === 'amendment').length;
+  }
+
+  // §3.2b — token ids are assigned by first appearance on the chain and are
+  // never reassigned. The registry is append-only: an asset whose file is
+  // later deleted keeps its identity, because the transaction referencing it
+  // is sealed and immutable.
+  const known = new Set(chain.assets.map((a) => a.hash));
+  for (const block of chain.blocks) {
+    for (const tx of block.transactions) {
+      for (const hash of tx.assets) {
+        if (known.has(hash)) continue;
+        const file = assetFiles.get(hash);
+        if (!file) {
+          throw new Error(
+            `asset ${hash} is referenced by block #${block.height} but no file on disk hashes to it — refusing to mint a token with unknown metadata`,
+          );
+        }
+        chain.assets.push({
+          tokenId: chain.assets.length + 1,
+          hash,
+          file: file.file,
+          mime: file.mime,
+          bytes: file.bytes,
+          mintedIn: block.height,
+        });
+        known.add(hash);
+      }
+    }
   }
 
   // §3.6 — difficulty is configurable and changing it must stay safe in both

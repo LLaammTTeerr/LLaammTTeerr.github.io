@@ -76,49 +76,71 @@ describe('parsePost', () => {
 describe('toTransaction', () => {
   it('produces a stable 32-byte hash', async () => {
     const post = parsePost('a/2026-07-28-x.md', RAW);
-    const tx = await toTransaction(post, '0xauthor');
+    const tx = await toTransaction(post, '0xauthor', []);
     expect(tx.hash).toMatch(/^0x[0-9a-f]{64}$/);
-    expect((await toTransaction(post, '0xauthor')).hash).toBe(tx.hash);
+    expect((await toTransaction(post, '0xauthor', [])).hash).toBe(tx.hash);
   });
 
   it('sets gas to the word count and value to the research hours', async () => {
     const post = parsePost('a/2026-07-28-x.md', RAW);
-    const tx = await toTransaction(post, '0xauthor');
+    const tx = await toTransaction(post, '0xauthor', []);
     expect(tx.gasUsed).toBe(9);
     expect(tx.value).toBe(12.5);
   });
 
   it('addresses one recipient per tag plus the series', async () => {
     const post = parsePost('a/2026-07-28-x.md', RAW);
-    const tx = await toTransaction(post, '0xauthor');
+    const tx = await toTransaction(post, '0xauthor', []);
     expect(tx.to).toHaveLength(3);
     expect(new Set(tx.to).size).toBe(3);
   });
 
   it('changes the hash when the body changes', async () => {
-    const a = await toTransaction(parsePost('a/x.md', RAW), '0xauthor');
+    const a = await toTransaction(parsePost('a/x.md', RAW), '0xauthor', []);
     const b = await toTransaction(
       parsePost('a/x.md', RAW.replace('đoạn.', 'đoạn!')),
       '0xauthor',
+      [],
     );
     expect(a.hash).not.toBe(b.hash);
   });
 
   it('changes the hash when only the research value changes', async () => {
-    const a = await toTransaction(parsePost('a/x.md', RAW), '0xauthor');
+    const a = await toTransaction(parsePost('a/x.md', RAW), '0xauthor', []);
     const b = await toTransaction(
       parsePost('a/x.md', RAW.replace('research: 12.5', 'research: 13.0')),
       '0xauthor',
+      [],
     );
     expect(a.hash).not.toBe(b.hash);
   });
 
   it('ignores trailing-whitespace-only edits', async () => {
-    const a = await toTransaction(parsePost('a/x.md', RAW), '0xauthor');
+    const a = await toTransaction(parsePost('a/x.md', RAW), '0xauthor', []);
     const b = await toTransaction(
       parsePost('a/x.md', RAW.replace('đoạn.\n', 'đoạn.   \n\n\n')),
       '0xauthor',
+      [],
     );
     expect(a.hash).toBe(b.hash);
+  });
+
+  it('commits asset hashes to the transaction hash', async () => {
+    const post = parsePost('a/x.md', RAW);
+    const withAsset = await toTransaction(post, '0xauthor', [
+      { file: 'a.svg', hash: '0x11', mime: 'image/svg+xml', bytes: 10 },
+    ]);
+    const without = await toTransaction(post, '0xauthor', []);
+    expect(withAsset.hash).not.toBe(without.hash);
+    expect(withAsset.assets).toEqual(['0x11']);
+  });
+
+  it('sorts committed asset hashes', async () => {
+    const post = parsePost('a/x.md', RAW);
+    const tx = await toTransaction(post, '0xauthor', [
+      { file: 'b.svg', hash: '0x22', mime: 'image/svg+xml', bytes: 1 },
+      { file: 'a.svg', hash: '0x11', mime: 'image/svg+xml', bytes: 1 },
+    ]);
+    expect(tx.assets).toEqual(['0x11', '0x22']);
   });
 });

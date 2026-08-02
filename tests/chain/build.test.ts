@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { mkdtempSync, cpSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, cpSync, writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildChain } from '../../src/chain/build';
@@ -8,17 +8,19 @@ import { serializeChain } from '../../src/chain/lock';
 
 const CONFIG = { difficulty: 2, maxTxPerBlock: 4, authorHandle: 'lamter', authorName: 'lamter.eth' };
 
-function workspace(): { postsDir: string; lockPath: string } {
+function workspace(): { postsDir: string; assetsDir: string; lockPath: string } {
   const dir = mkdtempSync(join(tmpdir(), 'chain-build-'));
   const postsDir = join(dir, 'posts');
+  const assetsDir = join(dir, 'assets');
   cpSync('tests/fixtures/posts', postsDir, { recursive: true });
-  return { postsDir, lockPath: join(dir, 'chain.lock.json') };
+  mkdirSync(assetsDir, { recursive: true });
+  return { postsDir, assetsDir, lockPath: join(dir, 'chain.lock.json') };
 }
 
 describe('buildChain', () => {
   it('seals past months and mints empty blocks for silent ones', async () => {
-    const { postsDir, lockPath } = workspace();
-    const { chain } = await buildChain({ postsDir, lockPath, now: '2026-09-10', config: CONFIG });
+    const { postsDir, assetsDir, lockPath } = workspace();
+    const { chain } = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
 
     expect(chain.blocks.map((b) => b.period)).toEqual(['2026-06', '2026-07', '2026-08']);
     expect(chain.blocks[0]!.txCount).toBe(2);
@@ -27,37 +29,37 @@ describe('buildChain', () => {
   });
 
   it('produces a chain that verifies', async () => {
-    const { postsDir, lockPath } = workspace();
-    const { chain } = await buildChain({ postsDir, lockPath, now: '2026-09-10', config: CONFIG });
+    const { postsDir, assetsDir, lockPath } = workspace();
+    const { chain } = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
     expect((await verifyChain(chain)).ok).toBe(true);
   });
 
   it('starts genesis at height 0 with a zero prev hash', async () => {
-    const { postsDir, lockPath } = workspace();
-    const { chain } = await buildChain({ postsDir, lockPath, now: '2026-09-10', config: CONFIG });
+    const { postsDir, assetsDir, lockPath } = workspace();
+    const { chain } = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
     expect(chain.blocks[0]!.height).toBe(0);
     expect(chain.blocks[0]!.prevHash).toBe('0x' + '00'.repeat(32));
   });
 
   it('sums gas and value per block', async () => {
-    const { postsDir, lockPath } = workspace();
-    const { chain } = await buildChain({ postsDir, lockPath, now: '2026-09-10', config: CONFIG });
+    const { postsDir, assetsDir, lockPath } = workspace();
+    const { chain } = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
     expect(chain.blocks[0]!.value).toBe(14.5);
     expect(chain.blocks[2]!.gasUsed).toBe(0);
   });
 
   it('is byte-identical when re-run at the same clock', async () => {
-    const { postsDir, lockPath } = workspace();
-    const first = await buildChain({ postsDir, lockPath, now: '2026-09-10', config: CONFIG });
-    const second = await buildChain({ postsDir, lockPath, now: '2026-09-10', config: CONFIG });
+    const { postsDir, assetsDir, lockPath } = workspace();
+    const first = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
+    const second = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
     expect(serializeChain(second.chain)).toBe(serializeChain(first.chain));
     expect(second.minted).toBe(0);
   });
 
   it('never rewrites a sealed block when the clock advances', async () => {
-    const { postsDir, lockPath } = workspace();
-    const before = await buildChain({ postsDir, lockPath, now: '2026-09-10', config: CONFIG });
-    const after = await buildChain({ postsDir, lockPath, now: '2026-11-10', config: CONFIG });
+    const { postsDir, assetsDir, lockPath } = workspace();
+    const before = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
+    const after = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-11-10', config: CONFIG });
 
     expect(after.chain.blocks.slice(0, 3)).toEqual(before.chain.blocks);
     expect(after.chain.blocks.map((b) => b.period)).toEqual([
@@ -67,14 +69,14 @@ describe('buildChain', () => {
   });
 
   it('emits an amendment when a sealed post is edited', async () => {
-    const { postsDir, lockPath } = workspace();
-    const before = await buildChain({ postsDir, lockPath, now: '2026-09-10', config: CONFIG });
+    const { postsDir, assetsDir, lockPath } = workspace();
+    const before = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
     const originalHash = before.chain.blocks[0]!.transactions[0]!.hash;
 
     const target = join(postsDir, '2026-06-15-first.md');
     writeFileSync(target, readFileSync(target, 'utf8') + '\nMột dòng sửa lại.\n');
 
-    const after = await buildChain({ postsDir, lockPath, now: '2026-11-10', config: CONFIG });
+    const after = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-11-10', config: CONFIG });
     expect(after.amendments).toBe(1);
 
     const amendments = after.chain.blocks.flatMap((b) =>
@@ -96,8 +98,8 @@ describe('buildChain', () => {
     // The body — and therefore the content hash — is untouched. Detecting on
     // the content hash alone silently discarded metadata edits: no amendment,
     // no transaction, no warning, and a stale title on the chain forever.
-    const { postsDir, lockPath } = workspace();
-    const before = await buildChain({ postsDir, lockPath, now: '2026-09-10', config: CONFIG });
+    const { postsDir, assetsDir, lockPath } = workspace();
+    const before = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
     const originalHash = before.chain.blocks[0]!.transactions[0]!.hash;
 
     const target = join(postsDir, '2026-06-15-first.md');
@@ -106,7 +108,7 @@ describe('buildChain', () => {
       readFileSync(target, 'utf8').replace('Bài viết đầu tiên', 'Bài viết đầu tiên (sửa)'),
     );
 
-    const after = await buildChain({ postsDir, lockPath, now: '2026-11-10', config: CONFIG });
+    const after = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-11-10', config: CONFIG });
     expect(after.amendments).toBe(1);
 
     const amendment = after.chain.blocks
@@ -120,13 +122,13 @@ describe('buildChain', () => {
   });
 
   it('emits an amendment for a research-only edit, carrying the new figure', async () => {
-    const { postsDir, lockPath } = workspace();
-    await buildChain({ postsDir, lockPath, now: '2026-09-10', config: CONFIG });
+    const { postsDir, assetsDir, lockPath } = workspace();
+    await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
 
     const target = join(postsDir, '2026-06-15-first.md');
     writeFileSync(target, readFileSync(target, 'utf8').replace('research: 2.0', 'research: 6.5'));
 
-    const after = await buildChain({ postsDir, lockPath, now: '2026-11-10', config: CONFIG });
+    const after = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-11-10', config: CONFIG });
     expect(after.amendments).toBe(1);
 
     const amendment = after.chain.blocks
@@ -144,27 +146,27 @@ describe('buildChain', () => {
   });
 
   it('does not re-emit a metadata amendment on a subsequent unchanged build', async () => {
-    const { postsDir, lockPath } = workspace();
-    await buildChain({ postsDir, lockPath, now: '2026-09-10', config: CONFIG });
+    const { postsDir, assetsDir, lockPath } = workspace();
+    await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
     const target = join(postsDir, '2026-06-15-first.md');
     writeFileSync(target, readFileSync(target, 'utf8').replace('tags: [essay]', 'tags: [essay, meta]'));
-    await buildChain({ postsDir, lockPath, now: '2026-11-10', config: CONFIG });
+    await buildChain({ postsDir, assetsDir, lockPath, now: '2026-11-10', config: CONFIG });
 
-    const third = await buildChain({ postsDir, lockPath, now: '2026-12-10', config: CONFIG });
+    const third = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-12-10', config: CONFIG });
     expect(third.amendments).toBe(0);
   });
 
   it('emits exactly one amendment per successive distinct metadata edit', async () => {
-    const { postsDir, lockPath } = workspace();
-    await buildChain({ postsDir, lockPath, now: '2026-09-10', config: CONFIG });
+    const { postsDir, assetsDir, lockPath } = workspace();
+    await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
     const target = join(postsDir, '2026-06-15-first.md');
 
     writeFileSync(target, readFileSync(target, 'utf8').replace('đầu tiên"', 'đầu tiên (v2)"'));
-    const second = await buildChain({ postsDir, lockPath, now: '2026-11-10', config: CONFIG });
+    const second = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-11-10', config: CONFIG });
     expect(second.amendments).toBe(1);
 
     writeFileSync(target, readFileSync(target, 'utf8').replace('(v2)"', '(v3)"'));
-    const third = await buildChain({ postsDir, lockPath, now: '2026-12-10', config: CONFIG });
+    const third = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-12-10', config: CONFIG });
     expect(third.amendments).toBe(1);
 
     const amendments = third.chain.blocks
@@ -180,8 +182,8 @@ describe('buildChain', () => {
   });
 
   it('refuses a reused filename carrying a different date', async () => {
-    const { postsDir, lockPath } = workspace();
-    await buildChain({ postsDir, lockPath, now: '2026-09-10', config: CONFIG });
+    const { postsDir, assetsDir, lockPath } = workspace();
+    await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
 
     // Same file name, different post: recording this as an amendment would
     // attach it to an unrelated sealed transaction.
@@ -189,7 +191,7 @@ describe('buildChain', () => {
     writeFileSync(target, readFileSync(target, 'utf8').replace('date: 2026-06-15', 'date: 2026-09-02'));
 
     await expect(
-      buildChain({ postsDir, lockPath, now: '2026-11-10', config: CONFIG }),
+      buildChain({ postsDir, assetsDir, lockPath, now: '2026-11-10', config: CONFIG }),
     ).rejects.toThrow(/2026-06-15-first\.md.*2026-06-15.*2026-09-02/s);
   });
 
@@ -198,11 +200,11 @@ describe('buildChain', () => {
     // hash, so filtering pending work on hash alone let the edited post
     // slip back in as a fresh "post" transaction sealed next to its own
     // amendment — duplicating the post on the chain.
-    const { postsDir, lockPath } = workspace();
-    await buildChain({ postsDir, lockPath, now: '2026-09-10', config: CONFIG });
+    const { postsDir, assetsDir, lockPath } = workspace();
+    await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
     const target = join(postsDir, '2026-06-15-first.md');
     writeFileSync(target, readFileSync(target, 'utf8') + '\nMột dòng sửa lại.\n');
-    const after = await buildChain({ postsDir, lockPath, now: '2026-11-10', config: CONFIG });
+    const after = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-11-10', config: CONFIG });
 
     // The amendment's own block, not necessarily the last block on the
     // chain — a backdated-into-a-sealed-period amendment can be followed by
@@ -215,11 +217,11 @@ describe('buildChain', () => {
   });
 
   it('never carries two post transactions for the same slug', async () => {
-    const { postsDir, lockPath } = workspace();
-    await buildChain({ postsDir, lockPath, now: '2026-09-10', config: CONFIG });
+    const { postsDir, assetsDir, lockPath } = workspace();
+    await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
     const target = join(postsDir, '2026-06-15-first.md');
     writeFileSync(target, readFileSync(target, 'utf8') + '\nMột dòng sửa lại.\n');
-    const after = await buildChain({ postsDir, lockPath, now: '2026-11-10', config: CONFIG });
+    const after = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-11-10', config: CONFIG });
 
     const postSlugs = after.chain.blocks
       .flatMap((b) => b.transactions)
@@ -229,15 +231,15 @@ describe('buildChain', () => {
   });
 
   it('does not compound: a second distinct edit yields exactly one further amendment', async () => {
-    const { postsDir, lockPath } = workspace();
-    await buildChain({ postsDir, lockPath, now: '2026-09-10', config: CONFIG });
+    const { postsDir, assetsDir, lockPath } = workspace();
+    await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
     const target = join(postsDir, '2026-06-15-first.md');
 
     writeFileSync(target, readFileSync(target, 'utf8') + '\nMột dòng sửa lại.\n');
-    await buildChain({ postsDir, lockPath, now: '2026-11-10', config: CONFIG });
+    await buildChain({ postsDir, assetsDir, lockPath, now: '2026-11-10', config: CONFIG });
 
     writeFileSync(target, readFileSync(target, 'utf8') + '\nMột dòng sửa khác.\n');
-    const after = await buildChain({ postsDir, lockPath, now: '2026-12-10', config: CONFIG });
+    const after = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-12-10', config: CONFIG });
 
     expect(after.amendments).toBe(1);
     const postSlugs = after.chain.blocks
@@ -252,11 +254,11 @@ describe('buildChain', () => {
   });
 
   it('does not re-charge gas or research hours for an edited post', async () => {
-    const { postsDir, lockPath } = workspace();
-    const before = await buildChain({ postsDir, lockPath, now: '2026-09-10', config: CONFIG });
+    const { postsDir, assetsDir, lockPath } = workspace();
+    const before = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
     const target = join(postsDir, '2026-06-15-first.md');
     writeFileSync(target, readFileSync(target, 'utf8') + '\nMột dòng sửa lại.\n');
-    const after = await buildChain({ postsDir, lockPath, now: '2026-11-10', config: CONFIG });
+    const after = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-11-10', config: CONFIG });
 
     const amendmentBlock = after.chain.blocks.find((b) =>
       b.transactions.some((t) => t.type === 'amendment'),
@@ -271,44 +273,44 @@ describe('buildChain', () => {
   });
 
   it('leaves the original transaction untouched after an amendment', async () => {
-    const { postsDir, lockPath } = workspace();
-    const before = await buildChain({ postsDir, lockPath, now: '2026-09-10', config: CONFIG });
+    const { postsDir, assetsDir, lockPath } = workspace();
+    const before = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
     const target = join(postsDir, '2026-06-15-first.md');
     writeFileSync(target, readFileSync(target, 'utf8') + '\nMột dòng sửa lại.\n');
-    const after = await buildChain({ postsDir, lockPath, now: '2026-11-10', config: CONFIG });
+    const after = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-11-10', config: CONFIG });
 
     expect(after.chain.blocks[0]).toEqual(before.chain.blocks[0]);
     expect((await verifyChain(after.chain)).ok).toBe(true);
   });
 
   it('does not re-emit an amendment on a subsequent unchanged build', async () => {
-    const { postsDir, lockPath } = workspace();
-    await buildChain({ postsDir, lockPath, now: '2026-09-10', config: CONFIG });
+    const { postsDir, assetsDir, lockPath } = workspace();
+    await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
     const target = join(postsDir, '2026-06-15-first.md');
     writeFileSync(target, readFileSync(target, 'utf8') + '\nMột dòng sửa lại.\n');
-    await buildChain({ postsDir, lockPath, now: '2026-11-10', config: CONFIG });
-    const third = await buildChain({ postsDir, lockPath, now: '2026-12-10', config: CONFIG });
+    await buildChain({ postsDir, assetsDir, lockPath, now: '2026-11-10', config: CONFIG });
+    const third = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-12-10', config: CONFIG });
     expect(third.amendments).toBe(0);
   });
 
   it('does not re-mint an empty block for an already-sealed month', async () => {
-    const { postsDir, lockPath } = workspace();
-    await buildChain({ postsDir, lockPath, now: '2026-09-10', config: CONFIG });
-    const after = await buildChain({ postsDir, lockPath, now: '2026-11-10', config: CONFIG });
+    const { postsDir, assetsDir, lockPath } = workspace();
+    await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
+    const after = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-11-10', config: CONFIG });
     const periods = after.chain.blocks.map((b) => b.period);
     expect(new Set(periods).size).toBe(periods.length);
   });
 
   it('places a backdated post in the first open period, not its own month', async () => {
-    const { postsDir, lockPath } = workspace();
-    const before = await buildChain({ postsDir, lockPath, now: '2026-09-10', config: CONFIG });
+    const { postsDir, assetsDir, lockPath } = workspace();
+    const before = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
 
     writeFileSync(
       join(postsDir, '2026-06-01-backdated.md'),
       '---\ntitle: "Bài viết lùi ngày"\ndate: 2026-06-01\ntags: [essay]\n---\n\nMột bài viết thêm sau.\n',
     );
 
-    const after = await buildChain({ postsDir, lockPath, now: '2026-09-10', config: CONFIG });
+    const after = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
     expect(after.chain.blocks.slice(0, 3)).toEqual(before.chain.blocks);
     expect(after.chain.blocks).toHaveLength(4);
     expect(after.chain.blocks[3]!.transactions.map((t) => t.slug)).toEqual(['2026-06-01-backdated']);
@@ -323,15 +325,15 @@ describe('buildChain', () => {
   });
 
   it('refuses to extend a lock file that fails verification', async () => {
-    const { postsDir, lockPath } = workspace();
-    await buildChain({ postsDir, lockPath, now: '2026-09-10', config: CONFIG });
+    const { postsDir, assetsDir, lockPath } = workspace();
+    await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
 
     const corrupt = JSON.parse(readFileSync(lockPath, 'utf8'));
     corrupt.blocks[0].gasUsed = 999999;
     writeFileSync(lockPath, JSON.stringify(corrupt, null, 2));
 
     await expect(
-      buildChain({ postsDir, lockPath, now: '2026-10-10', config: CONFIG }),
+      buildChain({ postsDir, assetsDir, lockPath, now: '2026-10-10', config: CONFIG }),
     ).rejects.toThrow(/refusing to extend/);
   });
 
@@ -340,11 +342,11 @@ describe('buildChain', () => {
     // each block against the target committed in its own header, and the
     // chain-level value is only a floor, so a looser config neither
     // invalidates the sealed blocks nor blocks the build.
-    const { postsDir, lockPath } = workspace();
-    const before = await buildChain({ postsDir, lockPath, now: '2026-09-10', config: CONFIG });
+    const { postsDir, assetsDir, lockPath } = workspace();
+    const before = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
 
     const looser = { ...CONFIG, difficulty: 1 };
-    const after = await buildChain({ postsDir, lockPath, now: '2026-11-10', config: looser });
+    const after = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-11-10', config: looser });
 
     expect(after.chain.blocks.slice(0, 3)).toEqual(before.chain.blocks);
     expect(after.chain.blocks.slice(3).every((b) => b.difficulty === 1)).toBe(true);
@@ -355,18 +357,18 @@ describe('buildChain', () => {
   it('keeps building when the configured difficulty is raised', async () => {
     // The floor only ever moves down: raising it would otherwise retroactively
     // invalidate every block sealed under the old target and brick the ledger.
-    const { postsDir, lockPath } = workspace();
-    await buildChain({ postsDir, lockPath, now: '2026-09-10', config: CONFIG });
+    const { postsDir, assetsDir, lockPath } = workspace();
+    await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
 
     const harder = { ...CONFIG, difficulty: 3 };
-    const after = await buildChain({ postsDir, lockPath, now: '2026-11-10', config: harder });
+    const after = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-11-10', config: harder });
 
     expect(after.chain.blocks.slice(3).every((b) => b.difficulty === 3)).toBe(true);
     expect(after.chain.difficulty).toBe(2);
     expect((await verifyChain(after.chain)).ok).toBe(true);
 
     // And the next run still starts: the stored floor matches what is sealed.
-    const again = await buildChain({ postsDir, lockPath, now: '2026-12-10', config: harder });
+    const again = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-12-10', config: harder });
     expect((await verifyChain(again.chain)).ok).toBe(true);
   });
 
@@ -374,7 +376,7 @@ describe('buildChain', () => {
     // Verified failure: four posts dated 2027-03 sealed a block with period
     // 2027-03, after which fromPeriod was 2027-03 — neither past nor full —
     // and no block could ever be minted again until real time reached 2027.
-    const { postsDir, lockPath } = workspace();
+    const { postsDir, assetsDir, lockPath } = workspace();
     for (const day of ['01', '02', '03', '04']) {
       writeFileSync(
         join(postsDir, `2027-03-${day}-future.md`),
@@ -382,7 +384,7 @@ describe('buildChain', () => {
       );
     }
 
-    const first = await buildChain({ postsDir, lockPath, now: '2026-09-10', config: CONFIG });
+    const first = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
     expect(first.chain.blocks.every((b) => b.period <= '2026-09')).toBe(true);
     const futureBlock = first.chain.blocks.find((b) =>
       b.transactions.some((t) => t.date.startsWith('2027-03')),
@@ -390,15 +392,15 @@ describe('buildChain', () => {
     expect(futureBlock.period).toBe('2026-09');
 
     // The chain is not frozen: the next elapsed month still mints.
-    const second = await buildChain({ postsDir, lockPath, now: '2026-11-10', config: CONFIG });
+    const second = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-11-10', config: CONFIG });
     expect(second.minted).toBeGreaterThan(0);
     expect(second.chain.blocks.map((b) => b.period)).toContain('2026-10');
     expect((await verifyChain(second.chain)).ok).toBe(true);
   });
 
   it('matches the golden snapshot at a pinned clock', async () => {
-    const { postsDir, lockPath } = workspace();
-    const { chain } = await buildChain({ postsDir, lockPath, now: '2026-09-10', config: CONFIG });
+    const { postsDir, assetsDir, lockPath } = workspace();
+    const { chain } = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
     expect(serializeChain(chain)).toMatchSnapshot();
   });
 
@@ -408,7 +410,7 @@ describe('buildChain', () => {
     // hit the pre-append guard and refuse to start at all, requiring a manual
     // revert to recover. The miner is stubbed to return a hash that is not the
     // header's, which is the shape of any bug producing an invalid block.
-    const { postsDir, lockPath } = workspace();
+    const { postsDir, assetsDir, lockPath } = workspace();
     vi.resetModules();
     vi.doMock('../../src/chain/mine', () => ({
       meetsDifficulty: () => true,
@@ -417,12 +419,87 @@ describe('buildChain', () => {
     try {
       const { buildChain: buildWithBrokenMiner } = await import('../../src/chain/build');
       await expect(
-        buildWithBrokenMiner({ postsDir, lockPath, now: '2026-09-10', config: CONFIG }),
+        buildWithBrokenMiner({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG }),
       ).rejects.toThrow(/refusing to write/);
       expect(existsSync(lockPath)).toBe(false);
     } finally {
       vi.doUnmock('../../src/chain/mine');
       vi.resetModules();
     }
+  });
+
+  it('mints a token for a referenced asset', async () => {
+    const { postsDir, assetsDir, lockPath } = workspace();
+    writeFileSync(join(assetsDir, 'so-do.svg'), '<svg/>');
+    writeFileSync(
+      join(postsDir, '2026-07-20-hinh.md'),
+      '---\ntitle: "Có hình"\ndate: 2026-07-20\ntags: [cp]\n---\n\n![sơ đồ](/assets/so-do.svg)\n',
+    );
+    const { chain } = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
+
+    expect(chain.assets).toHaveLength(1);
+    expect(chain.assets[0]!.tokenId).toBe(1);
+    expect(chain.assets[0]!.file).toBe('so-do.svg');
+    expect(chain.assets[0]!.mime).toBe('image/svg+xml');
+    expect(chain.assets[0]!.mintedIn).toBe(1);
+    const tx = chain.blocks.flatMap((b) => b.transactions).find((t) => t.slug === '2026-07-20-hinh');
+    expect(tx!.assets).toEqual([chain.assets[0]!.hash]);
+  });
+
+  it('assigns token ids by first appearance and never reassigns them', async () => {
+    const { postsDir, assetsDir, lockPath } = workspace();
+    writeFileSync(join(assetsDir, 'a.svg'), 'A');
+    writeFileSync(
+      join(postsDir, '2026-07-20-one.md'),
+      '---\ntitle: "Một"\ndate: 2026-07-20\ntags: [cp]\n---\n\n![a](/assets/a.svg)\n',
+    );
+    const first = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
+    const tokenOne = first.chain.assets[0]!;
+
+    writeFileSync(join(assetsDir, 'b.svg'), 'B');
+    writeFileSync(
+      join(postsDir, '2026-09-05-two.md'),
+      '---\ntitle: "Hai"\ndate: 2026-09-05\ntags: [cp]\n---\n\n![b](/assets/b.svg)\n',
+    );
+    const second = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-11-10', config: CONFIG });
+
+    expect(second.chain.assets[0]).toEqual(tokenOne);
+    expect(second.chain.assets[1]!.tokenId).toBe(2);
+    expect(second.chain.assets[1]!.file).toBe('b.svg');
+  });
+
+  it('emits an amendment when a referenced image is replaced', async () => {
+    const { postsDir, assetsDir, lockPath } = workspace();
+    writeFileSync(join(assetsDir, 'a.svg'), 'ORIGINAL');
+    writeFileSync(
+      join(postsDir, '2026-07-20-one.md'),
+      '---\ntitle: "Một"\ndate: 2026-07-20\ntags: [cp]\n---\n\n![a](/assets/a.svg)\n',
+    );
+    await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
+
+    writeFileSync(join(assetsDir, 'a.svg'), 'SWAPPED');
+    const after = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-11-10', config: CONFIG });
+
+    expect(after.amendments).toBe(1);
+    expect(after.chain.assets).toHaveLength(2);
+    expect((await verifyChain(after.chain)).ok).toBe(true);
+  });
+
+  it('fails the build when a post references a missing asset', async () => {
+    const { postsDir, assetsDir, lockPath } = workspace();
+    writeFileSync(
+      join(postsDir, '2026-07-20-broken.md'),
+      '---\ntitle: "Thiếu"\ndate: 2026-07-20\ntags: [cp]\n---\n\n![x](/assets/khong-co.svg)\n',
+    );
+    await expect(
+      buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG }),
+    ).rejects.toThrow(/khong-co\.svg/);
+  });
+
+  it('leaves an unreferenced file off the chain entirely', async () => {
+    const { postsDir, assetsDir, lockPath } = workspace();
+    writeFileSync(join(assetsDir, 'unused.png'), 'nobody links to me');
+    const { chain } = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
+    expect(chain.assets).toEqual([]);
   });
 });

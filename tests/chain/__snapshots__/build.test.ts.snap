@@ -112,7 +112,8 @@ exports[`buildChain > matches the golden snapshot at a pinned clock 1`] = `
       "hash": "0x002a378ea00e853543cb1281dfd5b01f20c4d714bdc17ff39fba90e545ae74a4",
       "transactions": []
     }
-  ]
+  ],
+  "assets": []
 }
 "
 `;

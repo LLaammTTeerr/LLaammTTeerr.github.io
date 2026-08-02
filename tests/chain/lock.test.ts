@@ -9,7 +9,7 @@ function tempFile(name: string): string {
   return join(mkdtempSync(join(tmpdir(), 'chain-')), name);
 }
 
-const chain: Chain = { version: 1, difficulty: 5, blocks: [] };
+const chain: Chain = { version: 1, difficulty: 5, blocks: [], assets: [] };
 
 // Fixture with deliberately inconsistent difficulty to verify field-level serialization:
 // chain.difficulty = 5, block.difficulty = 3. This is intentional — the fixture is used
@@ -72,11 +72,21 @@ const populated: Chain = {
       ],
     },
   ],
+  assets: [
+    {
+      tokenId: 1,
+      hash: '0x' + '99'.repeat(32),
+      file: 'so-do.svg',
+      mime: 'image/svg+xml',
+      bytes: 512,
+      mintedIn: 7,
+    },
+  ],
 };
 
 describe('emptyChain', () => {
   it('starts at version 1 with no blocks', () => {
-    expect(emptyChain(5)).toEqual({ version: 1, difficulty: 5, blocks: [] });
+    expect(emptyChain(5)).toEqual({ version: 1, difficulty: 5, blocks: [], assets: [] });
   });
 });
 
@@ -92,7 +102,7 @@ describe('serializeChain', () => {
   });
 
   it('does not depend on key insertion order', () => {
-    const reordered = { blocks: [], difficulty: 5, version: 1 } as unknown as Chain;
+    const reordered = { assets: [], blocks: [], difficulty: 5, version: 1 } as unknown as Chain;
     expect(serializeChain(reordered)).toBe(serializeChain(chain));
   });
 
@@ -100,10 +110,21 @@ describe('serializeChain', () => {
     expect(serializeChain(populated)).toBe(serializeChain(populated));
   });
 
-  it('does not depend on block/transaction key insertion order', () => {
+  it('does not depend on block/transaction/asset key insertion order', () => {
     const block = populated.blocks[0]!;
     const tx0 = block.transactions[0]!;
     const tx1 = block.transactions[1]!;
+    const asset = populated.assets[0]!;
+
+    // Construct a scrambled asset record with keys in deliberately different order
+    const scrambledAsset = {
+      mintedIn: asset.mintedIn,
+      bytes: asset.bytes,
+      mime: asset.mime,
+      file: asset.file,
+      hash: asset.hash,
+      tokenId: asset.tokenId,
+    } as any;
 
     // Construct scrambled transactions with keys in deliberately different order
     const scrambledTx0 = {
@@ -161,6 +182,7 @@ describe('serializeChain', () => {
           height: block.height,
         } as any,
       ],
+      assets: [scrambledAsset],
     };
     expect(serializeChain(scrambled)).toBe(serializeChain(populated));
   });
@@ -171,7 +193,7 @@ describe('serializeChain', () => {
 
     // Verify chain-level keys and order
     const chainKeys = Object.keys(parsed);
-    expect(chainKeys).toEqual(['version', 'difficulty', 'blocks']);
+    expect(chainKeys).toEqual(['version', 'difficulty', 'blocks', 'assets']);
 
     // Verify block-level keys and order
     const block = parsed.blocks[0];
@@ -235,6 +257,11 @@ describe('serializeChain', () => {
       'amends',
     ]);
 
+    // Verify asset-level keys and order
+    const asset = parsed.assets[0];
+    const assetKeys = Object.keys(asset);
+    expect(assetKeys).toEqual(['tokenId', 'hash', 'file', 'mime', 'bytes', 'mintedIn']);
+
     // Verify distinct field values to catch any level confusion
     expect(block.gasUsed).toBe(2840);
     expect(postTx.gasUsed).toBe(1900);
@@ -245,6 +272,10 @@ describe('serializeChain', () => {
     expect(amendmentTx.value).toBe(0);
     expect(amendmentTx.research).toBe(2.8);
     expect('research' in postTx).toBe(false);
+
+    expect(asset.tokenId).toBe(1);
+    expect(asset.file).toBe('so-do.svg');
+    expect(asset.mintedIn).toBe(7);
 
     // Verify difficulty at both levels (deliberately different to catch serialization confusion)
     expect(parsed.difficulty).toBe(5); // chain level
@@ -291,6 +322,21 @@ describe('readLock', () => {
     const path = tempFile('invalid-blocks.json');
     writeFileSync(path, JSON.stringify({ version: 1, difficulty: 5, blocks: 'not an array' }));
     expect(() => readLock(path, 5)).toThrow(/blocks/i);
+  });
+
+  it('throws when assets array is missing from ledger', () => {
+    const path = tempFile('missing-assets.json');
+    writeFileSync(path, JSON.stringify({ version: 1, difficulty: 5, blocks: [] }));
+    expect(() => readLock(path, 5)).toThrow(/assets/i);
+  });
+
+  it('throws when assets is not an array', () => {
+    const path = tempFile('invalid-assets.json');
+    writeFileSync(
+      path,
+      JSON.stringify({ version: 1, difficulty: 5, blocks: [], assets: 'not an array' }),
+    );
+    expect(() => readLock(path, 5)).toThrow(/assets/i);
   });
 
   it('names the block and the field when a block has no transactions array', () => {

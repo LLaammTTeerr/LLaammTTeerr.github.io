@@ -94,4 +94,12 @@ describe('hashAssetFile', () => {
     await expect(hashAssetFile(dir, 'gone.svg', 'content/posts/2026-08-05-x.md'))
       .rejects.toThrow(/2026-08-05-x\.md.*gone\.svg/s);
   });
+
+  it('rejects a file argument that could escape the assets directory', async () => {
+    const dir = tempAssets();
+    await expect(hashAssetFile(dir, '../secret.env', 'p.md')).rejects.toThrow(/\.\./);
+    await expect(hashAssetFile(dir, 'a/../../etc/passwd', 'p.md')).rejects.toThrow(/\.\./);
+    await expect(hashAssetFile(dir, 'sub/x.svg', 'p.md')).rejects.toThrow(/\//);
+    await expect(hashAssetFile(dir, 'sub\\x.svg', 'p.md')).rejects.toThrow(/\\/);
+  });
 });

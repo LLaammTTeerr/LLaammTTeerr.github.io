@@ -1,9 +1,9 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import type { Block, Chain, Transaction } from './types';
+import type { AssetRecord, Block, Chain, Transaction } from './types';
 import { blockStructuralProblem } from './verify';
 
 export function emptyChain(difficulty: number): Chain {
-  return { version: 1, difficulty, blocks: [] };
+  return { version: 1, difficulty, blocks: [], assets: [] };
 }
 
 /**
@@ -34,6 +34,17 @@ function orderedTransaction(t: Transaction) {
   };
 }
 
+function orderedAsset(a: AssetRecord): AssetRecord {
+  return {
+    tokenId: a.tokenId,
+    hash: a.hash,
+    file: a.file,
+    mime: a.mime,
+    bytes: a.bytes,
+    mintedIn: a.mintedIn,
+  };
+}
+
 function orderedBlock(b: Block) {
   return {
     height: b.height,
@@ -56,6 +67,7 @@ export function serializeChain(chain: Chain): string {
     version: chain.version,
     difficulty: chain.difficulty,
     blocks: chain.blocks.map(orderedBlock),
+    assets: chain.assets.map(orderedAsset),
   };
   return JSON.stringify(ordered, null, 2) + '\n';
 }
@@ -115,6 +127,9 @@ export function readLock(path: string, difficulty: number): Chain {
     throw new Error(`${path} is missing a valid "blocks" array — refusing to use a corrupt ledger`);
   }
   validateBlocks(path, chain.blocks);
+  if (!Array.isArray(chain.assets)) {
+    throw new Error(`${path} is missing a valid "assets" array — refusing to use a corrupt ledger`);
+  }
   return chain;
 }
 

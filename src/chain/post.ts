@@ -8,6 +8,7 @@ import {
 } from './canonical';
 import { sha256Hex } from './hash';
 import type { Hex, PostInput, Transaction } from './types';
+import type { AssetFile } from './asset';
 
 function required(value: unknown, field: string, filePath: string): string {
   if (value === undefined || value === null || value === '') {
@@ -82,9 +83,14 @@ export function parsePost(filePath: string, raw: string): PostInput {
   };
 }
 
-export async function toTransaction(post: PostInput, from: Hex): Promise<Transaction> {
+export async function toTransaction(
+  post: PostInput,
+  from: Hex,
+  assets: AssetFile[],
+): Promise<Transaction> {
   const normalized = normalizeBody(post.body);
   const contentHash = await sha256Hex(normalized);
+  const assetHashes = assets.map((a) => a.hash).sort();
 
   const hash = await sha256Hex(
     canonicalPostTx({
@@ -94,8 +100,8 @@ export async function toTransaction(post: PostInput, from: Hex): Promise<Transac
       series: post.series,
       research: post.research,
       from,
+      assets: assetHashes,
       contentHash,
-      assets: [],
     }),
   );
 
@@ -113,7 +119,7 @@ export async function toTransaction(post: PostInput, from: Hex): Promise<Transac
     from,
     to,
     contentHash,
-    assets: [],
+    assets: assetHashes,
     gasUsed: wordCount(normalized),
     value: post.research,
     // §3.9 — `research` is amendment-only metadata; on a post the declared
