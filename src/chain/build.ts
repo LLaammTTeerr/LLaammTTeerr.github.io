@@ -63,6 +63,7 @@ function stateHash(tx: Transaction): Promise<Hex> | null {
       research: tx.research,
       from: tx.from,
       contentHash: tx.contentHash,
+      assets: tx.assets,
     }),
   );
 }
@@ -122,6 +123,7 @@ async function detectAmendments(
         research: live.value,
         from,
         contentHash: live.contentHash,
+        assets: [],
       }),
     );
     out.push({
@@ -135,6 +137,7 @@ async function detectAmendments(
       from,
       to: [],
       contentHash: live.contentHash,
+      assets: [],
       // §3.9 — an amendment is worth 0 gas and 0 value on purpose, so block
       // aggregation cannot re-charge the word count and research hours already
       // counted in the block that sealed the original. It looks inconsistent

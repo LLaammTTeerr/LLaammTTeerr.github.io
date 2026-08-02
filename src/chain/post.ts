@@ -95,6 +95,7 @@ export async function toTransaction(post: PostInput, from: Hex): Promise<Transac
       research: post.research,
       from,
       contentHash,
+      assets: [],
     }),
   );
 
@@ -112,6 +113,7 @@ export async function toTransaction(post: PostInput, from: Hex): Promise<Transac
     from,
     to,
     contentHash,
+    assets: [],
     gasUsed: wordCount(normalized),
     value: post.research,
     // §3.9 — `research` is amendment-only metadata; on a post the declared

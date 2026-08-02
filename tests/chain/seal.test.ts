@@ -14,6 +14,7 @@ function tx(date: string, slug: string): Transaction {
     from: '0xaaaa',
     to: [],
     contentHash: `0xc${slug}`,
+    assets: [],
     gasUsed: 100,
     value: 1,
     research: null,

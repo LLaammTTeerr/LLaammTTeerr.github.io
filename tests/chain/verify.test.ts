@@ -22,6 +22,7 @@ async function tx(slug: string): Promise<Transaction> {
     research: 1,
     from: FROM,
     contentHash: ZERO,
+    assets: [],
   };
   return {
     hash: await sha256Hex(canonicalPostTx(fields)),
@@ -34,6 +35,7 @@ async function tx(slug: string): Promise<Transaction> {
     from: fields.from,
     to: [],
     contentHash: fields.contentHash,
+    assets: fields.assets,
     gasUsed: 10,
     value: fields.research,
     research: null,
@@ -51,6 +53,7 @@ async function amendmentTx(amends: string, title: string): Promise<Transaction> 
     research: 3.5,
     from: FROM,
     contentHash: ZERO,
+    assets: [],
   };
   return {
     hash: await sha256Hex(canonicalAmendmentTx(fields)),
@@ -63,6 +66,7 @@ async function amendmentTx(amends: string, title: string): Promise<Transaction> 
     from: fields.from,
     to: [],
     contentHash: fields.contentHash,
+    assets: fields.assets,
     gasUsed: 0,
     value: 0,
     research: fields.research,

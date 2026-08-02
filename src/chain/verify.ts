@@ -117,6 +117,7 @@ async function expectedTxHash(tx: Transaction): Promise<Hex | null> {
         research: tx.value,
         from: tx.from,
         contentHash: tx.contentHash,
+        assets: tx.assets,
       }),
     );
   }
@@ -131,6 +132,7 @@ async function expectedTxHash(tx: Transaction): Promise<Hex | null> {
       research: tx.research,
       from: tx.from,
       contentHash: tx.contentHash,
+      assets: tx.assets,
     }),
   );
 }

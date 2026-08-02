@@ -71,6 +71,7 @@ describe('canonicalPostTx', () => {
     research: 12.5,
     from: '0xaaaa',
     contentHash: '0xbbbb',
+    assets: [],
   };
 
   it('emits the exact field order from the spec', () => {
@@ -83,9 +84,41 @@ describe('canonicalPostTx', () => {
         'series:ghi-chu-thuat-toan',
         'research:12.5',
         'from:0xaaaa',
+        'assets:',
         'body:0xbbbb',
       ].join('\n'),
     );
+  });
+
+  it('emits assets immediately before body', () => {
+    expect(canonicalPostTx({ ...base, assets: ['0x22', '0x11'] })).toBe(
+      [
+        'post/1',
+        "title:Mo's Algorithm",
+        'date:2026-07-28',
+        'tags:algorithm,cp',
+        'series:ghi-chu-thuat-toan',
+        'research:12.5',
+        'from:0xaaaa',
+        'assets:0x11,0x22',
+        'body:0xbbbb',
+      ].join('\n'),
+    );
+  });
+
+  it('sorts assets so reference order in the body cannot change the hash', () => {
+    expect(canonicalPostTx({ ...base, assets: ['0x22', '0x11'] })).toBe(
+      canonicalPostTx({ ...base, assets: ['0x11', '0x22'] }),
+    );
+  });
+
+  it('emits an empty assets line for a post with no assets', () => {
+    expect(canonicalPostTx({ ...base, assets: [] })).toContain('\nassets:\n');
+  });
+
+  it('changes the canonical form when an asset changes', () => {
+    expect(canonicalPostTx({ ...base, assets: ['0x11'] }))
+      .not.toBe(canonicalPostTx({ ...base, assets: ['0x99'] }));
   });
 
   it('sorts tags so declaration order cannot change the hash', () => {
@@ -119,6 +152,7 @@ describe('canonicalAmendmentTx', () => {
     research: 12.5,
     from: '0xaaaa',
     contentHash: '0xbeef',
+    assets: [],
   };
 
   it('emits the exact amendment/1 field order', () => {
@@ -132,9 +166,20 @@ describe('canonicalAmendmentTx', () => {
         'series:ghi-chu-thuat-toan',
         'research:12.5',
         'from:0xaaaa',
+        'assets:',
         'body:0xbeef',
       ].join('\n'),
     );
+  });
+
+  it('carries assets so replacing an image produces an amendment', () => {
+    const fields = {
+      amends: '0xdead', date: '2026-07-28', title: 'x', tags: [],
+      series: null, research: 0, from: '0xaaaa', contentHash: '0xbeef',
+    };
+    expect(canonicalAmendmentTx({ ...fields, assets: ['0x11'] }))
+      .not.toBe(canonicalAmendmentTx({ ...fields, assets: ['0x99'] }));
+    expect(canonicalAmendmentTx({ ...fields, assets: ['0x11'] })).toContain('\nassets:0x11\n');
   });
 
   it('changes when only the title changes', () => {
@@ -164,7 +209,7 @@ describe('canonicalAmendmentTx', () => {
     expect(
       canonicalAmendmentTx({
         amends: '0xdead', date: '2026-07-28', title: 'x', tags: [],
-        series: null, research: 0, from: '0xaaaa', contentHash: '0xbeef',
+        series: null, research: 0, from: '0xaaaa', contentHash: '0xbeef', assets: [],
       }).startsWith('amendment/1\n'),
     ).toBe(true);
   });

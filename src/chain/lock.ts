@@ -26,6 +26,7 @@ function orderedTransaction(t: Transaction) {
     from: t.from,
     to: t.to,
     contentHash: t.contentHash,
+    assets: t.assets,
     gasUsed: t.gasUsed,
     value: t.value,
     research: t.research ?? undefined,

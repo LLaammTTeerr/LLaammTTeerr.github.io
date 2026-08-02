@@ -28,6 +28,7 @@ export interface CanonicalPostFields {
   research: number;
   from: Hex;
   contentHash: Hex;
+  assets: Hex[];
 }
 
 export function canonicalPostTx(p: CanonicalPostFields): string {
@@ -40,6 +41,7 @@ export function canonicalPostTx(p: CanonicalPostFields): string {
     `series:${p.series ?? ''}`,
     `research:${formatResearch(p.research)}`,
     `from:${p.from}`,
+    `assets:${[...p.assets].sort().join(',')}`,
     `body:${p.contentHash}`,
   ].join('\n');
 }
@@ -53,6 +55,7 @@ export interface CanonicalAmendmentFields {
   research: number;
   from: Hex;
   contentHash: Hex;
+  assets: Hex[];
 }
 
 /**
@@ -78,6 +81,7 @@ export function canonicalAmendmentTx(a: CanonicalAmendmentFields): string {
     `series:${a.series ?? ''}`,
     `research:${formatResearch(a.research)}`,
     `from:${a.from}`,
+    `assets:${[...a.assets].sort().join(',')}`,
     `body:${a.contentHash}`,
   ].join('\n');
 }

@@ -25,6 +25,12 @@ export interface Transaction {
   from: Hex;
   to: Hex[];                // tag/series addresses; empty for amendments
   contentHash: Hex;
+  /**
+   * §3.2b — content hashes of the files this transaction's body references,
+   * sorted. Committed to the transaction hash, so swapping a published
+   * diagram invalidates the post that uses it.
+   */
+  assets: Hex[];
   gasUsed: number;          // word count; 0 for amendments
   value: number;            // research hours; 0 for amendments (§3.9)
   /**
