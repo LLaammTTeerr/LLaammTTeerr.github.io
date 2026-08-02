@@ -1,0 +1,65 @@
+/* Element defaults. Component styles live with their components. */
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--txt);
+  font-family: var(--sans);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: inherit; }
+
+.nav {
+  display: flex; flex-wrap: wrap; gap: 0.9rem 1.2rem; align-items: center;
+  padding: 0.85rem 1.25rem;
+  background: var(--surf);
+  border-bottom: 1px solid var(--line2);
+}
+.nav .brand { font-family: var(--mono); font-weight: 600; text-decoration: none; }
+.nav .brand span { color: var(--acc); }
+.nav ul { display: flex; flex-wrap: wrap; gap: 1.05rem; list-style: none; margin: 0; padding: 0; }
+.nav li a {
+  font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--dim); text-decoration: none;
+}
+.nav li a:hover, .nav li a:focus-visible { color: var(--txt); }
+
+main { padding: 1.25rem; max-width: 64rem; margin: 0 auto; }
+
+:where(a, button, summary):focus-visible {
+  outline: 2px solid var(--acc); outline-offset: 2px;
+}
+
+.prefs { margin-left: auto; font-family: var(--mono); font-size: 0.72rem; }
+.prefs summary {
+  cursor: pointer; color: var(--dim);
+  border: 1px solid var(--line2); border-radius: 3px; padding: 0.36rem 0.6rem;
+  list-style: none;
+}
+.prefs-body {
+  display: grid; gap: 0.9rem; margin-top: 0.6rem;
+  padding: 0.9rem; background: var(--bg);
+  border: 1px solid var(--line2); border-radius: 4px;
+}
+.prefs fieldset { border: 0; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.prefs legend {
+  font-size: 0.6rem; letter-spacing: 0.15em; text-transform: uppercase;
+  color: var(--dim); padding: 0 0 0.4rem;
+}
+.prefs button {
+  font: inherit; color: var(--dim); background: transparent;
+  border: 1px solid var(--line2); border-radius: 99px;
+  padding: 0.3rem 0.7rem; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 0.42rem;
+}
+.prefs button:hover { color: var(--txt); }
+.prefs button[aria-pressed='true'] { color: var(--txt); border-color: var(--acc); }
+.prefs .dots { display: flex; gap: 2px; }
+.prefs .dots i { width: 0.42rem; height: 0.42rem; border-radius: 50%; display: block; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}

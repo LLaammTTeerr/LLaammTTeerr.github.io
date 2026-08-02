@@ -1,0 +1,47 @@
+---
+import { PALETTES, INTENSITIES, METERS } from '../site/themes';
+import { STORAGE_KEYS } from '../site/prefs-script';
+---
+
+<details class="prefs">
+  <summary aria-label="Tuỳ chọn hiển thị">Theme</summary>
+  <div class="prefs-body">
+    <fieldset>
+      <legend>Palette</legend>
+      {PALETTES.map((p) => (
+        <button type="button" data-pref="palette" value={p.id}>
+          <span class="dots">
+            <i style={`background:${p.swatch[0]}`}></i><i style={`background:${p.swatch[1]}`}></i>
+          </span>
+          {p.label}
+        </button>
+      ))}
+    </fieldset>
+    <fieldset>
+      <legend>Colour</legend>
+      {INTENSITIES.map((i) => (
+        <button type="button" data-pref="intensity" value={i.id}>{i.label}</button>
+      ))}
+    </fieldset>
+    <fieldset>
+      <legend>Work meter</legend>
+      {METERS.map((m) => (
+        <button type="button" data-pref="meter" value={m.id}>{m.label}</button>
+      ))}
+    </fieldset>
+  </div>
+</details>
+
+<script is:inline define:vars={{ KEYS: STORAGE_KEYS }}>
+  document.querySelectorAll('[data-pref]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var kind = b.getAttribute('data-pref');
+      var value = b.getAttribute('value');
+      document.documentElement.setAttribute('data-' + kind, value);
+      try { window.localStorage.setItem(KEYS[kind], value); } catch (e) { /* private mode */ }
+      document.querySelectorAll('[data-pref="' + kind + '"]').forEach(function (o) {
+        o.setAttribute('aria-pressed', String(o === b));
+      });
+    });
+  });
+</script>
