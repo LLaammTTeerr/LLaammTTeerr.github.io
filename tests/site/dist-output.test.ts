@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readDist, readDistCss } from './dist';
 import { parseRules, selectorParts, declaredValue, stripComments } from './css';
 import { METERS, DEFAULTS } from '../../src/site/themes';
+import { getBlocks, splitHashWork } from '../../src/site/chain-data';
 
 // Guards over what the build actually ships. Each of these covers a property
 // the branch claims but nothing else asserts: that a page load touches no
@@ -45,6 +46,36 @@ describe('fonts reach the build', () => {
         (f) => new RegExp(`font-family:\\s*["']?${family}`).test(f) && /vietnamese/i.test(f),
       );
       expect(vietnamese.length, `no vietnamese @font-face for ${family} in the built css`).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe('hash display', () => {
+  // §9's "Type" rule: every hash is middle-truncated. A raw 64-hex hash or
+  // merkle root in the built page would mean BlockCard rendered the field
+  // directly instead of through `shortHash`.
+  it('middle-truncates every block hash and merkle root', () => {
+    const html = readDist('index.html');
+    for (const block of getBlocks()) {
+      expect(html, `full hash of block #${block.height} appears untruncated`).not.toContain(
+        block.hash,
+      );
+      expect(
+        html,
+        `full merkle root of block #${block.height} appears untruncated`,
+      ).not.toContain(block.merkleRoot);
+    }
+  });
+
+  it("highlights each block's proven leading zeros", () => {
+    const html = readDist('index.html');
+    for (const block of getBlocks()) {
+      const work = splitHashWork(block.shortHash, block.difficulty);
+      expect(work.zeros.length, `block #${block.height} has difficulty 0`).toBeGreaterThan(0);
+      expect(
+        html,
+        `block #${block.height}'s proven zeros "${work.zeros}" are not marked up`,
+      ).toContain(`<mark class="zeros">${work.zeros}</mark>`);
     }
   });
 });

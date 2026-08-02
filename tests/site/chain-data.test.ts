@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { mkdtempSync, writeFileSync, cpSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { splitHashWork } from '../../src/site/chain-data';
 import {
   getChain, getBlocks, getBlock, getPosts, getAssets, getStats,
   workRatio, expectedAttempts, getPendingBlock,
@@ -22,6 +23,35 @@ describe('workRatio', () => {
 
   it('reports a lucky block as under one', () => {
     expect(workRatio(198676, 5)).toBeLessThan(1);
+  });
+});
+
+describe('splitHashWork', () => {
+  it('splits the marker, the proven zeros, and everything after', () => {
+    expect(splitHashWork('0x00000b1ea722', 5)).toEqual({
+      marker: '0x',
+      zeros: '00000',
+      rest: 'b1ea722',
+    });
+  });
+
+  it('reconstructs the input and highlights exactly `difficulty` zeros for a real committed block', () => {
+    // Pins the split against the actual chain rather than a hand-built
+    // string, so a mismatch between `difficulty` and what the hash really
+    // starts with (a bug in either place) would show up here.
+    const newest = getBlocks()[0]!;
+    const work = splitHashWork(newest.shortHash, newest.difficulty);
+    expect(work.marker + work.zeros + work.rest).toBe(newest.shortHash);
+    expect(work.zeros).toBe('0'.repeat(newest.difficulty));
+  });
+
+  it('clamps to the string available rather than slicing past its end', () => {
+    expect(splitHashWork('0x00', 5)).toEqual({ marker: '0x', zeros: '00', rest: '' });
+  });
+
+  it('treats a zero or negative difficulty as no highlighted prefix', () => {
+    expect(splitHashWork('0x00000abc', 0)).toEqual({ marker: '0x', zeros: '', rest: '00000abc' });
+    expect(splitHashWork('0x00000abc', -3)).toEqual({ marker: '0x', zeros: '', rest: '00000abc' });
   });
 });
 

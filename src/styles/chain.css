@@ -40,6 +40,11 @@
   text-transform: uppercase; padding-top: 0.12rem; }
 .meta dd { margin: 0; }
 .hash { font-family: var(--mono); word-break: break-all; color: var(--c-hash); }
+/* The block's proven leading zeros (§3.4), set off from the rest of the hash.
+   `background: none` strips the UA default yellow mark — an accent colour
+   from the reader's own palette carries the emphasis instead, so it reads
+   correctly under all eleven themes rather than fighting one of them. */
+.hash mark.zeros { background: none; color: var(--acc); font-weight: 700; }
 .num { color: var(--c-num); font-variant-numeric: tabular-nums; }
 
 .txs { list-style: none; margin: 0.9rem 0 0; padding: 0.8rem 0 0; border-top: 1px solid var(--line); }

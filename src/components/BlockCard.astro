@@ -1,11 +1,20 @@
 ---
 import WorkMeter from './WorkMeter.astro';
+import { shortHash, splitHashWork } from '../site/chain-data';
 import type { BlockView } from '../site/chain-data';
 // The card's styles travel with the card — see the note in WorkMeter.astro.
 import '../styles/chain.css';
 
 interface Props { block: BlockView; isNewest: boolean; isOldest: boolean }
 const { block, isNewest, isOldest } = Astro.props;
+
+// Middle-truncated per the design spec (§9's "Type" rule), with the block's
+// own proven leading zeros highlighted — the part of the hash that is
+// actually the proof of work, not just whatever digits happened to follow.
+// The merkle root gets the same truncation but no highlight: it was never
+// mined against a difficulty target, so no prefix of it is "proven" zeros.
+const hashWork = splitHashWork(block.shortHash, block.difficulty);
+const merkleShort = shortHash(block.merkleRoot);
 ---
 
 <div class="row" data-block={block.height}>
@@ -22,9 +31,9 @@ const { block, isNewest, isOldest } = Astro.props;
     </div>
     <dl class="meta">
       <dt>Hash</dt>
-      <dd><span class="hash">{block.hash}</span></dd>
+      <dd><span class="hash">{hashWork.marker}<mark class="zeros">{hashWork.zeros}</mark>{hashWork.rest}</span></dd>
       <dt>Merkle</dt>
-      <dd><span class="hash">{block.merkleRoot}</span></dd>
+      <dd><span class="hash">{merkleShort}</span></dd>
     </dl>
     <WorkMeter nonce={block.nonce} difficulty={block.difficulty} />
     {block.transactions.length > 0 ? (
