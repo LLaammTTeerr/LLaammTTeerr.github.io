@@ -75,3 +75,42 @@ now.
 **Reasoning:** the alternative was leaving the branch red. The edits are small and in the same
 failure class as D3. I would rather a reviewer confirm them with fresh eyes than have me wave
 them through on the implementer's description.
+
+---
+
+## D5 — the homepage and `/blocks` render the identical list
+
+**Found:** the homepage already listed every block, so building `/blocks` produced two routes
+with the same content. It also means the homepage grows without bound as the chain does.
+
+**Decision:** the homepage shows the **latest 5 blocks** plus a link to `/blocks`; `/blocks`
+keeps the complete list.
+
+**Reasoning:** this is what every block explorer does, and it is the only version where the two
+routes have distinct jobs. The alternative — deleting `/blocks` — loses the ability to browse
+the whole chain, which is worse as the chain grows.
+
+**To reverse:** change one slice in `index.astro`. Note it does change several
+`homepage.test.ts` assertions, so a revert means revisiting those too.
+
+**Ambiguity for you:** 5 is my pick, not a derived number. Say a word if you want more or fewer.
+
+---
+
+## D6 — five nav links 404 on every page
+
+**Found:** the header links `/tx`, `/address`, `/assets`, `/mempool` and `/verify`. None of those
+routes exist — they belong to the next two plans — so five of the eight nav entries land on the
+404 page that Task 6 just built.
+
+**Decision:** render an unbuilt nav entry as plain text rather than a link, until its route
+exists.
+
+**Reasoning:** the nav should describe the site truthfully. A link that 404s claims a page
+exists; plain text says "this is part of the plan, not yet built" without lying about it. The
+same reasoning as not showing a hash for a block that has not been mined. It also removes the
+reason Task 6's link-integrity test had to scope itself to `<main>` — once nothing in the nav is
+a dead link, that test can cover the whole page.
+
+**To reverse:** each becomes a link again as its route lands; the next plan will do that
+route by route.
