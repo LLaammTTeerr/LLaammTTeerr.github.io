@@ -1,0 +1,40 @@
+---
+import WorkMeter from './WorkMeter.astro';
+import type { BlockView } from '../site/chain-data';
+
+interface Props { block: BlockView; isNewest: boolean; isOldest: boolean }
+const { block, isNewest, isOldest } = Astro.props;
+---
+
+<div class="row" data-block={block.height}>
+  <div class="gutter">
+    <span class="spine" data-first={isNewest} data-last={isOldest}></span>
+    <span class={`n${block.isEmpty ? ' q' : ''}`}>#{block.height}</span>
+    <span class={`dot${block.isEmpty ? ' q' : ''}`}></span>
+  </div>
+  <article class={`card${block.isEmpty ? ' empty' : ''}`}>
+    <div class="card-top">
+      <span class="per">{block.period}{block.isGenesis ? ' · genesis' : ''}</span>
+      <span class="stamp">Sealed</span>
+    </div>
+    <dl class="meta">
+      <dt>Hash</dt>
+      <dd><span class="hash">{block.hash}</span></dd>
+      <dt>Merkle</dt>
+      <dd><span class="hash">{block.merkleRoot}</span></dd>
+    </dl>
+    <WorkMeter nonce={block.nonce} difficulty={block.difficulty} />
+    {block.transactions.length > 0 ? (
+      <ul class="txs">
+        {block.transactions.map((tx) => (
+          <li>
+            <span class="t">{tx.title ?? 'Amendment'}</span>
+            <span class="g">{tx.gasUsed} từ · {tx.value.toFixed(1)} giờ</span>
+          </li>
+        ))}
+      </ul>
+    ) : (
+      <p class="silent">Không có bài viết nào trong tháng này. Khối vẫn được đào.</p>
+    )}
+  </article>
+</div>
