@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readDist, readDistCss } from './dist';
+import { cssPerPage, distPages, readDist, readDistCss, withoutNamespaceUris } from './dist';
 import { parseRules, selectorParts, declaredValue, stripComments } from './css';
 import { METERS, DEFAULTS } from '../../src/site/themes';
 import { getBlocks, splitHashWork } from '../../src/site/chain-data';
@@ -11,15 +11,51 @@ import { getBlocks, splitHashWork } from '../../src/site/chain-data';
 // visible at a time.
 
 describe('no external requests', () => {
-  it('the built page references no absolute http(s) url', () => {
-    // Not a style preference: §9 requires the page make no third-party
-    // request. A CDN font, an analytics tag or an external stylesheet would
-    // all show up here.
-    expect(readDist('index.html')).not.toMatch(/https?:\/\//);
+  // Not a style preference: §9 requires a page load touch no third party. A
+  // CDN font, an analytics tag or an external stylesheet would all show up
+  // here.
+  //
+  // Every page, not just the homepage. Scoped to `index.html`, this guard was
+  // blind to the one route that vendored a third-party library: adding a CDN
+  // stylesheet and a tracking pixel to `[slug].astro` shipped both to
+  // `dist/tx/…/index.html` with all 145 site tests green.
+  it('finds more than one page to check', () => {
+    // Anti-vacuity: a loop over an empty or single-page list would pass while
+    // asserting nothing about the routes added since.
+    expect(distPages().length).toBeGreaterThan(1);
+    expect(distPages()).toContain('index.html');
   });
 
-  it('the built css references no absolute http(s) url', () => {
-    expect(readDistCss()).not.toMatch(/https?:\/\//);
+  it('no built page references an absolute http(s) url', () => {
+    for (const page of distPages()) {
+      expect(withoutNamespaceUris(readDist(page)), `${page} makes a third-party request`).not.toMatch(
+        /https?:\/\//,
+      );
+    }
+  });
+
+  it('no stylesheet any built page loads references an absolute http(s) url', () => {
+    for (const [page, css] of cssPerPage()) {
+      expect(css, `css loaded by ${page} makes a third-party request`).not.toMatch(/https?:\/\//);
+    }
+  });
+
+  it('excuses xml namespace identifiers, and nothing else', () => {
+    // The carry note this guard had to satisfy: a post containing `$O(n)$`
+    // gains `xmlns="http://www.w3.org/1998/Math/MathML"` from KaTeX, which is
+    // an inert identifier, not a fetch. Excluding it must not open a hole —
+    // so this pins both halves rather than loosening the pattern.
+    const mathml = '<math xmlns="http://www.w3.org/1998/Math/MathML"><mi>n</mi></math>';
+    expect(withoutNamespaceUris(mathml)).not.toMatch(/https?:\/\//);
+
+    for (const real of [
+      '<link rel="stylesheet" href="https://cdn.evil.example.com/tracker.css" />',
+      '<img src="https://tracker.example.com/pixel.gif" alt="" />',
+      '<use xlink:href="https://evil.example.com/sprite.svg#i" />',
+      '<svg xmlns="http://www.w3.org/2000/svg"><image href="http://evil.example.com/x.png" /></svg>',
+    ]) {
+      expect(withoutNamespaceUris(real), `${real} was excused as a namespace`).toMatch(/https?:\/\//);
+    }
   });
 });
 
