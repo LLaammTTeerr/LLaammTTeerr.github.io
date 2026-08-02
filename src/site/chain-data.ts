@@ -12,9 +12,23 @@ const LOCK_PATH = 'chain.lock.json';
 
 let cached: Chain | null = null;
 
+/**
+ * The cache is a singleton for the whole build, and every view shares its
+ * nested arrays by reference. Freezing once on read means a template that
+ * sorts a `transactions` array in place fails loudly at the mutation instead
+ * of silently corrupting every page rendered after it.
+ */
+function deepFreeze<T>(value: T): T {
+  if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const inner of Object.values(value)) deepFreeze(inner);
+  }
+  return value;
+}
+
 /** Memoized: a static build renders many pages from one ledger read. */
 export function getChain(): Chain {
-  cached ??= readLock(LOCK_PATH, CHAIN_CONFIG.difficulty);
+  cached ??= deepFreeze(readLock(LOCK_PATH, CHAIN_CONFIG.difficulty));
   return cached;
 }
 

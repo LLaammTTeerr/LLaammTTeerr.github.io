@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  getChain, getBlocks, getBlock, getPosts, getStats,
+  getChain, getBlocks, getBlock, getPosts, getAssets, getStats,
   workRatio, expectedAttempts,
 } from '../../src/site/chain-data';
 
@@ -106,7 +106,70 @@ describe('getStats', () => {
     expect(getStats().addresses).toBe(seen.size);
   });
 
+  // Pins a concrete number from the committed ledger rather than
+  // re-deriving it with the same walk as the implementation — a shared
+  // conceptual mistake in both would otherwise pass silently.
+  it('counts exactly the two addresses in the committed ledger', () => {
+    expect(getStats().addresses).toBe(2);
+  });
+
   it('reports the chain difficulty', () => {
     expect(getStats().difficulty).toBe(getChain().difficulty);
+  });
+});
+
+describe('cache immutability', () => {
+  it('freezes the chain, its blocks, transactions, and asset registry', () => {
+    const chain = getChain();
+    expect(Object.isFrozen(chain)).toBe(true);
+    expect(Object.isFrozen(chain.blocks)).toBe(true);
+    expect(Object.isFrozen(chain.assets)).toBe(true);
+    for (const block of chain.blocks) {
+      expect(Object.isFrozen(block)).toBe(true);
+      expect(Object.isFrozen(block.transactions)).toBe(true);
+      for (const tx of block.transactions) expect(Object.isFrozen(tx)).toBe(true);
+    }
+  });
+
+  it('throws rather than silently accepting a mutation on a returned transaction', () => {
+    const post = getPosts()[0]!;
+    const originalHash = post.hash;
+    expect(() => {
+      (post as { hash: string }).hash = 'mutated';
+    }).toThrow(TypeError);
+    // Not just "it threw" — the cache a later page reads must be unchanged.
+    expect(getPosts()[0]!.hash).toBe(originalHash);
+    expect(getChain().blocks.flatMap((b) => b.transactions)[0]!.hash).toBe(originalHash);
+  });
+
+  it("throws rather than silently accepting a mutation on a returned block's transactions array", () => {
+    const block = getBlocks().find((b) => b.transactions.length > 0)!;
+    const originalLength = block.transactions.length;
+    expect(() => {
+      block.transactions.push(block.transactions[0]!);
+    }).toThrow(TypeError);
+    expect(getBlock(block.height)!.transactions).toHaveLength(originalLength);
+    expect(getChain().blocks.find((b) => b.height === block.height)!.transactions).toHaveLength(
+      originalLength,
+    );
+  });
+
+  it('throws rather than silently accepting a mutation on the frozen asset registry', () => {
+    // The committed ledger mints no assets yet, so there is no individual
+    // AssetRecord to attempt to mutate — but the array itself must still
+    // reject a push, since that would poison every later page's asset list.
+    const originalLength = getChain().assets.length;
+    expect(() => {
+      getChain().assets.push({
+        tokenId: 999,
+        hash: '0xdeadbeef',
+        file: 'nonexistent.png',
+        mime: 'image/png',
+        bytes: 0,
+        mintedIn: 0,
+      });
+    }).toThrow(TypeError);
+    expect(getAssets()).toHaveLength(originalLength);
+    expect(getChain().assets).toHaveLength(originalLength);
   });
 });
