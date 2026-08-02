@@ -1,4 +1,6 @@
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { canonicalRecordedTx } from './canonical';
 import { orderedTransaction } from './lock';
 import type { Hex, Transaction } from './types';
 import { transactionStructuralProblem } from './verify';
@@ -29,6 +31,25 @@ export interface PendingLock {
 
 export const PENDING_PATH = 'chain.pending.json';
 
+/**
+ * The same digest `sha256Hex` produces, computed synchronously.
+ *
+ * `readPending` is sync and is read from sync template code; WebCrypto's
+ * `digest` is not, and making the whole read path async to reach it would
+ * change every caller for no gain in what is proved. This module is Node-only
+ * already — it reads and deletes files — and nothing here is in `verify.ts`'s
+ * browser closure, which imports in the other direction.
+ *
+ * Only the *hashing* is duplicated, never the canonical form: that comes from
+ * `canonicalRecordedTx`, the single definition `verifyBlock` also uses. The
+ * two hashers are pinned against each other in `tests/chain/pending.test.ts`,
+ * whose fixtures compute their hashes with `sha256Hex` and are then accepted
+ * — or rejected — by this one.
+ */
+function sha256HexSync(data: string): Hex {
+  return '0x' + createHash('sha256').update(data, 'utf8').digest('hex');
+}
+
 /** Same conventions as the lock: explicit key order, 2-space indent, trailing newline. */
 export function serializePending(pending: PendingLock): string {
   const ordered = {
@@ -42,7 +63,9 @@ export function serializePending(pending: PendingLock): string {
 }
 
 /**
- * Read the open block, or `null` if there isn't a usable one.
+ * Read the open block, or `null` if there isn't a usable one — where "usable"
+ * means every recorded transaction's hash recomputes from its own fields, not
+ * merely that the file is shaped like an open block.
  *
  * Deliberately total: unlike `readLock`, this **never throws**. The lock is the
  * ledger and a corrupt one must stop the build; this file is provisional and
@@ -78,8 +101,29 @@ export function readPending(path: string): PendingLock | null {
   const transactions = p.transactions as Transaction[];
   // A transaction serialized without `research` (a post) round-trips as
   // `undefined`; normalize so the in-memory shape matches the lock reader's.
+  // Before the hash check, not after: an amendment's `research` participates in
+  // its canonical form, so an `undefined` there would fail to canonicalize.
   for (const tx of transactions) {
     if (tx.research === undefined) tx.research = null;
+  }
+
+  // §3.6 — "a pending transaction still carries its own real hash". Shape is
+  // not realness: `transactionStructuralProblem` checks that `hash` is 64 hex
+  // digits, not that it is the sha256 of this transaction's own canonical
+  // form. Nothing else ever checks this file — `buildChain` reads it for
+  // periods and overwrites it, and `/verify` cannot see the open block at all
+  // — so without this a hand-edited or badly merged `chain.pending.json`
+  // publishes a fabricated hash, title and value through a green `astro
+  // build`. The lock is `verifyChain`'d twice per `chain:build`; this holds
+  // the open block to the same standard.
+  //
+  // Rejecting the whole file rather than the offending transaction, and by
+  // returning null rather than throwing: the file is provisional and fully
+  // derivable from `content/` plus the lock, so a corrupt one must never take
+  // the build down (see the contract above).
+  for (const tx of transactions) {
+    const canonical = canonicalRecordedTx(tx);
+    if (canonical === null || sha256HexSync(canonical) !== tx.hash) return null;
   }
 
   return {

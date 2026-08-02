@@ -1,4 +1,4 @@
-import { canonicalAmendmentTx, canonicalBlockHeader, canonicalPostTx } from './canonical';
+import { canonicalBlockHeader, canonicalRecordedTx } from './canonical';
 import { sha256Hex } from './hash';
 import { merkleRootHex } from './merkle';
 import type { Block, Chain, Hex, Transaction } from './types';
@@ -154,38 +154,14 @@ export function assetRecordProblem(rec: unknown): string | null {
  * Recompute a transaction's hash from the fields the ledger records. Returns
  * null when the record cannot produce a canonical form at all, which is itself
  * a verification failure.
+ *
+ * The canonical form lives in `canonical.ts` so `readPending` can recompute a
+ * pending transaction's hash against exactly the same definition this uses for
+ * sealed ones.
  */
 async function expectedTxHash(tx: Transaction): Promise<Hex | null> {
-  if (tx.type === 'post') {
-    if (tx.title === null) return null;
-    return sha256Hex(
-      canonicalPostTx({
-        title: tx.title,
-        date: tx.date,
-        tags: tx.tags,
-        series: tx.series,
-        // §3.8 — a post's declared research hours ARE its value.
-        research: tx.value,
-        from: tx.from,
-        contentHash: tx.contentHash,
-        assets: tx.assets,
-      }),
-    );
-  }
-  if (tx.title === null || tx.amends === null || tx.research == null) return null;
-  return sha256Hex(
-    canonicalAmendmentTx({
-      amends: tx.amends,
-      date: tx.date,
-      title: tx.title,
-      tags: tx.tags,
-      series: tx.series,
-      research: tx.research,
-      from: tx.from,
-      contentHash: tx.contentHash,
-      assets: tx.assets,
-    }),
-  );
+  const canonical = canonicalRecordedTx(tx);
+  return canonical === null ? null : sha256Hex(canonical);
 }
 
 /**

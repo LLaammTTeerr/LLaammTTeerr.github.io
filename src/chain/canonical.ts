@@ -1,4 +1,4 @@
-import type { BlockHeader, Hex } from './types';
+import type { BlockHeader, Hex, Transaction } from './types';
 
 /** §3.1 — normalize before hashing. Applied to raw Markdown, never to rendered HTML. */
 export function normalizeBody(body: string): string {
@@ -84,6 +84,49 @@ export function canonicalAmendmentTx(a: CanonicalAmendmentFields): string {
     `assets:${[...a.assets].sort().join(',')}`,
     `body:${a.contentHash}`,
   ].join('\n');
+}
+
+/**
+ * §3.2/§3.9 — the canonical form of a transaction as the ledger records it, or
+ * `null` when the record cannot produce one at all (itself a verification
+ * failure rather than a reason to throw).
+ *
+ * One definition, because two readers need it and a second copy would drift:
+ * `verifyBlock` recomputes every sealed transaction's hash from this, and
+ * `readPending` recomputes every recorded open-block transaction's hash from
+ * it. Pure and browser-safe, like the rest of this module.
+ *
+ * Note which field carries the declared hours. A post's ARE its `value`
+ * (§3.8). An amendment's live in `research`, because its `value` must stay 0
+ * so block aggregation cannot re-charge hours already counted in the block
+ * that sealed the original (§3.9).
+ */
+export function canonicalRecordedTx(tx: Transaction): string | null {
+  if (tx.type === 'post') {
+    if (tx.title === null) return null;
+    return canonicalPostTx({
+      title: tx.title,
+      date: tx.date,
+      tags: tx.tags,
+      series: tx.series,
+      research: tx.value,
+      from: tx.from,
+      contentHash: tx.contentHash,
+      assets: tx.assets,
+    });
+  }
+  if (tx.title === null || tx.amends === null || tx.research == null) return null;
+  return canonicalAmendmentTx({
+    amends: tx.amends,
+    date: tx.date,
+    title: tx.title,
+    tags: tx.tags,
+    series: tx.series,
+    research: tx.research,
+    from: tx.from,
+    contentHash: tx.contentHash,
+    assets: tx.assets,
+  });
 }
 
 export function canonicalBlockHeader(h: BlockHeader): string {
