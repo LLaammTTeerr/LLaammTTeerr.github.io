@@ -11,13 +11,17 @@
 @import '@fontsource/jetbrains-mono/latin-400.css';
 @import '@fontsource/jetbrains-mono/latin-600.css';
 
-/* Fontsource's own @font-face rules carry the unicode-range and font-display.
-   This block documents the Vietnamese range for the coverage test and pins
-   the swap behaviour in case a future import stops setting it. */
-@font-face {
-  font-family: 'Be Vietnam Pro';
-  font-display: swap;
-  src: local('Be Vietnam Pro');
-  unicode-range: U+1EA0-1EF9, U+0102-0103, U+0110-0111, U+0128-0129,
-                 U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+20AB;
-}
+/* Vietnamese lives in Latin Extended Additional, U+1EA0-1EF9, plus a
+   handful of precomposed letters outside that block: Ă/ă U+0102-0103,
+   Đ/đ U+0110-0111, Ĩ/ĩ U+0128-0129, Ũ/ũ U+0168-0169, Ơ/ơ U+01A0-01A1,
+   Ư/ư U+01AF-01B0, and the đồng sign U+20AB.
+   This is a comment, not a rule. An earlier version of this file declared
+   a fourth @font-face here — `src: local('Be Vietnam Pro')` — meant only to
+   document the range and pin font-display. In practice it competed with the
+   imported rules above: on a machine with a same-named local font installed
+   (common on Linux distros that package Google Fonts), the browser could
+   silently substitute that uncontrolled local copy for the vendored,
+   checker-verified one — the exact failure this task exists to close.
+   Coverage is verified against the real font files by
+   scripts/check-vietnamese.ts and tests/site/fonts.test.ts, not documented
+   in the cascade. */

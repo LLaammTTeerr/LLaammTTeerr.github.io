@@ -14,14 +14,20 @@ import { join } from 'node:path';
 const SAMPLE = 'Khối đầu tiên · Ghi chú thuật toán · Đường đi · Tư tưởng · Cộng hòa';
 
 export function hasVietnameseSubset(pkgDir: string): boolean {
-  const files = readdirSync(join(pkgDir, 'files'));
-  return files.some((f) => f.includes('vietnamese') && f.endsWith('.woff2'));
+  return vietnameseFilesFor(pkgDir).length > 0;
 }
 
 export function vietnameseFilesFor(pkgDir: string): string[] {
-  return readdirSync(join(pkgDir, 'files'))
-    .filter((f) => f.includes('vietnamese') && f.endsWith('.woff2'))
-    .sort();
+  // A candidate package that doesn't follow Fontsource's `files/` layout (or
+  // doesn't exist at all) has no Vietnamese subset by definition — that's a
+  // clean "no coverage" verdict, not a crash.
+  let files: string[];
+  try {
+    files = readdirSync(join(pkgDir, 'files'));
+  } catch {
+    return [];
+  }
+  return files.filter((f) => f.includes('vietnamese') && f.endsWith('.woff2')).sort();
 }
 
 const PACKAGES = [
