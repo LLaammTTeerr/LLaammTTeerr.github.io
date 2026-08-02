@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { CHAIN_CONFIG } from '../../chain.config';
-import { normalizeBody } from '../chain/canonical';
+import { normalizeBody, wordCount } from '../chain/canonical';
 import { sha256Hex } from '../chain/hash';
 import { readLock } from '../chain/lock';
 import { isStale, PENDING_PATH, readPending } from '../chain/pending';
@@ -164,12 +164,58 @@ export function getPendingPosts(): Transaction[] {
 
 const POSTS_DIR = 'content/posts';
 
+/** §3.9 — where the amendment that records a post's current state now sits. */
+export interface AmendedIn {
+  /**
+   * The block holding the amendment. A committed height while `sealed`; the
+   * open block's predicted height otherwise, which is why the notice built
+   * from this must not name a block number until it is sealed.
+   */
+  height: number;
+  /** False while the amendment is still in the open block (§3.6). */
+  sealed: boolean;
+}
+
 export interface PostContent {
   slug: string;
   /** Normalized body — byte-for-byte what the chain committed. */
   body: string;
   contentHash: Hex;
+  /**
+   * The chain's original `post` transaction for this slug. Once an amendment
+   * supersedes it this is history: it names when the post entered the chain
+   * and what it said then, and it describes **none** of what is rendered.
+   */
   tx: Transaction;
+  /**
+   * The transaction whose hash commits to `body` — the newest amendment, or
+   * `tx` when nothing amends it.
+   *
+   * Every field a page states about the text beside it must come from here.
+   * Rendering `tx`'s hash, title, tags, gas and value over an amended body
+   * printed a hash that does not commit to the words under it, which is the
+   * one falsehood this project cannot ship (§3.2, §7).
+   */
+  governing: Transaction;
+  /** True while `governing` is in the open block — it is not `Sealed` (§3.6). */
+  pending: boolean;
+  /**
+   * §3.8 — the word count of `body`, recomputed rather than read off a
+   * transaction. `gasUsed` is a derived field, and an amendment's is 0 by
+   * design (§3.9) so block totals cannot double-count it; the original's is
+   * the count of text that is no longer on screen. A count taken from a body
+   * whose hash `governing` commits to is verifiable, which neither of those
+   * is.
+   */
+  gasUsed: number;
+  /**
+   * §3.8/§3.9 — the declared research hours the chain's newest record carries:
+   * an amendment's `research`, or a post's `value`. An amendment's own `value`
+   * is 0 by design and must never be displayed as the figure.
+   */
+  value: number;
+  /** §3.9 — null when nothing amends this post. */
+  amendedIn: AmendedIn | null;
 }
 
 /**
@@ -194,20 +240,22 @@ export interface PostContent {
  * made, so there is no better signal to use; `detectAmendments` emits at most
  * one per post per build, which keeps that shape rare.)
  */
-function latestAmendment(txHash: Hex): Transaction | null {
+function latestAmendment(txHash: Hex): (AmendedIn & { tx: Transaction }) | null {
   const amends = (t: Transaction): boolean => t.type === 'amendment' && t.amends === txHash;
 
   const pending = getPendingBlock();
   if (pending !== null) {
     let newest: Transaction | null = null;
     for (const tx of pending.transactions) if (amends(tx)) newest = tx;
-    if (newest !== null) return newest;
+    if (newest !== null) return { tx: newest, height: pending.height, sealed: false };
   }
 
   const ascending = [...getChain().blocks].sort((a, b) => a.height - b.height);
-  let latest: Transaction | null = null;
+  let latest: (AmendedIn & { tx: Transaction }) | null = null;
   for (const block of ascending) {
-    for (const tx of block.transactions) if (amends(tx)) latest = tx;
+    for (const tx of block.transactions) {
+      if (amends(tx)) latest = { tx, height: block.height, sealed: true };
+    }
   }
   return latest;
 }
@@ -268,7 +316,7 @@ export async function getPostContent(
   // The chain's latest word on this post — what the file must match, and what
   // the error names. Reporting the sealed hash once an amendment supersedes it
   // would send the author chasing text the chain has already moved on from.
-  const expected = amendment === null ? tx.contentHash : amendment.contentHash;
+  const expected = amendment === null ? tx.contentHash : amendment.tx.contentHash;
 
   if (actual !== expected) {
     // The remedy is the same command either way, but not the same event: an
@@ -284,10 +332,32 @@ export async function getPostContent(
     );
   }
 
-  // The recorded hash that matched — the amendment's, or the sealed one — so
-  // the page renders a body and a hash that belong to each other and the
-  // verify control can only agree.
-  return { slug, body, contentHash: expected, tx };
+  // The transaction that matched — the amendment's, or the original — so the
+  // page renders a body and a hash that belong to each other and the verify
+  // control can only agree. Resolved here and nowhere else: a component that
+  // repeated this walk would be free to disagree with the hash the body was
+  // just accepted against.
+  const governing = amendment === null ? tx : amendment.tx;
+  return {
+    slug,
+    body,
+    contentHash: expected,
+    tx,
+    governing,
+    // An unamended post is pending exactly when the chain has not sealed it;
+    // an amended one is pending exactly when its newest amendment has not
+    // sealed, whatever the original did. The stamp describes the transaction
+    // on screen, and after an amendment that is the amendment (§3.6).
+    pending: amendment === null ? sealed === undefined : !amendment.sealed,
+    // §3.8 — derived from the body, not read off a transaction. `body` has
+    // already been proved to hash to what `governing` commits to, so this
+    // count is as verifiable as the hash beside it.
+    gasUsed: wordCount(body),
+    // §3.9 — an amendment's declared hours live in `research`; its `value` is
+    // 0 so block aggregation cannot re-charge them.
+    value: governing.type === 'amendment' ? (governing.research ?? 0) : governing.value,
+    amendedIn: amendment === null ? null : { height: amendment.height, sealed: amendment.sealed },
+  };
 }
 
 export interface PendingBlockView {

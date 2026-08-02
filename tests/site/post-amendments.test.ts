@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { normalizeBody } from '../../src/chain/canonical';
+import { normalizeBody, wordCount } from '../../src/chain/canonical';
 import { sha256Hex } from '../../src/chain/hash';
 import { readLock } from '../../src/chain/lock';
 import { readPending, type PendingLock } from '../../src/chain/pending';
@@ -32,32 +32,52 @@ vi.mock('../../src/chain/pending', async (importOriginal) => {
 });
 
 const SLUG = 'bai-viet';
+const POST_TITLE = 'Bài viết';
+const AMENDED_TITLE = 'Bài viết (đã sửa)';
 const ADDR = '0x' + 'c'.repeat(40);
 const POST_HASH = '0x' + '11'.repeat(32);
 const OTHER_POST_HASH = '0x' + '22'.repeat(32);
 const TIP_HASH = '0x' + '99'.repeat(32);
+/** The amendment sealed in block #2 — the chain's newest word on the post. */
+const SEALED_AMENDMENT = '0x' + 'dd'.repeat(32);
+/** An amendment in the still-open block, newer than everything sealed. */
+const PENDING_AMENDMENT = '0x' + 'ee'.repeat(32);
+/** A second post on the same chain that nothing amends — the control. */
+const UNAMENDED_SLUG = 'bai-khac';
+const UNAMENDED_HASH = '0x' + '33'.repeat(32);
 
 /**
  * Writes a post file and reports the hash the chain would commit for it —
  * through `parsePost`/`normalizeBody`/`sha256Hex`, the same pipeline
  * `chain:build` uses, so the fixture's recorded hashes are real ones.
  */
-async function postOnDisk(body: string): Promise<{ dir: string; contentHash: Hex }> {
+async function postOnDisk(
+  body: string,
+  slug: string = SLUG,
+): Promise<{ dir: string; contentHash: Hex; words: number }> {
   const dir = mkdtempSync(join(tmpdir(), 'amend-'));
   const raw = `---\ntitle: "Bài viết"\ndate: 2026-06-15\ntags: [meta]\nresearch: 1.0\n---\n\n${body}\n`;
-  const path = join(dir, `${SLUG}.md`);
+  const path = join(dir, `${slug}.md`);
   writeFileSync(path, raw);
-  return { dir, contentHash: await sha256Hex(normalizeBody(parsePost(path, raw).body)) };
+  const normalized = normalizeBody(parsePost(path, raw).body);
+  return { dir, contentHash: await sha256Hex(normalized), words: wordCount(normalized) };
 }
 
+/**
+ * §3.9 — an amendment carries the post's full new metadata, and carries
+ * `gasUsed: 0` / `value: 0` by design so block aggregation cannot re-charge
+ * the original's. Every field here differs from the post transaction below, so
+ * a page that reads any of them off the original instead can be told apart
+ * from one that reads them off the amendment.
+ */
 function amendment(amends: Hex, contentHash: Hex, hash: Hex): Transaction {
   return {
     hash,
     type: 'amendment',
     slug: null,
-    title: 'Bài viết',
+    title: AMENDED_TITLE,
     date: '2026-06-15',
-    tags: ['meta'],
+    tags: ['meta', 'chain'],
     series: null,
     from: ADDR,
     to: [],
@@ -65,7 +85,7 @@ function amendment(amends: Hex, contentHash: Hex, hash: Hex): Transaction {
     assets: [],
     gasUsed: 0,
     value: 0,
-    research: 1,
+    research: 9.5,
     amends,
   };
 }
@@ -88,24 +108,31 @@ function block(height: number, transactions: Transaction[], hash: Hex): Block {
 }
 
 /** v1 sealed, v2 amended, v3 amended again — v3 is the post's current state. */
-let v1: { dir: string; contentHash: Hex };
-let v2: { dir: string; contentHash: Hex };
-let v3: { dir: string; contentHash: Hex };
-let v4: { dir: string; contentHash: Hex };
-let unrecorded: { dir: string; contentHash: Hex };
+type OnDisk = { dir: string; contentHash: Hex; words: number };
+let v1: OnDisk;
+let v2: OnDisk;
+let v3: OnDisk;
+let v4: OnDisk;
+let unrecorded: OnDisk;
+/** The unamended control post, on the same chain and in its own directory. */
+let other: OnDisk;
 
 beforeAll(async () => {
+  // Deliberately different lengths: `gasUsed` is derived from the body (§3.8),
+  // so a page reading the original transaction's count instead of recomputing
+  // from the body on screen must produce a different number here.
   v1 = await postOnDisk('Phiên bản một.');
   v2 = await postOnDisk('Phiên bản hai.');
-  v3 = await postOnDisk('Phiên bản ba.');
-  v4 = await postOnDisk('Phiên bản bốn.');
+  v3 = await postOnDisk('Phiên bản ba, dài hơn hẳn.');
+  v4 = await postOnDisk('Phiên bản bốn, dài hơn nữa và thêm vài chữ.');
   unrecorded = await postOnDisk('Một sửa đổi chưa được ghi lại.');
+  other = await postOnDisk('Một bài khác, không ai sửa.', UNAMENDED_SLUG);
 
   const post: Transaction = {
     hash: POST_HASH,
     type: 'post',
     slug: SLUG,
-    title: 'Bài viết',
+    title: POST_TITLE,
     date: '2026-06-15',
     tags: ['meta'],
     series: null,
@@ -119,6 +146,28 @@ beforeAll(async () => {
     amends: null,
   };
 
+  // The control: same chain, no amendment anywhere against it. Its committed
+  // `gasUsed` is the real word count of its file, so "recomputed from the body"
+  // and "read off the transaction" agree here and disagree for `post` above —
+  // which is what makes the amended assertions discriminating.
+  const unamended: Transaction = {
+    hash: UNAMENDED_HASH,
+    type: 'post',
+    slug: UNAMENDED_SLUG,
+    title: 'Bài khác',
+    date: '2026-06-20',
+    tags: ['meta'],
+    series: null,
+    from: ADDR,
+    to: [],
+    contentHash: other.contentHash,
+    assets: [],
+    gasUsed: other.words,
+    value: 2.5,
+    research: null,
+    amends: null,
+  };
+
   // Ascending by height, as `readLock` returns it. The older amendment (v2)
   // sits in the lower block, the newer one (v3) in the tip: an implementation
   // that walks the wrong way, or keeps the first match instead of the last,
@@ -127,9 +176,9 @@ beforeAll(async () => {
     version: 1,
     difficulty: 5,
     blocks: [
-      block(0, [post], '0x' + 'aa'.repeat(32)),
+      block(0, [post, unamended], '0x' + 'aa'.repeat(32)),
       block(1, [amendment(POST_HASH, v2.contentHash, '0x' + 'bb'.repeat(32))], '0x' + 'cc'.repeat(32)),
-      block(2, [amendment(POST_HASH, v3.contentHash, '0x' + 'dd'.repeat(32))], TIP_HASH),
+      block(2, [amendment(POST_HASH, v3.contentHash, SEALED_AMENDMENT)], TIP_HASH),
     ],
     assets: [],
   };
@@ -152,19 +201,87 @@ describe('getPostContent, on a post the chain has amended', () => {
     // only hash consulted and this body could never be accepted — no matter how
     // many times the error's own advice was followed.
     vi.mocked(readPending).mockReturnValue(
-      pendingWith([amendment(POST_HASH, v4.contentHash, '0x' + 'ee'.repeat(32))]),
+      pendingWith([amendment(POST_HASH, v4.contentHash, PENDING_AMENDMENT)]),
     );
 
     const content = await getPostContent(SLUG, v4.dir);
     expect(content.contentHash).toBe(v4.contentHash);
     expect(await sha256Hex(content.body)).toBe(content.contentHash);
-    // The transaction is still the post's — an amendment has no slug (§3.9).
+    // `tx` stays the post's — an amendment has no slug (§3.9), so the original
+    // is what a slug resolves to. It is history from here on, not a
+    // description of the page: `governing` is what the page must render from.
     expect(content.tx.hash).toBe(POST_HASH);
+    expect(content.governing.hash).toBe(PENDING_AMENDMENT);
+    expect(content.governing.hash).not.toBe(content.tx.hash);
   });
 
   it('accepts the body recorded by the newest sealed amendment', async () => {
     const content = await getPostContent(SLUG, v3.dir);
     expect(content.contentHash).toBe(v3.contentHash);
+  });
+
+  it('governs the page with the amendment that commits to the body, not the post', async () => {
+    // The Critical. The page used to render the amendment's *body* under the
+    // original's hash, title, tags, gas and value, stamped `Sealed`: a hash
+    // presented as chain-attested that does not commit to the text beside it.
+    const content = await getPostContent(SLUG, v3.dir);
+
+    // The hash whose canonical form ends `body:<contentHash of what is shown>`.
+    expect(content.governing.hash).toBe(SEALED_AMENDMENT);
+    expect(content.governing.contentHash).toBe(await sha256Hex(content.body));
+
+    // Metadata: §3.9 says an amendment carries the post's full new state, and
+    // "consumers wanting current tags read the `tags` field of the newest
+    // amendment".
+    expect(content.governing.title).toBe(AMENDED_TITLE);
+    expect(content.governing.title).not.toBe(content.tx.title);
+    expect(content.governing.tags).toEqual(['meta', 'chain']);
+
+    // §3.8 — gas is derived from the body, recomputed rather than read off a
+    // transaction. The original's count describes text no longer on screen,
+    // and the amendment's own is 0 by design.
+    expect(content.gasUsed).toBe(wordCount(content.body));
+    expect(content.gasUsed).not.toBe(content.tx.gasUsed);
+    expect(content.governing.gasUsed).toBe(0);
+
+    // §3.9 — the declared hours live in `research`; `value` stays 0 so block
+    // aggregation cannot re-charge them.
+    expect(content.value).toBe(9.5);
+    expect(content.governing.value).toBe(0);
+    expect(content.value).not.toBe(content.tx.value);
+  });
+
+  it('names the sealed block holding the amendment, and stamps it sealed', async () => {
+    // §3.9 — "The original post page then displays 'Amended in block #N'".
+    const content = await getPostContent(SLUG, v3.dir);
+    expect(content.amendedIn).toEqual({ height: 2, sealed: true });
+    expect(content.pending).toBe(false);
+  });
+
+  it('says the amendment is still open rather than naming a block it has not joined', async () => {
+    // An open block's height is a prediction a size split can still change, so
+    // the notice must not name it, and the panel must not stamp `Sealed` over
+    // a transaction the chain has not committed to (§3.6).
+    vi.mocked(readPending).mockReturnValue(
+      pendingWith([amendment(POST_HASH, v4.contentHash, PENDING_AMENDMENT)]),
+    );
+    const content = await getPostContent(SLUG, v4.dir);
+    expect(content.amendedIn).toEqual({ height: 3, sealed: false });
+    expect(content.pending).toBe(true);
+  });
+
+  it('leaves an unamended post describing itself', async () => {
+    // The control: with no amendment, `governing` IS the post, `gasUsed`
+    // recomputes to the transaction's own committed count, and nothing claims
+    // an amendment exists. Without this the assertions above are satisfied by
+    // an implementation that always prefers an amendment-shaped answer.
+    const content = await getPostContent(UNAMENDED_SLUG, other.dir);
+    expect(content.governing).toBe(content.tx);
+    expect(content.governing.hash).toBe(UNAMENDED_HASH);
+    expect(content.gasUsed).toBe(content.tx.gasUsed);
+    expect(content.value).toBe(content.tx.value);
+    expect(content.amendedIn).toBeNull();
+    expect(content.pending).toBe(false);
   });
 
   it('refuses a body recorded only by a superseded amendment', async () => {
@@ -176,7 +293,7 @@ describe('getPostContent, on a post the chain has amended', () => {
 
   it('prefers the pending amendment over every sealed one', async () => {
     vi.mocked(readPending).mockReturnValue(
-      pendingWith([amendment(POST_HASH, v4.contentHash, '0x' + 'ee'.repeat(32))]),
+      pendingWith([amendment(POST_HASH, v4.contentHash, PENDING_AMENDMENT)]),
     );
     // v3 is the newest *sealed* state, but a later amendment is already
     // recorded in the open block, so v3 is no longer what the chain records.
@@ -229,7 +346,7 @@ describe('getPostContent, on a post the chain has amended', () => {
     // A stale open block belongs to a history this chain no longer has; its
     // amendment must not admit a body (`getPendingBlock` returns null).
     vi.mocked(readPending).mockReturnValue({
-      ...pendingWith([amendment(POST_HASH, v4.contentHash, '0x' + 'ee'.repeat(32))]),
+      ...pendingWith([amendment(POST_HASH, v4.contentHash, PENDING_AMENDMENT)]),
       prevHash: '0x' + '77'.repeat(32),
     });
     await expect(getPostContent(SLUG, v4.dir)).rejects.toThrow(/does not match the chain/);

@@ -65,7 +65,9 @@ beforeAll(() => {
     '}',
     '---',
     '<BlockCard block={pending} isNewest={true} isOldest={true} />',
-    '<TxPanel tx={firstTx} pending={true} />',
+    // gasUsed/value are the transaction's own here: this fixture's first
+    // transaction is a post, not an amendment (§3.9).
+    '<TxPanel tx={firstTx} pending={true} gasUsed={firstTx.gasUsed} value={firstTx.value} amendedIn={null} />',
     '',
   ].join('\n');
   writeFileSync(join(dir, 'src/pages/pending-fixture.astro'), page);

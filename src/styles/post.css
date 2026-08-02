@@ -10,6 +10,12 @@
   padding: .26rem .5rem; transform: rotate(-3deg); }
 .txpanel .addr { color: var(--c-addr); font-family: var(--mono); word-break: break-all; }
 .txpanel .tagname { color: var(--c-tag); font-family: var(--mono); margin-right: .6rem; }
+/* §3.9 — "Đã sửa trong khối #N". Set apart from the field list above it: this
+   is the one line of author-facing prose in the panel, and it explains why the
+   hash beside it is not the one the block card for this post still shows. */
+.txpanel .amended { margin: .85rem 0 0; padding-top: .7rem;
+  border-top: 1px solid var(--line); font-size: .78rem; color: var(--dim); }
+.txpanel .amended a { color: var(--acc); }
 
 article.post { max-width: 38rem; margin: 2rem auto 0; }
 article.post h1 { font-size: clamp(1.5rem, 3.4vw, 2rem); line-height: 1.25;

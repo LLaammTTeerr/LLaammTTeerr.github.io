@@ -13,32 +13,49 @@ import '../../styles/katex.css';
  * would make a freshly published post indistinguishable from a publishing
  * failure.
  *
- * `pending` travels with each path rather than being re-derived in the page:
- * the two lists are the only place that knows which block a transaction came
- * from, and `TxPanel` requires the answer.
+ * The paths carry the slug and nothing else. Everything this page states comes
+ * from `getPostContent`, which is the one place that resolves *which* recorded
+ * transaction the body on disk matches — the sealed original, or the newest
+ * amendment superseding it (§3.9). Passing the sealed transaction through as a
+ * prop is what shipped an amended body under the original's hash, title, tags,
+ * gas and value, stamped `Sealed`: two answers to "which transaction is this
+ * page about", from two places, silently disagreeing.
  *
  * No clock is read here, and none is passed: `getPendingBlock()` returns the
  * placement `chain:build` recorded (§14), so this route renders the same pages
  * on any day for the same chain.
  */
 export function getStaticPaths() {
-  return [
-    ...getPosts().map((tx) => ({ params: { slug: tx.slug! }, props: { tx, pending: false } })),
-    ...getPendingPosts().map((tx) => ({ params: { slug: tx.slug! }, props: { tx, pending: true } })),
-  ];
+  return [...getPosts(), ...getPendingPosts()].map((tx) => ({
+    params: { slug: tx.slug! },
+    props: { slug: tx.slug! },
+  }));
 }
 
-const { tx, pending } = Astro.props;
+const { slug } = Astro.props;
 // Throws if the file on disk no longer matches the chain — the build fails
 // rather than shipping a page whose verify control would contradict it.
-const content = await getPostContent(tx.slug!);
+const content = await getPostContent(slug);
 const html = await renderMarkdown(content.body);
+
+// The chain's current word on this post: the newest amendment's metadata, or
+// the original's when nothing amends it. Both record types carry a title
+// (§3.2, §3.9); `Transaction.title` is nullable only because one shape in the
+// union has none, and the original is the honest fallback if it ever were.
+const tx = content.governing;
+const title = tx.title ?? content.tx.title ?? slug;
 ---
 
-<Base title={`${tx.title} — Blogchain`} description={`${tx.title} · ${tx.gasUsed} từ`}>
-  <TxPanel tx={tx} pending={pending} />
+<Base title={`${title} — Blogchain`} description={`${title} · ${content.gasUsed} từ`}>
+  <TxPanel
+    tx={tx}
+    pending={content.pending}
+    gasUsed={content.gasUsed}
+    value={content.value}
+    amendedIn={content.amendedIn}
+  />
   <article class="post">
-    <h1>{tx.title}</h1>
+    <h1>{title}</h1>
     <p class="byline">{tx.date} · {tx.tags.map((t) => `#${t}`).join(' ')}</p>
     <Fragment set:html={html} />
   </article>

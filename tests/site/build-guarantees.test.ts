@@ -2,6 +2,10 @@ import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { sandboxRepo, buildSandbox, chainBuildSandbox, pendingIdsIn } from './sandbox';
+import { canonicalRecordedTx, normalizeBody, wordCount } from '../../src/chain/canonical';
+import { sha256Hex } from '../../src/chain/hash';
+import { parsePost } from '../../src/chain/post';
+import type { Transaction } from '../../src/chain/types';
 import { getPosts } from '../../src/site/chain-data';
 
 /**
@@ -159,6 +163,136 @@ describe('the edit cycle a published post actually goes through', () => {
       existsSync(join(dir, 'dist/tx', SLUG, 'index.html')),
       'a page was emitted for a body the chain does not record',
     ).toBe(false);
+  }, 300_000);
+});
+
+describe("an amended post's page describes the amendment, not the original", () => {
+  /**
+   * The Critical this branch shipped: `/tx/<slug>` rendered the amendment's
+   * *body* underneath the original transaction's hash, title, tags, gas and
+   * value, stamped `Sealed`, with no notice anywhere that the post had been
+   * amended. The hash printed beside the text did not commit to it — which is
+   * the one thing this whole project claims (§3.2, §7).
+   *
+   * Nothing in the suite caught it because nothing compared a *rendered* field
+   * against the chain's *latest* record. So this drives a real edit through a
+   * real `chain:build` and a real `astro build`, then recomputes the shown
+   * hash from the shown transaction's own fields and checks that its `body:`
+   * line is the sha256 of the body on the page.
+   */
+  const NEW_TITLE = 'Khối đầu tiên (đã sửa)';
+  const NEW_SENTENCE = 'Một câu bổ sung hoàn toàn mới.';
+
+  /** Applies the edit an author would make: title, tags, research, body. */
+  function amend(dir: string): void {
+    const path = join(dir, POST);
+    const original = readFileSync(path, 'utf8');
+    const edited =
+      original
+        .replace('title: "Khối đầu tiên"', `title: "${NEW_TITLE}"`)
+        .replace('tags: [meta]', 'tags: [meta, chain]')
+        .replace('research: 1.0', 'research: 9.5')
+        .replace(/\n*$/, '\n') + `\n${NEW_SENTENCE}\n`;
+    expect(edited, 'the fixture post no longer has the frontmatter this edit targets').not.toBe(original);
+    writeFileSync(path, edited);
+  }
+
+  function panelOf(html: string): string {
+    const panel = /<div class="txpanel">[\s\S]*?<article class="post">/.exec(html);
+    expect(panel, 'the page rendered no transaction panel at all').not.toBeNull();
+    return panel![0];
+  }
+
+  it('prints a hash that commits to the text beside it, with the amended metadata', async () => {
+    const dir = sandboxRepo();
+    const sealedHash = getPosts()[0]!.hash;
+    amend(dir);
+
+    const record = chainBuildSandbox(dir, '2026-08-05');
+    expect(record.status, `chain:build failed:\n${record.output}`).toBe(0);
+    expect(pendingIdsIn(dir), 'the edit produced no amendment').toContain(sealedHash);
+
+    const build = buildSandbox(dir);
+    expect(build.status, `sandbox build failed:\n${build.output}`).toBe(0);
+    const html = readFileSync(join(dir, 'dist/tx', SLUG, 'index.html'), 'utf8');
+    const panel = panelOf(html);
+
+    // The recorded amendment, and the hash the panel actually printed.
+    const pending = JSON.parse(readFileSync(join(dir, 'chain.pending.json'), 'utf8')) as {
+      transactions: Transaction[];
+    };
+    const shown = /class="a-hash"><span class="tilde">~<\/span>(0x[0-9a-f]{64})</.exec(panel);
+    expect(shown, 'the panel printed no unconfirmed transaction hash').not.toBeNull();
+    const hash = shown![1]!;
+    expect(hash, 'the panel printed the superseded original as this page\'s transaction').not.toBe(sealedHash);
+
+    const tx = pending.transactions.find((t) => t.hash === hash);
+    expect(tx, 'the hash on the page is in no record the build wrote').toBeDefined();
+
+    // The whole point. Recompute the printed hash from the printed
+    // transaction's own fields, and check the body it commits to is the body
+    // rendered underneath it.
+    const canonical = canonicalRecordedTx(tx!);
+    expect(canonical, 'the shown transaction cannot be canonicalized').not.toBeNull();
+    expect(await sha256Hex(canonical!), 'the printed hash is not the hash of its own fields').toBe(hash);
+    const body = normalizeBody(parsePost(join(dir, POST), readFileSync(join(dir, POST), 'utf8')).body);
+    expect(canonical!.split('\n').at(-1), 'the printed hash commits to other text than the page shows')
+      .toBe(`body:${await sha256Hex(body)}`);
+
+    // Every field the review found lying, checked against that same record.
+    expect(html).toContain(`>${NEW_TITLE}</h1>`);
+    expect(html).toContain(`<title>${NEW_TITLE}`);
+    expect(html, 'the page is still headed by the superseded title').not.toMatch(
+      /<h1[^>]*>Khối đầu tiên<\/h1>/,
+    );
+    expect(panel).toContain('chain.tag');
+    expect(html).toContain('#meta #chain');
+    // §3.8 — gas is derived from the body, so it must be the count of the
+    // words on this page, not the original transaction's stale figure.
+    expect(panel).toContain(`<span class="num">${wordCount(body)}</span> từ`);
+    expect(panel, 'gas is the superseded transaction\'s word count').not.toContain(
+      `<span class="num">${getPosts()[0]!.gasUsed}</span> từ`,
+    );
+    // §3.9 — the declared hours live in `research`; `value` is 0 on purpose.
+    expect(panel).toContain('<span class="num">9.5</span> giờ nghiên cứu');
+    expect(panel, 'value came from the superseded transaction').not.toContain('<span class="num">1.0</span> giờ');
+    // §3.6 — the amendment is in the open block, so nothing here is `Sealed`.
+    expect(panel).toContain('Chưa niêm phong');
+    expect(panel, 'an unsealed amendment was stamped Sealed').not.toContain('>Sealed<');
+    // §3.9's notice, which must not name a block the amendment has not joined.
+    expect(panel).toContain('Đã sửa');
+    expect(panel, 'the notice named a predicted block height as a fact').not.toMatch(
+      /Đã sửa trong khối <a href="\/block\/\d+">/,
+    );
+  }, 300_000);
+
+  it('names the block once the amendment seals, and links it', () => {
+    const dir = sandboxRepo();
+    amend(dir);
+    expect(chainBuildSandbox(dir, '2026-08-05').status).toBe(0);
+    const seal = chainBuildSandbox(dir, '2026-09-05');
+    expect(seal.status, `chain:build failed:\n${seal.output}`).toBe(0);
+
+    const build = buildSandbox(dir);
+    expect(build.status, `sandbox build failed:\n${build.output}`).toBe(0);
+    const panel = panelOf(readFileSync(join(dir, 'dist/tx', SLUG, 'index.html'), 'utf8'));
+
+    // The height comes from the lock the build wrote, never from a literal.
+    const lock = JSON.parse(readFileSync(join(dir, 'chain.lock.json'), 'utf8')) as {
+      blocks: { height: number; transactions: { type: string }[] }[];
+    };
+    const holder = lock.blocks.find((b) => b.transactions.some((t) => t.type === 'amendment'));
+    expect(holder, 'no block on the chain holds the amendment').toBeDefined();
+
+    // §3.9 — "The original post page then displays 'Amended in block #N',
+    // linking to the amendment."
+    expect(panel).toContain(
+      `Đã sửa trong khối <a href="/block/${holder!.height}">#${holder!.height}</a>`,
+    );
+    expect(panel).toContain('<span class="stamp">Sealed</span>');
+    // And the original is still reachable: it is what the block card for this
+    // post shows, so the page must say which transaction it supersedes.
+    expect(panel).toContain(`<dt>Amends</dt><dd><span class="hash">${getPosts()[0]!.hash}</span></dd>`);
   }, 300_000);
 });
 

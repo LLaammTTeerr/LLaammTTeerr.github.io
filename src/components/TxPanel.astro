@@ -1,5 +1,6 @@
 ---
 import type { Transaction } from '../chain/types';
+import type { AmendedIn } from '../site/chain-data';
 import { getBlocks, getPendingBlock, researchHours } from '../site/chain-data';
 import { routeById } from '../site/routes';
 import PendingState from './PendingState.astro';
@@ -10,13 +11,31 @@ import PendingState from './PendingState.astro';
 import '../styles/chain.css';
 import '../styles/post.css';
 
-// `pending` is required on purpose, with no default. A caller that forgot it
-// used to render `Sealed` over an unconfirmed transaction — the one falsehood
-// §3.6 is most explicit about ("a pending hash presented with the same
-// authority as a sealed one would be the single most misleading thing this
-// site could display"). Every caller now has to say which state it is in.
-interface Props { tx: Transaction; pending: boolean }
-const { tx, pending } = Astro.props;
+// Every prop is required on purpose, with no default.
+//
+// `pending`: a caller that forgot it used to render `Sealed` over an
+// unconfirmed transaction — the one falsehood §3.6 is most explicit about ("a
+// pending hash presented with the same authority as a sealed one would be the
+// single most misleading thing this site could display").
+//
+// `gasUsed` and `value`: a transaction cannot state either about itself once
+// it is an amendment. §3.9 fixes an amendment's `gasUsed` and `value` at 0 so
+// block aggregation cannot re-charge the original's, and puts the declared
+// hours in `research` instead. Defaulting to `tx.gasUsed` / `tx.value` would
+// therefore print `0 từ · —` under an amended post's text, so the caller — the
+// only party that knows which body is on screen — has to supply both.
+interface Props {
+  /** The transaction being described: the one whose hash commits to the text. */
+  tx: Transaction;
+  pending: boolean;
+  /** §3.8 — word count of the body shown beside this panel. */
+  gasUsed: number;
+  /** §3.8 — declared research hours from the record `tx` is. */
+  value: number;
+  /** §3.9 — set when `tx` is the amendment that supersedes an earlier record. */
+  amendedIn: AmendedIn | null;
+}
+const { tx, pending, gasUsed, value, amendedIn } = Astro.props;
 
 // A pending transaction is in no sealed block, and `getBlocks()` reads sealed
 // history only — searching it for one found nothing and rendered `—` for the
@@ -26,10 +45,10 @@ const { tx, pending } = Astro.props;
 const block = pending
   ? getPendingBlock()
   : getBlocks().find((b) => b.transactions.some((t) => t.hash === tx.hash));
-const readMinutes = Math.max(1, Math.round(tx.gasUsed / 200));
+const readMinutes = Math.max(1, Math.round(gasUsed / 200));
 // null when the author declared no `research` — §3.8 wants an em dash there,
 // not the `0.0` the chain (correctly) committed.
-const hours = researchHours(tx.value);
+const hours = researchHours(value);
 
 // A tag or series is an address in the `/address` namespace, which — like
 // the nav entries in src/site/routes.ts, and read from that same list — has
@@ -74,7 +93,7 @@ const address = routeById('address');
         <span class="tagname">{tx.series}.series</span>
       )) : null}
     </dd>
-    <dt>Gas used</dt><dd><span class="num">{tx.gasUsed}</span> từ · {readMinutes} phút đọc</dd>
+    <dt>Gas used</dt><dd><span class="num">{gasUsed}</span> từ · {readMinutes} phút đọc</dd>
     <dt>Value</dt>
     <dd>{hours ? <><span class="num">{hours}</span> giờ nghiên cứu</> : '—'}</dd>
     {tx.assets.length > 0 ? (
@@ -83,7 +102,32 @@ const address = routeById('address');
         <dd><span class="num">{tx.assets.length}</span> token</dd>
       </>
     ) : null}
+    {amendedIn !== null && tx.amends !== null ? (
+      <>
+        {/* The transaction this one supersedes. Without it the original hash
+            — which is what /blocks and the sealed block's own page still show
+            for this post — vanishes from the post page entirely, and a reader
+            arriving from either has no way to reconcile the two. */}
+        <dt>Amends</dt>
+        <dd><span class="hash">{tx.amends}</span></dd>
+      </>
+    ) : null}
   </dl>
+  {amendedIn !== null ? (
+    // §3.9 — "The original post page then displays 'Amended in block #N',
+    // linking to the amendment." Author-facing copy, so Vietnamese; the field
+    // labels above are explorer chrome and stay English.
+    //
+    // A block number is named only once the amendment has sealed. While it is
+    // in the open block its height is a prediction a size split can still
+    // change, so naming it would be the same falsehood as `/block/<height>`
+    // for the open block, which the branch already refuses to build.
+    <p class="amended">{amendedIn.sealed ? (
+      <Fragment>Đã sửa trong khối <a href={`/block/${amendedIn.height}`}>#{amendedIn.height}</a></Fragment>
+    ) : (
+      <Fragment>Đã sửa; bản đính chính đang chờ trong <a href="/blocks">khối chưa niêm phong</a></Fragment>
+    )}</p>
+  ) : null}
   {pending ? (
     <PendingState
       fill="sửa bài lúc này sẽ đổi hash, chưa sinh bản đính chính"
