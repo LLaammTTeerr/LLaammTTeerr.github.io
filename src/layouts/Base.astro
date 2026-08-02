@@ -1,5 +1,6 @@
 ---
 import { PREFS_INLINE_SCRIPT } from '../site/prefs-script';
+import { ROUTES } from '../site/routes';
 import Preferences from '../components/Preferences.astro';
 import '../styles/fonts.css';
 import '../styles/tokens.css';
@@ -12,28 +13,12 @@ interface Props {
 
 const { title, description = 'Blog của lamter, hiển thị như một trình duyệt blockchain.' } = Astro.props;
 
-/**
- * The nav names the site's full shape, not just what this build produces —
- * `/tx`, `/address`, `/assets`, `/mempool` and `/verify` belong to later
- * plans and have no route yet. `built: false` is the only difference between
- * an entry here and a real link: the label, order and position stay put, and
- * the next plan lands a route by flipping one boolean rather than editing
- * markup. Rendering it as a link anyway would send a reader to the 404 page.
- */
-interface NavEntry {
-  href: string;
-  label: string;
-  built: boolean;
-}
-
-const NAV: NavEntry[] = [
-  { href: '/blocks', label: 'Blocks', built: true },
-  { href: '/tx', label: 'Transactions', built: false },
-  { href: '/address', label: 'Addresses', built: false },
-  { href: '/assets', label: 'Assets', built: false },
-  { href: '/mempool', label: 'Mempool', built: false },
-  { href: '/verify', label: 'Verify', built: false },
-];
+// The nav names the site's full shape, not just what this build produces —
+// see src/site/routes.ts. `built: false` is the only difference between an
+// entry here and a real link: the label, order and position stay put, and
+// the next plan lands a route by flipping one boolean there rather than
+// editing this markup. Rendering it as a link anyway would send a reader to
+// the 404 page.
 ---
 
 <html lang="vi">
@@ -48,7 +33,7 @@ const NAV: NavEntry[] = [
     <nav class="nav">
       <a class="brand" href="/">lamter<span>.eth</span></a>
       <ul>
-        {NAV.map((entry) => (
+        {ROUTES.map((entry) => (
           <li>{entry.built ? (
             <a href={entry.href}>{entry.label}</a>
           ) : (

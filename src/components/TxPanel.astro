@@ -1,6 +1,7 @@
 ---
 import type { Transaction } from '../chain/types';
 import { getBlocks, getPendingBlock, researchHours } from '../site/chain-data';
+import { routeById } from '../site/routes';
 import PendingState from './PendingState.astro';
 // `.meta`, `.hash` and `.num` are BlockCard's dense-metadata classes
 // (src/styles/chain.css) — reused verbatim here rather than redefined, so
@@ -29,6 +30,12 @@ const readMinutes = Math.max(1, Math.round(tx.gasUsed / 200));
 // null when the author declared no `research` — §3.8 wants an em dash there,
 // not the `0.0` the chain (correctly) committed.
 const hours = researchHours(tx.value);
+
+// A tag or series is an address in the `/address` namespace, which — like
+// the nav entries in src/site/routes.ts, and read from that same list — has
+// no page yet. Naming it stays; linking it to a route this build cannot
+// produce would be the identical dead link the nav used to ship.
+const address = routeById('address');
 ---
 
 <div class="txpanel">
@@ -56,8 +63,16 @@ const hours = researchHours(tx.value);
     <dt>From</dt><dd><span class="addr">{tx.from}</span></dd>
     <dt>To</dt>
     <dd>
-      {tx.tags.map((t) => <a class="tagname" href={`/address/${t}.tag`}>{t}.tag</a>)}
-      {tx.series ? <a class="tagname" href={`/address/${tx.series}.series`}>{tx.series}.series</a> : null}
+      {tx.tags.map((t) => (address.built ? (
+        <a class="tagname" href={`${address.href}/${t}.tag`}>{t}.tag</a>
+      ) : (
+        <span class="tagname">{t}.tag</span>
+      )))}
+      {tx.series ? (address.built ? (
+        <a class="tagname" href={`${address.href}/${tx.series}.series`}>{tx.series}.series</a>
+      ) : (
+        <span class="tagname">{tx.series}.series</span>
+      )) : null}
     </dd>
     <dt>Gas used</dt><dd><span class="num">{tx.gasUsed}</span> từ · {readMinutes} phút đọc</dd>
     <dt>Value</dt>

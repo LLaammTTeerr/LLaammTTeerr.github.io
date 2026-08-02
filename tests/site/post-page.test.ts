@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { readDist } from './dist';
 import { getBlocks, getPosts } from '../../src/site/chain-data';
 import { PREFS_INLINE_SCRIPT } from '../../src/site/prefs-script';
+import { routeById } from '../../src/site/routes';
 import { buildSandbox, chainBuildSandbox, sandboxRepo } from './sandbox';
 
 const slug = () => getPosts()[0]!.slug!;
@@ -57,9 +58,29 @@ describe('post page', () => {
     expect(page()).toContain(`<span class="num">${tx.value.toFixed(1)}</span>`);
   });
 
-  it('links to each tag address the post sent to', () => {
+  it('names each tag address the post sent to, and links it only once /address exists', () => {
+    // The old version of this test asserted the tag was a link, full stop —
+    // which pinned a bug: `/address` has no page, so that link 404s on every
+    // post. The real contract is the tag is always *named*, and becomes a
+    // link exactly when its route exists — read from the same ROUTES list
+    // TxPanel itself reads, not hard-coded, so this flips the moment a later
+    // plan lands `/address` and TxPanel starts linking it.
     const tx = getPosts()[0]!;
-    for (const tag of tx.tags) expect(page()).toContain(`/address/${tag}.tag`);
+    expect(tx.tags.length, 'the fixture post declares no tags to check').toBeGreaterThan(0);
+    const address = routeById('address');
+    for (const tag of tx.tags) {
+      expect(page(), `${tag}.tag is not named on the page at all`).toContain(`${tag}.tag`);
+      if (address.built) {
+        expect(page(), `${tag}.tag should be a real link now that /address exists`).toContain(
+          `<a class="tagname" href="${address.href}/${tag}.tag">${tag}.tag</a>`,
+        );
+      } else {
+        expect(
+          page(),
+          `${tag}.tag links to ${address.href}, which the build does not produce`,
+        ).not.toContain(`href="${address.href}/${tag}.tag"`);
+      }
+    }
   });
 
   it('keeps the panel labels in English and the prose in Vietnamese', () => {

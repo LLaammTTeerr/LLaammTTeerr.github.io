@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { DIST, distPages, readDist } from './dist';
+import { ROUTES } from '../../src/site/routes';
 
 /**
  * Fix 2: `Base.astro`'s nav names the site's whole shape, including routes
@@ -29,14 +30,11 @@ function navItems(html: string): string[] {
   return [...navOf(html).matchAll(/<li>([\s\S]*?)<\/li>/g)].map((m) => m[1]!.replace(/<[^>]+>/g, '').trim());
 }
 
-const BUILT = [{ href: '/blocks', label: 'Blocks' }];
-const NOT_BUILT = [
-  { href: '/tx', label: 'Transactions' },
-  { href: '/address', label: 'Addresses' },
-  { href: '/assets', label: 'Assets' },
-  { href: '/mempool', label: 'Mempool' },
-  { href: '/verify', label: 'Verify' },
-];
+// Read from src/site/routes.ts, the single list Base.astro's nav and
+// TxPanel's tag/series links both render from — not re-declared here, so
+// this file cannot silently drift from what the site actually ships.
+const BUILT = ROUTES.filter((r) => r.built);
+const NOT_BUILT = ROUTES.filter((r) => !r.built);
 
 // A handful of routes with genuinely different templates, not every page in
 // the build — the nav is identical `Base.astro` chrome everywhere, so more
@@ -129,29 +127,27 @@ function resolves(href: string): boolean {
   return existsSync(path) && !statSync(path).isDirectory();
 }
 
-/**
- * `TxPanel.astro` links each post's tags and series to `/address/<tag>.tag`
- * and `/address/<series>.series` — the same class of "link to a route from a
- * later plan" that this file otherwise catches, but a pre-existing, already
- * and separately tested design (`tests/site/post-page.test.ts` — "links to
- * each tag address the post sent to"). Fix 2 named only `Base.astro:29-33`;
- * changing TxPanel's links would fail that other, intentional test and was
- * never in scope here. Excluded explicitly, rather than the check silently
- * passing: an unscoped version of this test fails on every build today for
- * a reason that has nothing to do with the nav, which is what this file is
- * actually proving.
- */
-const KNOWN_PREEXISTING_DEAD_LINK = /^\/address\/[^/]+\.(tag|series)$/;
-
 describe('link integrity across the whole page', () => {
   it('finds more than one page to check', () => {
     expect(distPages().length).toBeGreaterThan(1);
   });
 
-  it('no link anywhere in any built page 404s, aside from the pre-existing tag/series address links', () => {
+  it('checks a dotted-looking href as a route, not skips it as a static file', () => {
+    // `/address/<tag>.tag` looks like a filename (a dot before the end), but
+    // it is a route this app defines, not a static asset. A resolver that
+    // special-cased "the last path segment has a dot in it" to mean "skip,
+    // probably a file" would silently stop checking exactly this shape of
+    // link — which is precisely how `TxPanel.astro`'s dead `/address/<tag>.tag`
+    // links shipped past an earlier, unscoped link check. `resolves` here
+    // makes no such exception: it only ever asks the filesystem.
+    expect(resolves('/address/meta.tag')).toBe(false);
+    expect(resolves('/blocks')).toBe(true);
+  });
+
+  it('no link anywhere in any built page 404s', () => {
     let checked = 0;
     for (const page of distPages()) {
-      const hrefs = internalHrefs(readDist(page)).filter((h) => !KNOWN_PREEXISTING_DEAD_LINK.test(h));
+      const hrefs = internalHrefs(readDist(page));
       checked += hrefs.length;
       for (const href of hrefs) {
         expect(resolves(href), `${href} is linked from ${page} but was never built`).toBe(true);
