@@ -11,6 +11,7 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "chain:build": "tsx scripts/build-chain.ts",
+    "check:vietnamese": "tsx scripts/check-vietnamese.ts",
     "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview",

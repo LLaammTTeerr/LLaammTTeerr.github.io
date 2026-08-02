@@ -1,0 +1,23 @@
+/* Self-hosted. No CDN: the build must work offline and the site must make no
+   third-party request per page load (§9). */
+
+@import '@fontsource/be-vietnam-pro/vietnamese-400.css';
+@import '@fontsource/be-vietnam-pro/vietnamese-600.css';
+@import '@fontsource/be-vietnam-pro/latin-400.css';
+@import '@fontsource/be-vietnam-pro/latin-600.css';
+
+@import '@fontsource/jetbrains-mono/vietnamese-400.css';
+@import '@fontsource/jetbrains-mono/vietnamese-600.css';
+@import '@fontsource/jetbrains-mono/latin-400.css';
+@import '@fontsource/jetbrains-mono/latin-600.css';
+
+/* Fontsource's own @font-face rules carry the unicode-range and font-display.
+   This block documents the Vietnamese range for the coverage test and pins
+   the swap behaviour in case a future import stops setting it. */
+@font-face {
+  font-family: 'Be Vietnam Pro';
+  font-display: swap;
+  src: local('Be Vietnam Pro');
+  unicode-range: U+1EA0-1EF9, U+0102-0103, U+0110-0111, U+0128-0129,
+                 U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+20AB;
+}
