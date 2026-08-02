@@ -1,0 +1,43 @@
+---
+import type { Transaction } from '../chain/types';
+import { getBlocks } from '../site/chain-data';
+// `.meta`, `.hash` and `.num` are BlockCard's dense-metadata classes
+// (src/styles/chain.css) — reused verbatim here rather than redefined, so
+// the transaction panel and the block cards read as the same monospace,
+// token-coloured chrome instead of drifting into two competing styles.
+import '../styles/chain.css';
+import '../styles/post.css';
+
+interface Props { tx: Transaction }
+const { tx } = Astro.props;
+
+const block = getBlocks().find((b) => b.transactions.some((t) => t.hash === tx.hash));
+const readMinutes = Math.max(1, Math.round(tx.gasUsed / 200));
+---
+
+<div class="txpanel">
+  <div class="txpanel-head">
+    <span class="lbl">Transaction</span>
+    <span class="stamp">Confirmed</span>
+  </div>
+  <dl class="meta">
+    <dt>Hash</dt><dd><span class="hash">{tx.hash}</span></dd>
+    <dt>Block</dt>
+    <dd>{block ? <a href={`/block/${block.height}`}>#{block.height}</a> : '—'} · {block?.period}</dd>
+    <dt>Timestamp</dt><dd>{tx.date}</dd>
+    <dt>From</dt><dd><span class="addr">{tx.from}</span></dd>
+    <dt>To</dt>
+    <dd>
+      {tx.tags.map((t) => <a class="tagname" href={`/address/${t}.tag`}>{t}.tag</a>)}
+      {tx.series ? <a class="tagname" href={`/address/${tx.series}.series`}>{tx.series}.series</a> : null}
+    </dd>
+    <dt>Gas used</dt><dd><span class="num">{tx.gasUsed}</span> từ · {readMinutes} phút đọc</dd>
+    <dt>Value</dt><dd><span class="num">{tx.value.toFixed(1)}</span> giờ nghiên cứu</dd>
+    {tx.assets.length > 0 ? (
+      <>
+        <dt>Assets</dt>
+        <dd><span class="num">{tx.assets.length}</span> token</dd>
+      </>
+    ) : null}
+  </dl>
+</div>

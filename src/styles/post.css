@@ -1,0 +1,34 @@
+.txpanel { background: var(--surf); border: 1px solid var(--line2);
+  border-radius: 5px; padding: 1rem 1.1rem; }
+.txpanel-head { display: flex; flex-wrap: wrap; gap: .5rem 1rem;
+  align-items: center; margin-bottom: .85rem; }
+.txpanel-head .lbl { font-family: var(--mono); font-size: .7rem;
+  letter-spacing: .1em; text-transform: uppercase; color: var(--dim); }
+.txpanel-head .stamp { margin-left: auto; font-family: var(--mono);
+  font-size: .6rem; letter-spacing: .13em; text-transform: uppercase;
+  color: var(--good); border: 1.5px solid var(--good); border-radius: 2px;
+  padding: .26rem .5rem; transform: rotate(-3deg); }
+.txpanel .addr { color: var(--c-addr); font-family: var(--mono); word-break: break-all; }
+.txpanel .tagname { color: var(--c-tag); font-family: var(--mono); margin-right: .6rem; }
+
+article.post { max-width: 38rem; margin: 2rem auto 0; }
+article.post h1 { font-size: clamp(1.5rem, 3.4vw, 2rem); line-height: 1.25;
+  margin: 0 0 .5rem; letter-spacing: -.018em; font-weight: 660; text-wrap: balance; }
+article.post .byline { font-family: var(--mono); font-size: .7rem;
+  color: var(--dim); margin: 0 0 1.6rem; letter-spacing: .04em; }
+article.post p { font-size: 1.02rem; line-height: 1.78; margin: 0 0 1.15rem; }
+article.post h2 { font-size: 1.15rem; margin: 2rem 0 .7rem; font-weight: 640; }
+article.post h3 { font-size: 1.02rem; margin: 1.6rem 0 .6rem; font-weight: 640; }
+article.post code { font-family: var(--mono); font-size: .88em; }
+article.post pre { background: var(--surf); border: 1px solid var(--line);
+  border-radius: 4px; padding: .85rem .95rem; overflow-x: auto;
+  font-size: .78rem; line-height: 1.6; margin: 0 0 1.15rem; }
+article.post pre code { font-size: inherit; }
+article.post table { width: 100%; border-collapse: collapse; margin: 0 0 1.15rem;
+  font-size: .92rem; display: block; overflow-x: auto; }
+article.post th, article.post td { border-bottom: 1px solid var(--line);
+  padding: .45rem .6rem; text-align: left; }
+article.post blockquote { margin: 0 0 1.15rem; padding-left: .9rem;
+  border-left: 2px solid var(--line2); color: var(--dim); }
+article.post img { max-width: 100%; height: auto; }
+.katex-display { overflow-x: auto; overflow-y: hidden; padding: .2rem 0; }

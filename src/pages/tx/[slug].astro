@@ -1,0 +1,27 @@
+---
+import Base from '../../layouts/Base.astro';
+import TxPanel from '../../components/TxPanel.astro';
+import { getPostContent, getPosts } from '../../site/chain-data';
+import { renderMarkdown } from '../../site/markdown';
+import '../../styles/post.css';
+import '../../styles/katex.css';
+
+export function getStaticPaths() {
+  return getPosts().map((tx) => ({ params: { slug: tx.slug! }, props: { tx } }));
+}
+
+const { tx } = Astro.props;
+// Throws if the file on disk no longer matches the chain — the build fails
+// rather than shipping a page whose verify control would contradict it.
+const content = await getPostContent(tx.slug!);
+const html = await renderMarkdown(content.body);
+---
+
+<Base title={`${tx.title} — Blogchain`} description={`${tx.title} · ${tx.gasUsed} từ`}>
+  <TxPanel tx={tx} />
+  <article class="post">
+    <h1>{tx.title}</h1>
+    <p class="byline">{tx.date} · {tx.tags.map((t) => `#${t}`).join(' ')}</p>
+    <Fragment set:html={html} />
+  </article>
+</Base>

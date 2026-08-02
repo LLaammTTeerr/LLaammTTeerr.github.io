@@ -40,7 +40,7 @@ const merkleShort = shortHash(block.merkleRoot);
       <ul class="txs">
         {block.transactions.map((tx) => (
           <li>
-            <h3 class="t">{tx.title ?? 'Amendment'}</h3>
+            <h3 class="t">{tx.slug ? <a href={`/tx/${tx.slug}`}>{tx.title}</a> : (tx.title ?? 'Amendment')}</h3>
             <span class="g">{tx.gasUsed} từ · {tx.value.toFixed(1)} giờ</span>
           </li>
         ))}
