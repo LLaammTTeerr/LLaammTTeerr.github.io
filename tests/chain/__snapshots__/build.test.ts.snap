@@ -1,0 +1,115 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`buildChain > matches the golden snapshot at a pinned clock 1`] = `
+"{
+  "version": 1,
+  "difficulty": 2,
+  "blocks": [
+    {
+      "height": 0,
+      "period": "2026-06",
+      "prevHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "merkleRoot": "0x57f00ef41d3c0bcbdd757225e04a8025b18176a27461469c99e38959ef548cbd",
+      "timestamp": "2026-06-20T00:00:00Z",
+      "txCount": 2,
+      "gasUsed": 28,
+      "value": 14.5,
+      "difficulty": 2,
+      "nonce": 589,
+      "hash": "0x006f624b6984d51f2ab098b3f6f15760c0bf43d7b4877d13d27fda28768d454a",
+      "transactions": [
+        {
+          "hash": "0x2d280cae40138ffe6fde1f20129548ccb4933931ccfac2eca0e140dbf153c268",
+          "type": "post",
+          "slug": "2026-06-15-first",
+          "title": "Bài viết đầu tiên",
+          "date": "2026-06-15",
+          "tags": [
+            "essay"
+          ],
+          "series": null,
+          "from": "0x017b046a17056ce94749f1d0cf26dfa3e33abc7b",
+          "to": [
+            "0xb8af9916daa8ef78a420f0fcedfba05fad692f87"
+          ],
+          "contentHash": "0x609c8dc55737f9741d0d52cf8f768a3f774a9fcd7f57b214ee06c19b4f114b11",
+          "gasUsed": 8,
+          "value": 2,
+          "amends": null
+        },
+        {
+          "hash": "0x29bf618b50969cce916dd907d8dbd1b1cb81d45d420f859eb7147c8d4ea1c47d",
+          "type": "post",
+          "slug": "2026-06-20-second",
+          "title": "Ghi chú về thuật toán",
+          "date": "2026-06-20",
+          "tags": [
+            "cp",
+            "algorithm"
+          ],
+          "series": "ghi-chu-thuat-toan",
+          "from": "0x017b046a17056ce94749f1d0cf26dfa3e33abc7b",
+          "to": [
+            "0x5e6abdbce628ff0853ca5d2a987785fd3243831b",
+            "0x936973fe3ac981cde4c6c026894ea6cf985ecc45",
+            "0x97f28539f3dcb91809767ac8404ab5b502689a36"
+          ],
+          "contentHash": "0x67447f8a539d3993b928d21ba3b3fa722cf351eb9865be6d2c9588768d99697c",
+          "gasUsed": 20,
+          "value": 12.5,
+          "amends": null
+        }
+      ]
+    },
+    {
+      "height": 1,
+      "period": "2026-07",
+      "prevHash": "0x006f624b6984d51f2ab098b3f6f15760c0bf43d7b4877d13d27fda28768d454a",
+      "merkleRoot": "0x58785b4f3ea07c41e7ffe918285eba63ac431cf8d43ee4dcb6718bfa7d3fcc65",
+      "timestamp": "2026-07-05T00:00:00Z",
+      "txCount": 1,
+      "gasUsed": 8,
+      "value": 0,
+      "difficulty": 2,
+      "nonce": 111,
+      "hash": "0x00074480e3a228dab80b474407150bbf1f088379d778dc9c4851046c7167c436",
+      "transactions": [
+        {
+          "hash": "0x58785b4f3ea07c41e7ffe918285eba63ac431cf8d43ee4dcb6718bfa7d3fcc65",
+          "type": "post",
+          "slug": "2026-07-05-third",
+          "title": "Vì sao tôi bỏ Vim",
+          "date": "2026-07-05",
+          "tags": [
+            "essay"
+          ],
+          "series": null,
+          "from": "0x017b046a17056ce94749f1d0cf26dfa3e33abc7b",
+          "to": [
+            "0xb8af9916daa8ef78a420f0fcedfba05fad692f87"
+          ],
+          "contentHash": "0x51cf198e003eb655b13e4885f7eb1e6bb97f4f9888c9a66e483c7820ea5713f1",
+          "gasUsed": 8,
+          "value": 0,
+          "amends": null
+        }
+      ]
+    },
+    {
+      "height": 2,
+      "period": "2026-08",
+      "prevHash": "0x00074480e3a228dab80b474407150bbf1f088379d778dc9c4851046c7167c436",
+      "merkleRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "timestamp": "2026-08-31T00:00:00Z",
+      "txCount": 0,
+      "gasUsed": 0,
+      "value": 0,
+      "difficulty": 2,
+      "nonce": 320,
+      "hash": "0x003500574a9cc30f78f2c34e2151abba13a7dba8f42a371863c30235bd2b524f",
+      "transactions": []
+    }
+  ]
+}
+"
+`;
