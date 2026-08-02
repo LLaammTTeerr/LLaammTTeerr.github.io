@@ -102,4 +102,15 @@ describe('hashAssetFile', () => {
     await expect(hashAssetFile(dir, 'sub/x.svg', 'p.md')).rejects.toThrow(/\//);
     await expect(hashAssetFile(dir, 'sub\\x.svg', 'p.md')).rejects.toThrow(/\\/);
   });
+
+  it('rejects a lone "." or ".." basename rather than reaching readFileSync on a directory', async () => {
+    // `referencedAssets`' capture group (`[A-Za-z0-9._-]+`) permits `.` and
+    // `..` as full matches — `![x](/assets/..)` captures exactly `..` — so
+    // this is a reachable path, not a hypothetical one. A lone `.` used to
+    // slip past every check here, reach `readFileSync` on `assetsDir`
+    // itself, and throw a bare EISDIR naming no post.
+    const dir = tempAssets();
+    await expect(hashAssetFile(dir, '.', 'p.md')).rejects.toThrow(/invalid asset filename "\."/);
+    await expect(hashAssetFile(dir, '..', 'p.md')).rejects.toThrow(/invalid asset filename "\.\."/);
+  });
 });

@@ -69,11 +69,14 @@ export async function hashAssetFile(
   file: string,
   referencedBy: string,
 ): Promise<AssetFile> {
-  // Not reachable today via `referencedAssets` — its capture group
-  // (`[A-Za-z0-9._-]+`) cannot emit a `/`, `\` or `..`. But this is called
-  // from the build with a filename sourced from post content, so guard
-  // cheaply against path traversal rather than trusting the caller forever.
-  if (file.includes('/') || file.includes('\\') || file.includes('..')) {
+  // `referencedAssets`' capture group (`[A-Za-z0-9._-]+`) permits `.` and
+  // `..` as full matches — `![x](/assets/..)` captures exactly `..` — so this
+  // guard closes a reachable path, not a hypothetical one. It also rejects a
+  // lone `.`: unguarded, that reaches `readFileSync` on `assetsDir` itself
+  // and throws a bare EISDIR naming no post. This is called from the build
+  // with a filename sourced from post content, so guard cheaply against path
+  // traversal rather than trusting the caller forever.
+  if (file.includes('/') || file.includes('\\') || file === '.' || file === '..') {
     throw new Error(`${referencedBy}: invalid asset filename "${file}"`);
   }
   const path = join(assetsDir, file);

@@ -483,6 +483,13 @@ describe('buildChain', () => {
     expect(after.amendments).toBe(1);
     expect(after.chain.assets).toHaveLength(2);
     expect((await verifyChain(after.chain)).ok).toBe(true);
+
+    // The text-edit path already has a "does not re-emit on a subsequent
+    // unchanged build" guard; the asset path stopped short of it. If this
+    // regresses, the failure mode is an amendment emitted on every build
+    // forever.
+    const third = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-12-10', config: CONFIG });
+    expect(third.amendments).toBe(0);
   });
 
   it('fails the build when a post references a missing asset', async () => {

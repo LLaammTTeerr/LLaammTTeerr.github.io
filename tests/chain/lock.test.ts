@@ -324,19 +324,22 @@ describe('readLock', () => {
     expect(() => readLock(path, 5)).toThrow(/blocks/i);
   });
 
-  it('throws when assets array is missing from ledger', () => {
+  it('throws a "predates the registry" error, not a corrupt-ledger error, when assets is absent', () => {
+    // §3.2b — a ledger from before this addendum has no `assets` key at all.
+    // That is a stale-ledger fault, distinct from a hand-corrupted one, and
+    // needs its own diagnosis: re-mine, don't just refuse.
     const path = tempFile('missing-assets.json');
     writeFileSync(path, JSON.stringify({ version: 1, difficulty: 5, blocks: [] }));
-    expect(() => readLock(path, 5)).toThrow(/assets/i);
+    expect(() => readLock(path, 5)).toThrow(/predates the asset registry.*re-mine/is);
   });
 
-  it('throws when assets is not an array', () => {
+  it('throws a corrupt-ledger error when assets is present but not an array', () => {
     const path = tempFile('invalid-assets.json');
     writeFileSync(
       path,
       JSON.stringify({ version: 1, difficulty: 5, blocks: [], assets: 'not an array' }),
     );
-    expect(() => readLock(path, 5)).toThrow(/assets/i);
+    expect(() => readLock(path, 5)).toThrow(/non-array "assets"/i);
   });
 
   it('names the block and the field when a block has no transactions array', () => {
@@ -369,6 +372,32 @@ describe('readLock', () => {
     const path = tempFile('bad-difficulty.json');
     writeFileSync(path, JSON.stringify({ version: 1, difficulty: 'five', blocks: [] }));
     expect(() => readLock(path, 5)).toThrow(/difficulty/i);
+  });
+
+  it('names the offending index when an asset record is null', () => {
+    // §3.2b — `Array.isArray` alone lets a null element through: it would
+    // seed the mint loop's `known` set with `undefined` and then vanish
+    // silently when `serializeChain` drops the record's fields.
+    const path = tempFile('null-asset.json');
+    writeFileSync(
+      path,
+      JSON.stringify({ version: 1, difficulty: 5, blocks: [], assets: [null] }),
+    );
+    expect(() => readLock(path, 5)).toThrow(/asset at index 0.*not an object/is);
+  });
+
+  it('names the offending index and field when an asset record has a wrong-typed field', () => {
+    const path = tempFile('bad-asset-field.json');
+    writeFileSync(
+      path,
+      JSON.stringify({
+        version: 1,
+        difficulty: 5,
+        blocks: [],
+        assets: [{ tokenId: 'x', hash: '0x' + '11'.repeat(32), file: 'a.svg', mime: 'image/svg+xml', bytes: 5, mintedIn: 0 }],
+      }),
+    );
+    expect(() => readLock(path, 5)).toThrow(/asset at index 0.*"tokenId"/is);
   });
 
   it('reads a ledger written before amendments carried metadata', () => {

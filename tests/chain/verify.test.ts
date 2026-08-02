@@ -13,7 +13,7 @@ const ZERO = '0x' + '00'.repeat(32);
 const FROM = '0x' + 'aa'.repeat(20);
 
 /** A post transaction whose hash genuinely commits to its own fields. */
-async function tx(slug: string): Promise<Transaction> {
+async function tx(slug: string, assets: string[] = []): Promise<Transaction> {
   const fields = {
     title: slug,
     date: '2026-07-01',
@@ -22,7 +22,7 @@ async function tx(slug: string): Promise<Transaction> {
     research: 1,
     from: FROM,
     contentHash: ZERO,
-    assets: [],
+    assets,
   };
   return {
     hash: await sha256Hex(canonicalPostTx(fields)),
@@ -512,6 +512,66 @@ describe('browser safety', () => {
       // at runtime, so keep this substring check as a second, cheaper net.
       expect(source, `${file} must stay browser-safe`).not.toContain('node:');
     }
+  });
+});
+
+describe('asset registry', () => {
+  // The brief's fixture spread `{ ...tx('a'), assets: [...] }` without an
+  // `await`, and even awaited, overriding `.assets` after the hash was
+  // already computed over `assets: []` leaves the hash uncommitted to the
+  // override — `txOk` would be false and "accepts a registry consistent
+  // with the transactions" could never pass. `tx()` now takes the assets
+  // array directly so the hash is correct from the start.
+  async function chainWithAsset() {
+    const t = await tx('a', ['0x' + '1a'.repeat(32)]);
+    const b0 = await makeBlock(0, ZERO, [t]);
+    return {
+      version: 1 as const,
+      difficulty: DIFFICULTY,
+      blocks: [b0],
+      assets: [{
+        tokenId: 1, hash: '0x' + '1a'.repeat(32), file: 'a.svg',
+        mime: 'image/svg+xml', bytes: 10, mintedIn: 0,
+      }],
+    };
+  }
+
+  it('accepts a registry consistent with the transactions', async () => {
+    expect((await verifyChain(await chainWithAsset())).ok).toBe(true);
+  });
+
+  it('rejects a referenced asset that has no registry entry', async () => {
+    const chain = await chainWithAsset();
+    chain.assets = [];
+    expect((await verifyChain(chain)).ok).toBe(false);
+  });
+
+  it('rejects a registry entry no transaction references', async () => {
+    const chain = await chainWithAsset();
+    chain.assets.push({
+      tokenId: 2, hash: '0x' + '2b'.repeat(32), file: 'ghost.svg',
+      mime: 'image/svg+xml', bytes: 1, mintedIn: 0,
+    });
+    expect((await verifyChain(chain)).ok).toBe(false);
+  });
+
+  it('rejects a wrong mint block', async () => {
+    const chain = await chainWithAsset();
+    chain.assets[0]!.mintedIn = 5;
+    expect((await verifyChain(chain)).ok).toBe(false);
+  });
+
+  it('rejects non-sequential token ids', async () => {
+    const chain = await chainWithAsset();
+    chain.assets[0]!.tokenId = 7;
+    expect((await verifyChain(chain)).ok).toBe(false);
+  });
+
+  it('does not throw on a malformed registry', async () => {
+    const chain = await chainWithAsset();
+    (chain as unknown as { assets: unknown }).assets = 'not an array';
+    await expect(verifyChain(chain)).resolves.toBeDefined();
+    expect((await verifyChain(chain)).ok).toBe(false);
   });
 });
 

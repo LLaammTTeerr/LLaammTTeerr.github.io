@@ -222,6 +222,48 @@ export async function verifyBlock(
   };
 }
 
+/**
+ * §3.2b — the asset registry is derived data outside the mined header, so it
+ * needs its own check: every referenced hash has exactly one entry, every
+ * entry is referenced, mint blocks match first appearance, and token ids run
+ * 1..n in that same order. Total over untrusted input, like the rest of this
+ * module.
+ */
+function registryProblem(chain: Chain): string | null {
+  if (!Array.isArray(chain.assets)) return 'assets is not an array';
+
+  const firstSeen = new Map<Hex, number>();
+  const order: Hex[] = [];
+  for (const block of chain.blocks) {
+    // A block that is not even an object (e.g. `null`) already fails
+    // structurally and drags `ok` to false on its own; this loop must still
+    // not throw walking past it to look for asset references.
+    if (!isRecord(block) || !Array.isArray(block.transactions)) continue;
+    for (const tx of block.transactions) {
+      if (!isRecord(tx) || !Array.isArray(tx.assets)) continue;
+      for (const hash of tx.assets) {
+        if (typeof hash !== 'string' || firstSeen.has(hash)) continue;
+        firstSeen.set(hash, isFiniteNumber(block.height) ? (block.height as number) : NaN);
+        order.push(hash);
+      }
+    }
+  }
+
+  if (chain.assets.length !== order.length) {
+    return `registry holds ${chain.assets.length} assets but transactions reference ${order.length}`;
+  }
+  for (let i = 0; i < order.length; i++) {
+    const rec = chain.assets[i];
+    if (!rec || typeof rec !== 'object') return `asset #${i} is not a record`;
+    if (rec.hash !== order[i]) return `asset #${i} is out of first-appearance order`;
+    if (rec.tokenId !== i + 1) return `asset #${i} has tokenId ${String(rec.tokenId)}, expected ${i + 1}`;
+    if (rec.mintedIn !== firstSeen.get(order[i]!)) {
+      return `asset ${order[i]} claims mintedIn ${String(rec.mintedIn)} but first appears in block #${String(firstSeen.get(order[i]!))}`;
+    }
+  }
+  return null;
+}
+
 export async function verifyChain(
   chain: Chain,
 ): Promise<{ ok: boolean; blocks: BlockVerification[] }> {
@@ -239,5 +281,6 @@ export async function verifyChain(
     // the next block reports a link failure rather than crashing on it.
     if (result.reason === undefined) prev = block;
   }
-  return { ok: blocks.every((b) => b.ok), blocks };
+  const registry = registryProblem(chain);
+  return { ok: blocks.every((b) => b.ok) && registry === null, blocks };
 }
