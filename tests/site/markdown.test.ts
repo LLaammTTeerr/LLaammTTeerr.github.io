@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { renderMarkdown } from '../../src/site/markdown';
 
 describe('renderMarkdown', () => {
@@ -127,6 +128,59 @@ describe('renderMarkdown', () => {
     it('does not treat code blocks as math', async () => {
       const html = await renderMarkdown('```\ncost = $total\n```\n');
       expect(html).not.toContain('katex');
+    });
+
+    it('ships accessible MathML alongside the visual, aria-hidden tree', async () => {
+      // KaTeX's visual HTML tree is aria-hidden in every output mode — it is
+      // designed to be paired with a MathML sibling, not to stand alone. If
+      // that sibling is missing (e.g. `output: 'html'`), a screen-reader user
+      // gets nothing at all for the formula.
+      const html = await renderMarkdown('$O(n)$\n');
+      expect(html).toMatch(/<math\b/);
+      expect(html).toContain('aria-hidden="true"');
+    });
+
+    it('renders only classes the vendored stylesheet actually styles', async () => {
+      // Guards against `katex`, `rehype-katex`, and `micromark-extension-math`
+      // resolving to *different* katex versions (rehype-katex only declares a
+      // `^0.16.0` peer, so npm will not dedupe a stricter top-level pin).
+      // KaTeX has renamed structural classes across major versions — 0.16's
+      // `.base`/`.strut` became `.katex-base`/`.katex-strut` in 0.18 — so a
+      // skewed install renders markup the vendored stylesheet doesn't style:
+      // correct HTML, wrong CSS, silently broken layout.
+      //
+      // TeX's eight atom types (mord/mop/mbin/mrel/mopen/mclose/mpunct/
+      // minner) are excluded: KaTeX bakes their inter-atom spacing into
+      // inline `style="margin-right:…"` on the emitted spans rather than
+      // CSS rules, so these class names legitimately never appear in
+      // katex.min.css in any version — asserting on them would fail
+      // permanently, not on a real skew.
+      const ATOM_TYPE_CLASSES = new Set([
+        'mord',
+        'mop',
+        'mbin',
+        'mrel',
+        'mopen',
+        'mclose',
+        'mpunct',
+        'minner',
+      ]);
+      // A fraction and a square root between them exercise the structural
+      // classes (base, strut, vlist*, frac-line, sqrt) that do carry
+      // dedicated rules and are the ones a rename actually breaks.
+      const html = await renderMarkdown('$$\n\\frac{a}{b} + \\sqrt{x}\n$$\n');
+      const classes = new Set<string>();
+      for (const match of html.matchAll(/class="([^"]*)"/g)) {
+        for (const cls of match[1]!.split(/\s+/)) {
+          if (cls) classes.add(cls);
+        }
+      }
+      expect(classes.size).toBeGreaterThan(0); // sanity: the regex found something to check
+      const css = readFileSync('node_modules/katex/dist/katex.min.css', 'utf8');
+      const unstyled = [...classes]
+        .filter((cls) => !ATOM_TYPE_CLASSES.has(cls))
+        .filter((cls) => !new RegExp(`\\.${cls}[^a-zA-Z0-9_-]`).test(css));
+      expect(unstyled).toEqual([]);
     });
   });
 });

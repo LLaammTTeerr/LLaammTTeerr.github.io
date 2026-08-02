@@ -104,7 +104,13 @@ const processor = unified()
   .use(remarkGfm)
   .use(remarkMath)
   .use(remarkRehype)
-  .use(rehypeKatex, { output: 'html' })
+  // `output` is left at its default (`htmlAndMathml`) rather than pinned to
+  // `'html'`. KaTeX marks its visual HTML tree `aria-hidden="true"` in every
+  // output mode — it is designed to be paired with an accessible MathML
+  // sibling, not to stand alone. Forcing `output: 'html'` would drop that
+  // sibling and leave only the aria-hidden tree, so a screen reader would get
+  // nothing at all for every formula, not a formula read twice.
+  .use(rehypeKatex)
   .use(rehypeSafeUrls)
   .use(rehypeStringify);
 
