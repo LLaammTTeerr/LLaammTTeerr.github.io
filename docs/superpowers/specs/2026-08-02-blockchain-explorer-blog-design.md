@@ -9,9 +9,10 @@
 ## 1. Summary
 
 A personal blog rendered as a blockchain explorer. Posts are transactions, grouped
-into cryptographically chained blocks, with metadata that is genuinely computed
-rather than decorative: real SHA-256 hashes, real Merkle roots, and a real
-proof-of-work nonce mined at build time.
+into cryptographically chained blocks, with metadata that is genuine rather than
+decorative: real SHA-256 hashes, real Merkle roots, and a real proof-of-work
+nonce mined at build time. Every displayed field is committed to the chain, so a
+reader can verify it.
 
 The site builds to pure static files and requires no server. Readers can
 independently verify the entire chain in their own browser.
@@ -81,12 +82,23 @@ title:<title>
 date:<YYYY-MM-DD>
 tags:<comma-joined, sorted, lowercased slugs>
 series:<slug, or empty string>
+research:<hours, always exactly one decimal place>
 from:<author address>
 body:<hex sha256 of the normalized body>
 ```
 
 `txHash = sha256(canonical)`, rendered as `0x` + 64 lowercase hex characters.
 Displayed truncated with a middle ellipsis and a click-to-copy affordance.
+
+`research` is the one field not derivable from the body (§3.8), which is exactly
+why it is committed to the hash: an author-declared number displayed beside
+verified data would otherwise be unverifiable decoration. Including it makes the
+declaration tamper-evident — revising a past claim produces a visible amendment
+rather than a silent edit.
+
+Its serialization is fixed at one decimal place (`12.5`, `0.0`, `40.0`) so that
+`12.5`, `12.50`, and `12.500` in frontmatter cannot produce three different
+hashes for identical content.
 
 ### 3.3 Merkle root
 
@@ -138,9 +150,13 @@ Block `#0`, with `prevHash` set to 64 zeros. Sealed like any other block.
 
 ### 3.6 Sealing rule
 
-A block seals when it reaches **8 transactions** or when the **calendar month
+A block seals when it reaches **4 transactions** or when the **calendar week
 ends**, whichever comes first. This mirrors a real block size limit paired with a
 block time target. Both values are configurable.
+
+"Week" means the ISO-8601 week, sealing after Sunday. The boundary is evaluated
+against transaction dates, never against build time, so sealing stays
+deterministic (§3.4).
 
 Transactions not yet in a sealed block belong to the **pending block**, which is
 displayed with its transaction list but without a hash or nonce, since neither
@@ -173,11 +189,22 @@ A post sends to every tag it carries, so multi-tag posts create no conflict.
 
 ### 3.8 Gas and value
 
-- `gasUsed` — word count of the normalized body. A block's `gasUsed` is the sum
-  over its transactions.
-- `value` — estimated reading time in minutes (`ceil(words / 200)`).
+- `gasUsed` — word count of the normalized body, derived. A block's `gasUsed` is
+  the sum over its transactions.
+- `value` — **hours of research the author declares**, from the optional
+  `research` frontmatter field. Displayed as `12.5 hrs research`. A block's
+  `value` is the sum over its transactions; an address page shows total value
+  received, which is a genuine measure of effort spent on that topic.
 
-These are the only derived-metric fields. Nothing further is invented.
+`research` is optional and defaults to `0.0`, which displays as `—` rather than a
+misleading `0`, so a short note can be published without ceremony. Adding the
+value later is a legitimate edit and correctly produces an amendment (§3.9).
+
+Reading time is computed for display on post pages and listings but is not a
+chain field — it is a straightforward function of `gasUsed` and would be
+redundant in the ledger.
+
+These are the only two value-bearing fields. Nothing further is invented.
 
 ### 3.9 Amendments
 
@@ -249,6 +276,7 @@ title: "Mo's Algorithm và cách tối ưu"
 date: 2026-07-28
 tags: [cp, algorithm]
 series: "Ghi chú thuật toán"   # optional
+research: 12.5                 # optional, hours; defaults to 0.0
 summary: "Tóm tắt ngắn cho trang danh sách."
 ```
 
@@ -408,5 +436,6 @@ so no CMS layer is needed to write from another machine.
 - Publishing is write-a-file-and-push, live in under three minutes.
 - Lighthouse performance and accessibility both ≥ 95.
 - Post body sits at a 65–75 character measure with body text ≥ 18px.
-- Every metadata field displayed anywhere on the site is derived from content and
-  independently verifiable.
+- Every metadata field displayed anywhere on the site is either derived from
+  content or declared in frontmatter, and in both cases is committed to the chain
+  and independently verifiable.
