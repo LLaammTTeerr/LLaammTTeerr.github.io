@@ -1,6 +1,8 @@
 import type { Element, Parents, Root } from 'hast';
+import rehypeKatex from 'rehype-katex';
 import rehypeStringify from 'rehype-stringify';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
 import remarkParse from 'remark-parse';
 import remarkRehype from 'remark-rehype';
 import { unified } from 'unified';
@@ -100,7 +102,9 @@ function rehypeSafeUrls() {
 const processor = unified()
   .use(remarkParse)
   .use(remarkGfm)
+  .use(remarkMath)
   .use(remarkRehype)
+  .use(rehypeKatex, { output: 'html' })
   .use(rehypeSafeUrls)
   .use(rehypeStringify);
 

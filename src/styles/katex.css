@@ -1,0 +1,4 @@
+/* Self-hosted (§9). KaTeX's stylesheet references its own font files by
+   relative path; importing from the package lets the bundler resolve and
+   emit them, so no request leaves the origin. */
+@import 'katex/dist/katex.min.css';

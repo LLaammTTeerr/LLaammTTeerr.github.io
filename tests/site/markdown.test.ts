@@ -101,4 +101,32 @@ describe('renderMarkdown', () => {
       );
     });
   });
+
+  describe('math', () => {
+    it('renders inline math', async () => {
+      const html = await renderMarkdown('độ phức tạp $O(n)$ là đủ\n');
+      expect(html).toContain('katex');
+      expect(html).not.toContain('$O(n)$');
+    });
+
+    it('renders display math', async () => {
+      // remark-math's block ("display") form mirrors code-fence grammar: the
+      // `$$` markers must sit alone on their own line. `$$...$$` on a single
+      // line parses as *inline* math instead (its content permits a literal
+      // `$`), so it never gets the `katex-display` class this test checks for.
+      const html = await renderMarkdown('$$\nO((n + q)\\sqrt{n})\n$$\n');
+      expect(html).toContain('katex-display');
+    });
+
+    it('leaves a lone dollar sign alone', async () => {
+      // Prices and shell prompts must not become math.
+      const html = await renderMarkdown('giá 5 $ một cái\n');
+      expect(html).not.toContain('katex');
+    });
+
+    it('does not treat code blocks as math', async () => {
+      const html = await renderMarkdown('```\ncost = $total\n```\n');
+      expect(html).not.toContain('katex');
+    });
+  });
 });
