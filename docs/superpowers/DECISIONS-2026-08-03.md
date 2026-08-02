@@ -137,3 +137,45 @@ zero dead links, which is a property worth being able to state.
 **Ambiguity for you:** this is the third place I have applied "do not link to what does not
 exist". If you would rather ship the links and accept 404s until the routes land, it is one
 boolean per site.
+
+---
+
+## D8 — the review found a shipped falsehood, and it was my design error
+
+**Found:** after editing a published post, `/tx/<slug>` rendered the amended body underneath the
+**original** transaction's hash, title, tags, gas and value, stamped `Sealed`, with no amendment
+notice. Measured: body of 64 words shown under `Gas used 44 từ`, and a hash that does not commit
+to the text beside it.
+
+This is the exact class of failure the project exists to prevent, and it was mine. Task 3's brief
+told the implementer which body to *accept* and never said what the page should then *display*,
+so a build failure became a shipped lie.
+
+**Decision:** fixed rather than deferred. The panel now describes the amendment that governs the
+current text — its hash, its title and tags, gas recomputed from the body, value from the
+amendment's declared `research`, and `Đã sửa trong khối #N` as §3.9 has always required and
+nothing ever rendered.
+
+**Verified:** an independent recomputation of the `amendment/1` canonical form matches the hash
+on the page, and that canonical form's `body:` line matches the sha256 of the body rendered
+beneath it. Also checked the pending case, multiple amendments, and that block and address
+totals are unaffected.
+
+**Lesson worth keeping:** every serious defect on this branch was found by driving the real
+workflow end to end. None was found by the test suite, which was green at every step.
+
+---
+
+## D9 — gas could still be fabricated by hand-editing the pending file
+
+**Found:** `gasUsed` is not part of the canonical form, so the hash verification added for
+`chain.pending.json` cannot catch a hand-edited word count. `gasUsed: 12345` reached `/` and
+`/blocks` through a green build.
+
+**Decision:** recompute it rather than trusting the file. `gasUsed` is derived (§3.8: word count
+of the normalized body) and the body *is* committed via `contentHash`, so re-deriving it is
+verifiable where reading it is not. Where no body is available to re-derive from, the field is
+omitted rather than guessed — the same rule as not showing a hash for an unmined block.
+
+**Explicitly rejected:** adding `gasUsed` to the canonical form. That would change the hash
+format and invalidate every hash already in `chain.lock.json`.
