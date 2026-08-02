@@ -1,0 +1,126 @@
+/* §9.1 — palette, intensity and meter tokens.
+   Structure: :root carries the default palette (github-dark). Each other
+   palette redefines the same custom properties under its own attribute,
+   including an explicit [data-palette="github-dark"] block that mirrors
+   :root, so every id in themes.ts has a matching selector here. Components
+   style through the tokens and never name a palette. */
+
+:root {
+  --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --sans: 'Be Vietnam Pro', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+
+  --bg: #0d1117;
+  --surf: #161b22;
+  --line: #21262d;
+  --line2: #30363d;
+  --txt: #e6edf3;
+  --dim: #8b949e;
+  --acc: #a371f7;
+  --h-hash: #7ee787;
+  --h-addr: #79c0ff;
+  --h-tag: #ff7b72;
+  --h-num: #ffa657;
+  --good: #3fb950;
+  --warn: #d29922;
+  --bad: #f85149;
+}
+
+[data-palette="github-dark"] {
+  --bg: #0d1117; --surf: #161b22; --line: #21262d; --line2: #30363d;
+  --txt: #e6edf3; --dim: #8b949e; --acc: #a371f7;
+  --h-hash: #7ee787; --h-addr: #79c0ff; --h-tag: #ff7b72; --h-num: #ffa657;
+  --good: #3fb950; --warn: #d29922; --bad: #f85149;
+}
+[data-palette="tokyo-night"] {
+  --bg: #1a1b26; --surf: #1f2335; --line: #292e42; --line2: #3b4261;
+  --txt: #c0caf5; --dim: #565f89; --acc: #7aa2f7;
+  --h-hash: #73daca; --h-addr: #7dcfff; --h-tag: #bb9af7; --h-num: #ff9e64;
+  --good: #9ece6a; --warn: #e0af68; --bad: #f7768e;
+}
+[data-palette="gruvbox"] {
+  --bg: #1d2021; --surf: #282828; --line: #3c3836; --line2: #504945;
+  --txt: #ebdbb2; --dim: #928374; --acc: #fe8019;
+  --h-hash: #b8bb26; --h-addr: #83a598; --h-tag: #d3869b; --h-num: #fabd2f;
+  --good: #b8bb26; --warn: #fabd2f; --bad: #fb4934;
+}
+[data-palette="nord"] {
+  --bg: #2e3440; --surf: #3b4252; --line: #434c5e; --line2: #4c566a;
+  --txt: #eceff4; --dim: #8993a4; --acc: #88c0d0;
+  --h-hash: #8fbcbb; --h-addr: #81a1c1; --h-tag: #b48ead; --h-num: #ebcb8b;
+  --good: #a3be8c; --warn: #d08770; --bad: #bf616a;
+}
+[data-palette="dracula"] {
+  --bg: #282a36; --surf: #343746; --line: #44475a; --line2: #5a5f7a;
+  --txt: #f8f8f2; --dim: #8f94b5; --acc: #bd93f9;
+  --h-hash: #f1fa8c; --h-addr: #8be9fd; --h-tag: #ff79c6; --h-num: #bd93f9;
+  --good: #50fa7b; --warn: #ffb86c; --bad: #ff5555;
+}
+[data-palette="catppuccin"] {
+  --bg: #1e1e2e; --surf: #26263a; --line: #313244; --line2: #45475a;
+  --txt: #cdd6f4; --dim: #7f849c; --acc: #cba6f7;
+  --h-hash: #a6e3a1; --h-addr: #89b4fa; --h-tag: #f5c2e7; --h-num: #fab387;
+  --good: #a6e3a1; --warn: #f9e2af; --bad: #f38ba8;
+}
+[data-palette="solarized"] {
+  --bg: #002b36; --surf: #073642; --line: #0f4553; --line2: #586e75;
+  --txt: #eee8d5; --dim: #93a1a1; --acc: #268bd2;
+  --h-hash: #2aa198; --h-addr: #6c71c4; --h-tag: #d33682; --h-num: #b58900;
+  --good: #859900; --warn: #b58900; --bad: #dc322f;
+}
+[data-palette="one-dark"] {
+  --bg: #21252b; --surf: #282c34; --line: #3a4049; --line2: #4b5263;
+  --txt: #d7dae0; --dim: #7f848e; --acc: #61afef;
+  --h-hash: #98c379; --h-addr: #56b6c2; --h-tag: #c678dd; --h-num: #d19a66;
+  --good: #98c379; --warn: #e5c07b; --bad: #e06c75;
+}
+[data-palette="rose-pine"] {
+  --bg: #191724; --surf: #1f1d2e; --line: #26233a; --line2: #403d52;
+  --txt: #e0def4; --dim: #908caa; --acc: #c4a7e7;
+  --h-hash: #9ccfd8; --h-addr: #ebbcba; --h-tag: #eb6f92; --h-num: #f6c177;
+  --good: #9ccfd8; --warn: #f6c177; --bad: #eb6f92;
+}
+[data-palette="latte"] {
+  --bg: #eff1f5; --surf: #e6e9ef; --line: #ccd0da; --line2: #bcc0cc;
+  --txt: #4c4f69; --dim: #6c6f85; --acc: #8839ef;
+  --h-hash: #179299; --h-addr: #1e66f5; --h-tag: #ea76cb; --h-num: #fe640b;
+  --good: #40a02b; --warn: #df8e1d; --bad: #d20f39;
+}
+[data-palette="github-light"] {
+  --bg: #ffffff; --surf: #f6f8fa; --line: #d8dee4; --line2: #afb8c1;
+  --txt: #1f2328; --dim: #656d76; --acc: #8250df;
+  --h-hash: #1b7c83; --h-addr: #0969da; --h-tag: #cf222e; --h-num: #bc4c00;
+  --good: #1a7f37; --warn: #9a6700; --bad: #cf222e;
+}
+
+/* Intensity decides which roles actually take a hue. Minimal is the default,
+   so it lives on :root and needs no attribute. */
+:root {
+  --c-hash: var(--dim);
+  --c-addr: var(--txt);
+  --c-tag: var(--txt);
+  --c-num: var(--txt);
+}
+[data-intensity="bal"] {
+  --c-hash: var(--dim);
+  --c-addr: var(--h-addr);
+  --c-tag: var(--txt);
+  --c-num: var(--txt);
+}
+[data-intensity="full"] {
+  --c-hash: var(--h-hash);
+  --c-addr: var(--h-addr);
+  --c-tag: var(--h-tag);
+  --c-num: var(--h-num);
+}
+
+/* All three meters render; CSS shows one. A reader without JavaScript keeps
+   the default rather than seeing three at once or none. */
+.meter { display: none; }
+:root .meter-m1 { display: block; }
+[data-meter="m1"] .meter-m1 { display: block; }
+[data-meter="m1"] .meter-m2,
+[data-meter="m1"] .meter-m3 { display: none; }
+[data-meter="m2"] .meter-m1 { display: none; }
+[data-meter="m2"] .meter-m2 { display: block; }
+[data-meter="m3"] .meter-m1 { display: none; }
+[data-meter="m3"] .meter-m3 { display: block; }
