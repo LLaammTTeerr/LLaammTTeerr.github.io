@@ -4,7 +4,7 @@ import { STORAGE_KEYS } from '../site/prefs-script';
 ---
 
 <details class="prefs">
-  <summary aria-label="Tuỳ chọn hiển thị">Theme</summary>
+  <summary>Theme</summary>
   <div class="prefs-body">
     <fieldset>
       <legend>Palette</legend>
@@ -33,6 +33,19 @@ import { STORAGE_KEYS } from '../site/prefs-script';
 </details>
 
 <script is:inline define:vars={{ KEYS: STORAGE_KEYS }}>
+  // Initialise aria-pressed from the attributes the blocking head script
+  // already resolved onto <html> — storage, the prefers-color-scheme
+  // first-visit case, and the try/catch fallback are all folded into those
+  // attributes, so they are the single source of truth. Re-reading
+  // localStorage here would re-implement that resolution and could disagree
+  // with what is actually applied.
+  ['palette', 'intensity', 'meter'].forEach(function (kind) {
+    var current = document.documentElement.getAttribute('data-' + kind);
+    document.querySelectorAll('[data-pref="' + kind + '"]').forEach(function (b) {
+      b.setAttribute('aria-pressed', String(b.getAttribute('value') === current));
+    });
+  });
+
   document.querySelectorAll('[data-pref]').forEach(function (b) {
     b.addEventListener('click', function () {
       var kind = b.getAttribute('data-pref');
