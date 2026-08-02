@@ -16,6 +16,7 @@ function tx(date: string, slug: string): Transaction {
     contentHash: `0xc${slug}`,
     gasUsed: 100,
     value: 1,
+    research: null,
     amends: null,
   };
 }
@@ -195,6 +196,60 @@ describe('planBlocks', () => {
     expect(drafts).toHaveLength(1);
     expect(drafts[0]!.period).toBe('2026-07');
     expect(drafts[0]!.transactions).toHaveLength(4);
+  });
+
+  it('never proposes a block for a month that has not started', () => {
+    // A block sealed in a month that has not started sets fromPeriod to that
+    // month; every later transaction then clamps into it, and a month that is
+    // neither past nor full never seals. The chain would freeze until real
+    // time caught up, and sealed blocks cannot be taken back.
+    const drafts = planBlocks([tx('2027-03-04', 'future')], {
+      maxTxPerBlock: 4,
+      fromPeriod: '2026-08',
+      now: '2026-09-10',
+    });
+    expect(drafts.every((d) => d.period <= '2026-09')).toBe(true);
+    // It waits in the current open month rather than sealing 2027-03.
+    expect(drafts.flatMap((d) => d.transactions)).toEqual([]);
+  });
+
+  it('seals future-dated posts into the current month once they fill a block', () => {
+    const txs = ['a', 'b', 'c', 'd'].map((s, i) => tx(`2027-03-0${i + 1}`, s));
+    const drafts = planBlocks(txs, {
+      maxTxPerBlock: 4,
+      fromPeriod: '2026-08',
+      now: '2026-09-10',
+    });
+    const filled = drafts.filter((d) => d.transactions.length > 0);
+    expect(filled).toHaveLength(1);
+    expect(filled[0]!.period).toBe('2026-09');
+    expect(filled[0]!.transactions).toHaveLength(4);
+    expect(filled[0]!.transactions[0]!.date).toBe('2027-03-01');
+  });
+
+  it('does not mint genesis into a future month when every post is future-dated', () => {
+    const drafts = planBlocks([tx('2027-03-04', 'future')], {
+      maxTxPerBlock: 4,
+      fromPeriod: null,
+      now: '2026-09-10',
+    });
+    // The only open month is the current one, and it is not full, so nothing
+    // seals — rather than sealing 2027-03 and freezing the chain.
+    expect(drafts).toEqual([]);
+  });
+
+  it('orders same-date posts by codepoint, not by locale collation', () => {
+    // localeCompare resolves against ambient ICU, so ordering would depend on
+    // the machine's locale: en-US puts "alpha" before "Beta", and Czech puts
+    // "hi" before "chi" while codepoint order says the opposite. A different
+    // order means a different Merkle root and a different block hash.
+    const drafts = planBlocks([tx('2026-07-01', 'alpha'), tx('2026-07-01', 'Beta')], OPTS);
+    expect(drafts[0]!.transactions.map((t) => t.slug)).toEqual(['Beta', 'alpha']);
+  });
+
+  it('orders ch- initial slugs by codepoint', () => {
+    const drafts = planBlocks([tx('2026-07-01', 'hi-mot'), tx('2026-07-01', 'chi-hai')], OPTS);
+    expect(drafts[0]!.transactions.map((t) => t.slug)).toEqual(['chi-hai', 'hi-mot']);
   });
 
   it('throws when maxTxPerBlock is zero', () => {

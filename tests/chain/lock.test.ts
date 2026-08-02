@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { EMPTY_CHAIN, serializeChain, readLock, writeLock } from '../../src/chain/lock';
+import { emptyChain, serializeChain, readLock, writeLock } from '../../src/chain/lock';
 import type { Chain } from '../../src/chain/types';
 
 function tempFile(name: string): string {
@@ -45,21 +45,26 @@ const populated: Chain = {
           contentHash: '0x' + '55'.repeat(32),
           gasUsed: 1900,
           value: 9.5,
+          research: null,
           amends: null,
         },
         {
           hash: '0x' + '66'.repeat(32),
           type: 'amendment',
           slug: null,
-          title: null,
+          // §3.9 — an amendment carries the post's new declared metadata, but
+          // 0 gas and 0 value: the word count and research hours were already
+          // charged in the block that sealed the original.
+          title: 'Mo’s Algorithm và cách tối ưu (sửa)',
           date: '2026-06-15',
-          tags: [],
-          series: null,
+          tags: ['algorithm', 'cp'],
+          series: 'ghi-chu-thuat-toan',
           from: '0x' + '22'.repeat(20),
           to: [],
           contentHash: '0x' + '77'.repeat(32),
-          gasUsed: 940,
-          value: 2.8,
+          gasUsed: 0,
+          value: 0,
+          research: 2.8,
           amends: '0x' + '88'.repeat(32),
         },
       ],
@@ -67,9 +72,9 @@ const populated: Chain = {
   ],
 };
 
-describe('EMPTY_CHAIN', () => {
+describe('emptyChain', () => {
   it('starts at version 1 with no blocks', () => {
-    expect(EMPTY_CHAIN(5)).toEqual({ version: 1, difficulty: 5, blocks: [] });
+    expect(emptyChain(5)).toEqual({ version: 1, difficulty: 5, blocks: [] });
   });
 });
 
@@ -101,6 +106,7 @@ describe('serializeChain', () => {
     // Construct scrambled transactions with keys in deliberately different order
     const scrambledTx0 = {
       amends: tx0.amends,
+      research: tx0.research,
       value: tx0.value,
       gasUsed: tx0.gasUsed,
       contentHash: tx0.contentHash,
@@ -117,6 +123,7 @@ describe('serializeChain', () => {
 
     const scrambledTx1 = {
       amends: tx1.amends,
+      research: tx1.research,
       value: tx1.value,
       gasUsed: tx1.gasUsed,
       contentHash: tx1.contentHash,
@@ -200,6 +207,9 @@ describe('serializeChain', () => {
     ]);
 
     // Verify transaction-level keys and order for amendment transaction
+    // An amendment additionally serializes "research": the hours it declares
+    // for the post it amends, which cannot live in "value" (§3.9 pins that to
+    // 0). A post omits the key entirely — its "value" already says the same.
     const amendmentTx = block.transactions[1];
     const amendmentTxKeys = Object.keys(amendmentTx);
     expect(amendmentTxKeys).toEqual([
@@ -215,17 +225,20 @@ describe('serializeChain', () => {
       'contentHash',
       'gasUsed',
       'value',
+      'research',
       'amends',
     ]);
 
     // Verify distinct field values to catch any level confusion
     expect(block.gasUsed).toBe(2840);
     expect(postTx.gasUsed).toBe(1900);
-    expect(amendmentTx.gasUsed).toBe(940);
+    expect(amendmentTx.gasUsed).toBe(0);
 
     expect(block.value).toBe(12.5);
     expect(postTx.value).toBe(9.5);
-    expect(amendmentTx.value).toBe(2.8);
+    expect(amendmentTx.value).toBe(0);
+    expect(amendmentTx.research).toBe(2.8);
+    expect('research' in postTx).toBe(false);
 
     // Verify difficulty at both levels (deliberately different to catch serialization confusion)
     expect(parsed.difficulty).toBe(5); // chain level
@@ -235,7 +248,7 @@ describe('serializeChain', () => {
 
 describe('readLock', () => {
   it('returns an empty chain when the file does not exist', () => {
-    expect(readLock(tempFile('missing.json'), 5)).toEqual(EMPTY_CHAIN(5));
+    expect(readLock(tempFile('missing.json'), 5)).toEqual(emptyChain(5));
   });
 
   it('round-trips a written chain', () => {
@@ -272,6 +285,48 @@ describe('readLock', () => {
     const path = tempFile('invalid-blocks.json');
     writeFileSync(path, JSON.stringify({ version: 1, difficulty: 5, blocks: 'not an array' }));
     expect(() => readLock(path, 5)).toThrow(/blocks/i);
+  });
+
+  it('names the block and the field when a block has no transactions array', () => {
+    // §10 — this used to surface as "Cannot read properties of undefined
+    // (reading 'map')" from inside verifyBlock: no message, no block height.
+    const path = tempFile('no-txs.json');
+    const broken = JSON.parse(serializeChain(populated));
+    delete broken.blocks[0].transactions;
+    writeFileSync(path, JSON.stringify(broken));
+
+    expect(() => readLock(path, 5)).toThrow(/height 7.*transactions/s);
+  });
+
+  it('names the offending transaction when a transaction field is malformed', () => {
+    const path = tempFile('bad-tx.json');
+    const broken = JSON.parse(serializeChain(populated));
+    delete broken.blocks[0].transactions[1].contentHash;
+    writeFileSync(path, JSON.stringify(broken));
+
+    expect(() => readLock(path, 5)).toThrow(/transaction #1.*contentHash/s);
+  });
+
+  it('names the block when a block is not an object at all', () => {
+    const path = tempFile('null-block.json');
+    writeFileSync(path, JSON.stringify({ version: 1, difficulty: 5, blocks: [null] }));
+    expect(() => readLock(path, 5)).toThrow(/index 0.*not an object/s);
+  });
+
+  it('throws when the chain difficulty is not a number', () => {
+    const path = tempFile('bad-difficulty.json');
+    writeFileSync(path, JSON.stringify({ version: 1, difficulty: 'five', blocks: [] }));
+    expect(() => readLock(path, 5)).toThrow(/difficulty/i);
+  });
+
+  it('reads a ledger written before amendments carried metadata', () => {
+    // A post has no "research" key on disk; it must normalize to null rather
+    // than to undefined, so a round-trip is byte-stable.
+    const path = tempFile('legacy.json');
+    writeFileSync(path, serializeChain(populated));
+    const read = readLock(path, 5);
+    expect(read.blocks[0]!.transactions[0]!.research).toBeNull();
+    expect(serializeChain(read)).toBe(serializeChain(populated));
   });
 });
 

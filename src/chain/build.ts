@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ChainConfig } from '../../chain.config';
 import { identityAddress } from './address';
-import { canonicalAmendmentTx } from './canonical';
+import { canonicalAmendmentTx, canonicalPostTx } from './canonical';
 import { sha256Hex } from './hash';
 import { readLock, writeLock } from './lock';
 import { merkleRootHex } from './merkle';
@@ -43,31 +43,83 @@ function readPostTransactions(postsDir: string, from: Hex): Promise<Transaction[
 }
 
 /**
- * §3.9 — a sealed post whose content hash no longer matches produces an
+ * The state a transaction asserts a post is in, as a `tx/1` hash.
+ *
+ * For a post that is its own hash. For an amendment it is the hash the post
+ * *would* have if it were published today with the amended metadata and body —
+ * which is exactly what the next build compares the live post against. This is
+ * what lets a recorded amendment be recognized as already covering an edit,
+ * with no extra bookkeeping field in the ledger.
+ */
+function stateHash(tx: Transaction): Promise<Hex> | null {
+  if (tx.type === 'post') return Promise.resolve(tx.hash);
+  if (tx.title === null || tx.research === null) return null;
+  return sha256Hex(
+    canonicalPostTx({
+      title: tx.title,
+      date: tx.date,
+      tags: tx.tags,
+      series: tx.series,
+      research: tx.research,
+      from: tx.from,
+      contentHash: tx.contentHash,
+    }),
+  );
+}
+
+/**
+ * §3.9 — a sealed post whose transaction hash no longer matches produces an
  * amendment transaction rather than a rewrite. Amendments already recorded in
  * the lock are not re-emitted.
+ *
+ * Detection is on the full `tx/1` hash, not the content hash: a retitle, a tag
+ * change or a corrected research figure leaves the body untouched, and
+ * comparing content hashes would let every such edit vanish — no amendment, no
+ * transaction, no warning, and stale metadata on the chain forever.
  */
 async function detectAmendments(
   sealed: Transaction[],
   current: Transaction[],
   from: Hex,
+  postsDir: string,
 ): Promise<Transaction[]> {
   const currentBySlug = new Map(current.map((t) => [t.slug, t]));
-  const alreadyAmended = new Set(
-    sealed.filter((t) => t.type === 'amendment').map((t) => `${t.amends}:${t.contentHash}`),
-  );
+
+  const alreadyAmended = new Set<string>();
+  for (const tx of sealed) {
+    if (tx.type !== 'amendment') continue;
+    const state = await stateHash(tx);
+    if (state !== null) alreadyAmended.add(`${tx.amends}:${state}`);
+  }
 
   const out: Transaction[] = [];
   for (const original of sealed) {
     if (original.type === 'amendment') continue;
     const live = currentBySlug.get(original.slug);
-    if (!live || live.contentHash === original.contentHash) continue;
-    if (alreadyAmended.has(`${original.hash}:${live.contentHash}`)) continue;
+    if (!live) continue;
+
+    // Same filename, different date: a new post reusing a slug, not an edit of
+    // the old one. Recording it as an amendment would silently attach it to an
+    // unrelated transaction, so refuse and name both dates.
+    if (live.date !== original.date) {
+      throw new Error(
+        `${join(postsDir, `${original.slug}.md`)}: slug "${original.slug}" is already on the chain ` +
+          `dated ${original.date}, but this file is dated ${live.date} — a reused filename is a ` +
+          `different post, not an edit; give it a new filename`,
+      );
+    }
+
+    if (live.hash === original.hash) continue;
+    if (alreadyAmended.has(`${original.hash}:${live.hash}`)) continue;
 
     const hash = await sha256Hex(
       canonicalAmendmentTx({
-        date: original.date,
         amends: original.hash,
+        date: original.date,
+        title: live.title!,
+        tags: live.tags,
+        series: live.series,
+        research: live.value,
         from,
         contentHash: live.contentHash,
       }),
@@ -76,15 +128,23 @@ async function detectAmendments(
       hash,
       type: 'amendment',
       slug: null,
-      title: null,
+      title: live.title,
       date: original.date,
-      tags: [],
-      series: null,
+      tags: live.tags,
+      series: live.series,
       from,
       to: [],
       contentHash: live.contentHash,
+      // §3.9 — an amendment is worth 0 gas and 0 value on purpose, so block
+      // aggregation cannot re-charge the word count and research hours already
+      // counted in the block that sealed the original. It looks inconsistent
+      // beside the metadata below, and is not: the metadata fields (title,
+      // tags, series, research) carry the post's NEW declared state, which the
+      // renderer reads from the latest amendment; `gasUsed`/`value` are chain
+      // accounting, and that accounting was settled when the original sealed.
       gasUsed: 0,
       value: 0,
+      research: live.value,
       amends: original.hash,
     });
   }
@@ -115,7 +175,7 @@ export async function buildChain(opts: BuildOptions): Promise<BuildResult> {
   );
 
   const live = await readPostTransactions(opts.postsDir, from);
-  const amendments = await detectAmendments(sealedTxs, live, from);
+  const amendments = await detectAmendments(sealedTxs, live, from, opts.postsDir);
 
   // §3.9 — a sealed post's later edits are represented by amendments, not by
   // re-publishing the post. Filtering on hash alone misses this: an edit
@@ -173,6 +233,17 @@ export async function buildChain(opts: BuildOptions): Promise<BuildResult> {
     minted++;
     amendmentsSealed += draft.transactions.filter((t) => t.type === 'amendment').length;
   }
+
+  // §3.6 — difficulty is configurable and changing it must stay safe in both
+  // directions. `chain.difficulty` is the chain's floor: the lowest target any
+  // block on it was mined at. Leaving it at whatever the lock happened to say
+  // made it stale, and it was the sole authority for proof of work — a chain
+  // built at 1 and later at 3 still claimed 1. Verification now checks each
+  // block against the difficulty committed in its own mined header and uses
+  // this value only as the floor, so lowering the config is safe. The floor
+  // only ever moves down: raising the config must not retroactively invalidate
+  // blocks sealed under the old, lower target, which would brick the ledger.
+  chain.difficulty = chain.blocks.reduce((lo, b) => Math.min(lo, b.difficulty), config.difficulty);
 
   // §10 — never persist a chain that fails its own verification. Without
   // this, a build that produced a broken chain would still write it to

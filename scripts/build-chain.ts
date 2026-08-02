@@ -31,7 +31,8 @@ console.log(`  integrity   ${result.ok ? 'OK' : 'FAILED'}`);
 if (!result.ok) {
   for (const b of result.blocks.filter((b) => !b.ok)) {
     console.error(
-      `  block #${b.height}  hash:${b.hashOk} merkle:${b.merkleOk} link:${b.linkOk} pow:${b.powOk}`,
+      `  block #${b.height}  hash:${b.hashOk} merkle:${b.merkleOk} link:${b.linkOk} pow:${b.powOk} tx:${b.txOk}` +
+        (b.reason === undefined ? '' : `  ${b.reason}`),
     );
   }
   process.exit(1);

@@ -18,6 +18,12 @@ export function mine(
   header: Omit<BlockHeader, 'nonce'>,
   difficulty: number,
 ): { nonce: number; hash: Hex } {
+  // A negative or fractional target otherwise fails deep inside
+  // `meetsDifficulty` as a RangeError from `'0'.repeat(...)`, naming nothing.
+  if (!Number.isInteger(difficulty) || difficulty < 0) {
+    throw new Error(`difficulty must be a non-negative integer, got ${difficulty}`);
+  }
+
   for (let nonce = 0; ; nonce++) {
     const hash = sha256SyncHex(canonicalBlockHeader({ ...header, nonce }));
     if (meetsDifficulty(hash, difficulty)) return { nonce, hash };

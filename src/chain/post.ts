@@ -114,6 +114,9 @@ export async function toTransaction(post: PostInput, from: Hex): Promise<Transac
     contentHash,
     gasUsed: wordCount(normalized),
     value: post.research,
+    // §3.9 — `research` is amendment-only metadata; on a post the declared
+    // hours are `value` itself.
+    research: null,
     amends: null,
   };
 }

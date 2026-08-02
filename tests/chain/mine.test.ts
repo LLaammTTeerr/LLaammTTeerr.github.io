@@ -53,9 +53,20 @@ describe('mine', () => {
     }
   });
 
-  it('produces different nonces for different headers', () => {
-    const a = mine(header, 2).nonce;
-    const b = mine({ ...header, height: 1 }, 2).nonce;
+  it('produces different hashes for different headers', () => {
+    // Asserting the *nonces* differ was probabilistic: two unrelated headers
+    // can legitimately meet difficulty 2 at the same nonce (~0.2% of the
+    // time). The hashes cannot collide.
+    const a = mine(header, 2).hash;
+    const b = mine({ ...header, height: 1 }, 2).hash;
     expect(a).not.toBe(b);
+  });
+
+  it('rejects a negative difficulty instead of failing inside String.repeat', () => {
+    expect(() => mine(header, -1)).toThrow(/non-negative integer/);
+  });
+
+  it('rejects a non-integer difficulty', () => {
+    expect(() => mine(header, 1.5)).toThrow(/non-negative integer/);
   });
 });

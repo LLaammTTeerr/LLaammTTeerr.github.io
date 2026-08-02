@@ -53,9 +53,14 @@ describe('parsePost', () => {
     expect(() => parsePost('a/2026-07-28-x.md', raw)).toThrow(/2026-07-28-x\.md/);
   });
 
-  it('accepts a research value with exactly one decimal place', () => {
-    const raw = RAW.replace('research: 12.5', 'research: 12.5');
-    expect(parsePost('a/2026-07-28-x.md', raw).research).toBe(12.5);
+  it('accepts a research value written as a whole number', () => {
+    const raw = RAW.replace('research: 12.5', 'research: 12');
+    expect(parsePost('a/2026-07-28-x.md', raw).research).toBe(12);
+  });
+
+  it('accepts a research value of zero', () => {
+    const raw = RAW.replace('research: 12.5', 'research: 0');
+    expect(parsePost('a/2026-07-28-x.md', raw).research).toBe(0);
   });
 
   it('rejects a research value with more than one decimal place', () => {

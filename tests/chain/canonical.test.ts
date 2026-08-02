@@ -110,24 +110,54 @@ describe('canonicalPostTx', () => {
 });
 
 describe('canonicalAmendmentTx', () => {
-  it('emits the exact field order from the spec', () => {
-    expect(
-      canonicalAmendmentTx({
-        date: '2026-07-28',
-        amends: '0xdead',
-        from: '0xaaaa',
-        contentHash: '0xbeef',
-      }),
-    ).toBe(
+  const base = {
+    amends: '0xdead',
+    date: '2026-07-28',
+    title: "Mo's Algorithm",
+    tags: ['cp', 'algorithm'],
+    series: 'ghi-chu-thuat-toan',
+    research: 12.5,
+    from: '0xaaaa',
+    contentHash: '0xbeef',
+  };
+
+  it('emits the exact tx/2 field order', () => {
+    expect(canonicalAmendmentTx(base)).toBe(
       [
-        'tx/1',
+        'tx/2',
         'type:amendment',
-        'date:2026-07-28',
         'amends:0xdead',
+        'date:2026-07-28',
+        "title:Mo's Algorithm",
+        'tags:algorithm,cp',
+        'series:ghi-chu-thuat-toan',
+        'research:12.5',
         'from:0xaaaa',
         'body:0xbeef',
       ].join('\n'),
     );
+  });
+
+  it('changes when only the title changes', () => {
+    expect(canonicalAmendmentTx({ ...base, title: 'Khác' })).not.toBe(canonicalAmendmentTx(base));
+  });
+
+  it('changes when only the research figure changes', () => {
+    expect(canonicalAmendmentTx({ ...base, research: 13 })).not.toBe(canonicalAmendmentTx(base));
+  });
+
+  it('sorts and lowercases tags like the post form', () => {
+    expect(canonicalAmendmentTx({ ...base, tags: ['CP', 'Algorithm'] })).toBe(
+      canonicalAmendmentTx(base),
+    );
+  });
+
+  it('renders a null series as an empty value', () => {
+    expect(canonicalAmendmentTx({ ...base, series: null })).toContain('\nseries:\n');
+  });
+
+  it('has no trailing newline', () => {
+    expect(canonicalAmendmentTx(base).endsWith('\n')).toBe(false);
   });
 });
 

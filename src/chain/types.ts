@@ -26,7 +26,15 @@ export interface Transaction {
   to: Hex[];                // tag/series addresses; empty for amendments
   contentHash: Hex;
   gasUsed: number;          // word count; 0 for amendments
-  value: number;            // research hours; 0 for amendments
+  value: number;            // research hours; 0 for amendments (§3.9)
+  /**
+   * §3.9 — the research hours an amendment declares for the post it amends.
+   * `null` on a post, where `value` already records the same number. An
+   * amendment cannot use `value` for this: `value` must stay 0 so block
+   * aggregation does not re-charge hours already counted in the block that
+   * sealed the original. Serialized only for amendments.
+   */
+  research: number | null;
   amends: Hex | null;
 }
 

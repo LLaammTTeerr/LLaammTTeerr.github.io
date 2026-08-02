@@ -45,18 +45,38 @@ export function canonicalPostTx(p: CanonicalPostFields): string {
 }
 
 export interface CanonicalAmendmentFields {
-  date: string;
   amends: Hex;
+  date: string;
+  title: string;
+  tags: string[];
+  series: string | null;
+  research: number;
   from: Hex;
   contentHash: Hex;
 }
 
+/**
+ * §3.9 — the amendment form, version `tx/2`.
+ *
+ * An edit to a sealed post may change nothing but its metadata: a retitle, a
+ * new tag, a corrected research figure. `tx/1` covers those fields, so an
+ * amendment must too — otherwise a metadata-only edit produces no hash change,
+ * no amendment, and the ledger keeps the stale values forever.
+ *
+ * `tx/1` (posts) is unchanged. The on-disk chain carries no amendments, so
+ * nothing needs migrating.
+ */
 export function canonicalAmendmentTx(a: CanonicalAmendmentFields): string {
+  const tags = a.tags.map((t) => t.toLowerCase()).sort();
   return [
-    'tx/1',
+    'tx/2',
     'type:amendment',
-    `date:${a.date}`,
     `amends:${a.amends}`,
+    `date:${a.date}`,
+    `title:${a.title}`,
+    `tags:${tags.join(',')}`,
+    `series:${a.series ?? ''}`,
+    `research:${formatResearch(a.research)}`,
     `from:${a.from}`,
     `body:${a.contentHash}`,
   ].join('\n');
