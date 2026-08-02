@@ -9,7 +9,7 @@ export function EMPTY_CHAIN(difficulty: number): Chain {
  * Serialize with an explicit key order so the committed ledger produces a
  * clean diff and is byte-stable regardless of object construction order.
  */
-function orderedTransaction(t: Transaction) {
+function orderedTransaction(t: Transaction): Transaction {
   return {
     hash: t.hash,
     type: t.type,
@@ -27,7 +27,7 @@ function orderedTransaction(t: Transaction) {
   };
 }
 
-function orderedBlock(b: Block) {
+function orderedBlock(b: Block): Block {
   return {
     height: b.height,
     period: b.period,
@@ -68,6 +68,9 @@ export function readLock(path: string, difficulty: number): Chain {
   const chain = parsed as Chain;
   if (chain.version !== 1) {
     throw new Error(`${path} has unsupported chain version ${String(chain.version)}`);
+  }
+  if (!Array.isArray(chain.blocks)) {
+    throw new Error(`${path} is missing a valid "blocks" array — refusing to use a corrupt ledger`);
   }
   return chain;
 }
