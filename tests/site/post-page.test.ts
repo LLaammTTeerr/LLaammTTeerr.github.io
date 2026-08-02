@@ -6,9 +6,25 @@ import { getBlocks, getPosts } from '../../src/site/chain-data';
 import { PREFS_INLINE_SCRIPT } from '../../src/site/prefs-script';
 import { routeById } from '../../src/site/routes';
 import { buildSandbox, chainBuildSandbox, sandboxRepo } from './sandbox';
+import { normalizeBody } from '../../src/chain/canonical';
+import { parsePost } from '../../src/chain/post';
 
 const slug = () => getPosts()[0]!.slug!;
 const page = () => readDist(`tx/${slug()}/index.html`);
+
+/** The `<article>` alone — the panel and `Base.astro`'s chrome excluded. */
+function articleOf(html: string): string {
+  const m = /<article class="post">([\s\S]*?)<\/article>/.exec(html);
+  if (m === null) throw new Error('the page has no post article');
+  return m[1]!;
+}
+
+/** The post's own source, as the chain parses it. */
+function source(): { body: string; summary: string } {
+  const path = join('content/posts', `${slug()}.md`);
+  const parsed = parsePost(path, readFileSync(path, 'utf8'));
+  return { body: normalizeBody(parsed.body), summary: parsed.summary };
+}
 
 describe('post page', () => {
   it('exists for every post on the chain', () => {
@@ -42,9 +58,18 @@ describe('post page', () => {
     expect(page()).toMatch(new RegExp(`<h1[^>]*>${tx.title}</h1>`));
   });
 
-  it('renders the body as HTML, not as raw markdown', () => {
-    expect(page()).toContain('<p>');
-    expect(page()).not.toContain('---\ntitle:');
+  it('renders the body as HTML, and only the body', () => {
+    // `not.toContain('---\ntitle:')` stood here and could not fire: the page
+    // renders `parsePost(...).body`, from which gray-matter has already
+    // stripped the frontmatter, and nothing on the page reads the raw `.md`.
+    // What a raw read WOULD show is the frontmatter's own fields — `summary`
+    // above all, which is never displayed anywhere and is not part of the
+    // hashed body. That is the assertion with something to catch.
+    const article = articleOf(page());
+    expect(article).toContain('<p>');
+    expect(source().summary.length, 'the fixture post declares no summary to check').toBeGreaterThan(0);
+    expect(article, 'the frontmatter leaked into the rendered page').not.toContain(source().summary);
+    expect(article).not.toContain('---');
   });
 
   it('shows gas and value from the committed transaction', () => {
@@ -84,8 +109,17 @@ describe('post page', () => {
   });
 
   it('keeps the panel labels in English and the prose in Vietnamese', () => {
+    // `toContain('Khối đầu tiên')` stood for "the prose": that string is the
+    // post's *title*, present in `<title>`, `<meta description>` and `<h1>`.
+    // Replacing the entire rendered body with English left it green. The prose
+    // is the body, so read a real sentence of it from the source the chain
+    // hashes — derived, never written down here.
     expect(page()).toContain('Gas used');
-    expect(page()).toContain('Khối đầu tiên');
+    const firstLine = source().body.split('\n').find((l) => l.trim().length > 0)!;
+    expect(firstLine, 'the first body line is the title, not prose').not.toBe(getPosts()[0]!.title);
+    expect(articleOf(page()), 'the rendered body is not the post the chain committed').toContain(
+      firstLine,
+    );
   });
 
   it('runs the blocking preferences script before its first stylesheet', () => {
@@ -110,8 +144,11 @@ describe('post page', () => {
   });
 
   it('sets a per-post title and description', () => {
+    // The name promised both; only the title was checked, so the description
+    // could have stayed `Base.astro`'s site-wide default on every post page.
     const tx = getPosts()[0]!;
     expect(page()).toContain(`<title>${tx.title}`);
+    expect(page()).toContain(`<meta name="description" content="${tx.title} · ${tx.gasUsed} từ">`);
   });
 });
 

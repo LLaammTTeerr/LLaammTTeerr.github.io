@@ -1,7 +1,37 @@
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 
 export const DIST = 'dist';
+
+/**
+ * True when a site-internal href has something in `distRoot` to land on — a
+ * page (`/blocks` → `blocks/index.html`) or a built asset
+ * (`/_astro/Base.abc123.css`), which a whole-document scan also turns up.
+ *
+ * The plain-file half must reject a bare directory: `dist/tx/` exists as soon
+ * as any one post builds, as a container for `dist/tx/<slug>/`, even when
+ * `/tx` itself names no page. Accepting it as a hit would let a link check
+ * pass with a bare `href="/tx"` restored to the nav — the one mutation that
+ * check exists to catch — because the directory grouping the real pages is
+ * itself real.
+ *
+ * One definition, used by every link check in the suite. Two of them had
+ * drifted: `block-routes.test.ts` still carried the version without the
+ * `isDirectory()` rejection, latent only because `<main>` happens to emit no
+ * bare directory href today.
+ */
+export function resolvesIn(distRoot: string, href: string): boolean {
+  const clean = href.replace(/[?#].*$/, '').replace(/^\//, '').replace(/\/$/, '');
+  if (clean === '') return existsSync(join(distRoot, 'index.html'));
+  if (existsSync(join(distRoot, clean, 'index.html'))) return true;
+  const path = join(distRoot, clean);
+  return existsSync(path) && !statSync(path).isDirectory();
+}
+
+/** Absolute site-internal hrefs in a fragment or document, deduplicated. */
+export function internalHrefs(html: string): string[] {
+  return [...new Set([...html.matchAll(/href="(\/[^"]*)"/g)].map((m) => m[1]!))];
+}
 
 /**
  * Read a file from the build output, with an error that says what to do.

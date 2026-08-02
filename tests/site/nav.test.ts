@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { existsSync, readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
-import { DIST, distPages, readDist } from './dist';
+import { readFileSync } from 'node:fs';
+import { DIST, distPages, internalHrefs, readDist, resolvesIn } from './dist';
 import { ROUTES } from '../../src/site/routes';
 
 /**
@@ -102,30 +101,12 @@ describe('nav entries for routes that do not exist yet', () => {
  * the real guarantee: nothing anywhere in a built page 404s.
  */
 
-/** Absolute site-internal hrefs anywhere in a document, deduplicated. */
-function internalHrefs(html: string): string[] {
-  return [...new Set([...html.matchAll(/href="(\/[^"]*)"/g)].map((m) => m[1]!))];
-}
-
 /**
- * True when a site-internal href has something in `dist` to land on — a
- * page (`/blocks` → `dist/blocks/index.html`) or a built asset
- * (`/_astro/Base.abc123.css`), which a whole-document scan also turns up.
- *
- * The plain `existsSync(join(DIST, clean))` half must reject a bare
- * directory: `dist/tx/` exists as soon as any one post builds, as a
- * container for `dist/tx/<slug>/`, even when `/tx` itself names no page.
- * Accepting it as a hit would have let this very test pass with a bare
- * `href="/tx"` restored to the nav — the one mutation this file exists to
- * catch — because the directory it groups real pages under is real.
+ * The shared resolver (see `resolvesIn` in ./dist), bound to this repo's own
+ * `dist`. Shared rather than re-declared so `block-routes.test.ts` cannot go
+ * on carrying the version without the bare-directory rejection.
  */
-function resolves(href: string): boolean {
-  const clean = href.replace(/[?#].*$/, '').replace(/^\//, '').replace(/\/$/, '');
-  if (clean === '') return existsSync(join(DIST, 'index.html'));
-  if (existsSync(join(DIST, clean, 'index.html'))) return true;
-  const path = join(DIST, clean);
-  return existsSync(path) && !statSync(path).isDirectory();
-}
+const resolves = (href: string): boolean => resolvesIn(DIST, href);
 
 describe('link integrity across the whole page', () => {
   it('finds more than one page to check', () => {

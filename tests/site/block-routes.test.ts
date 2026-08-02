@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { readDist } from './dist';
+import { DIST, internalHrefs, readDist, resolvesIn } from './dist';
 import { getBlocks, splitHashWork } from '../../src/site/chain-data';
 import { buildSandbox, chainBuildSandbox, sandboxRepo } from './sandbox';
 
@@ -49,18 +49,18 @@ function fieldOf(html: string, label: string): string {
   return m[1]!;
 }
 
-/** Absolute site-internal hrefs in a fragment, deduplicated. */
-function internalHrefs(html: string): string[] {
-  return [...new Set([...html.matchAll(/href="(\/[^"]*)"/g)].map((m) => m[1]!))];
-}
+/**
+ * The shared resolver (see `resolvesIn` in ./dist), bound to a sandbox's
+ * `dist`. This file used to carry its own copy, without the `isDirectory()`
+ * rejection `nav.test.ts:110-127` documents adding — so `href="/tx"`,
+ * `/block` or `/blocks` would have counted as resolving here purely because
+ * the directory grouping the real pages exists.
+ */
+const resolvesInSandbox = (root: string, href: string): boolean =>
+  resolvesIn(join(root, 'dist'), href);
 
-/** True when a site-internal href has a page in `root/dist` to land on. */
-function resolvesIn(root: string, href: string): boolean {
-  const clean = href.replace(/[?#].*$/, '').replace(/^\//, '').replace(/\/$/, '');
-  const dist = join(root, 'dist');
-  if (clean === '') return existsSync(join(dist, 'index.html'));
-  return existsSync(join(dist, clean, 'index.html')) || existsSync(join(dist, clean));
-}
+/** The same resolver, bound to this repo's own already-built `dist`. */
+const resolves = (href: string): boolean => resolvesIn(DIST, href);
 
 const listHtml = () => readDist('blocks/index.html');
 const blockHtml = (height: number) => readDist(`block/${height}/index.html`);
@@ -100,7 +100,7 @@ describe('the block list at /blocks', () => {
     const hrefs = internalHrefs(mainOf(listHtml()));
     expect(hrefs.length, 'the list emitted no links at all').toBeGreaterThan(0);
     for (const href of hrefs) {
-      expect(resolvesIn('.', href), `${href} is linked from /blocks but was never built`).toBe(true);
+      expect(resolves(href), `${href} is linked from /blocks but was never built`).toBe(true);
     }
   });
 });
@@ -152,7 +152,7 @@ describe('a sealed block page at /block/<height>', () => {
       expect(hrefs.length, `block #${block.height} emitted no links at all`).toBeGreaterThan(0);
       for (const href of hrefs) {
         expect(
-          resolvesIn('.', href),
+          resolves(href),
           `${href} is linked from /block/${block.height} but was never built`,
         ).toBe(true);
       }
@@ -224,7 +224,7 @@ describe('the 404 page', () => {
     expect(hrefs, 'the 404 body links nowhere').toContain('/');
     expect(hrefs, 'the 404 body does not link to the chain').toContain('/blocks');
     for (const href of hrefs) {
-      expect(resolvesIn('.', href), `404 links ${href}, which was never built`).toBe(true);
+      expect(resolves(href), `404 links ${href}, which was never built`).toBe(true);
     }
   });
 
@@ -321,8 +321,14 @@ describe('the open block', () => {
   });
 
   it('emits no link the sandbox build did not produce a page for', () => {
-    for (const href of internalHrefs(mainOf(sandboxList()))) {
-      expect(resolvesIn(dir, href), `${href} is linked from /blocks but was never built`).toBe(true);
+    const hrefs = internalHrefs(mainOf(sandboxList()));
+    // Anti-vacuity, which this loop was the only one in the file to lack: a
+    // `<main>` emitting no links at all would report success having checked
+    // nothing — and the open block's card is precisely what this exists to
+    // check does not link to a page the build refused to make.
+    expect(hrefs.length, 'the sandbox /blocks page emitted no internal links to check').toBeGreaterThan(0);
+    for (const href of hrefs) {
+      expect(resolvesInSandbox(dir, href), `${href} is linked from /blocks but was never built`).toBe(true);
     }
   });
 });

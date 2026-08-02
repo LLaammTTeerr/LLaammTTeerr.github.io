@@ -48,13 +48,33 @@ describe('the "view all" link', () => {
 });
 
 describe('stats bar', () => {
+  /**
+   * The bar's own cells, as `label -> value` — never bare substrings.
+   *
+   * `toContain('Transactions')` and `toContain('Addresses')` were satisfied by
+   * `Base.astro`'s nav, which renders both words as `<span class="soon">` on
+   * every page in the site; deleting both cells from `StatsBar.astro` left the
+   * old test green. `toContain('>1<')` for the chain height was satisfied by
+   * the Transactions tile's own `<div class="v">1</div>`; blanking the height
+   * cell left it green too. Reading the pairs makes each cell answerable only
+   * by itself.
+   */
+  function cells(): Map<string, string> {
+    return new Map(
+      [...html().matchAll(/<div class="k">([^<]*)<\/div><div class="v">([^<]*)<\/div>/g)]
+        .map((m) => [m[1]!, m[2]!]),
+    );
+  }
+
   it('shows chain height, transactions, addresses and difficulty', () => {
     const s = getStats();
-    expect(html()).toContain('Chain height');
-    expect(html()).toContain('Transactions');
-    expect(html()).toContain('Addresses');
-    expect(html()).toContain('Difficulty');
-    expect(html()).toContain(`>${s.height}<`);
+    const bar = cells();
+    expect([...bar.keys()]).toEqual(['Chain height', 'Transactions', 'Addresses', 'Difficulty']);
+    expect(bar.get('Chain height')).toBe(String(s.height));
+    expect(bar.get('Transactions')).toBe(String(s.transactions));
+    expect(bar.get('Addresses')).toBe(String(s.addresses));
+    // §3.4 — difficulty is shown as the zeros a block had to find.
+    expect(bar.get('Difficulty')).toBe('0'.repeat(s.difficulty));
   });
 });
 
@@ -94,6 +114,10 @@ describe('block list', () => {
 
   it('orders blocks newest first in the document', () => {
     const order = [...html().matchAll(/data-block="(\d+)"/g)].map((m) => Number(m[1]));
+    // `[]` equals `[].sort()`, so without this the assertion below holds for a
+    // page that rendered no block at all. The preceding test happens to supply
+    // a guard; this one must not depend on the order tests happen to run in.
+    expect(order.length, 'the homepage rendered no blocks at all').toBeGreaterThan(0);
     expect(order).toEqual([...order].sort((a, b) => b - a));
   });
 
@@ -101,8 +125,20 @@ describe('block list', () => {
     expect(html()).toContain('Sealed');
   });
 
-  it('marks the genesis block', () => {
-    expect(html()).toContain('genesis');
+  it('marks the genesis block, and only in its own card', () => {
+    // `toContain('genesis')` was satisfied by the genesis post's slug, which
+    // BlockCard emits as `href="/tx/2026-06-15-genesis"` on every build
+    // regardless: dropping the `· genesis` marker left it green. Anchored to
+    // the marker's own markup, and read from the chain rather than written
+    // down, so it also fails if the marker lands on the wrong card.
+    const genesis = getBlocks().find((b) => b.isGenesis)!;
+    expect(html()).toContain(`<span class="per">${genesis.period} · genesis</span>`);
+    for (const b of homepageBlocks()) {
+      if (b.sealed && b.isGenesis) continue;
+      expect(html(), `block #${b.height} is marked genesis`).not.toContain(
+        `<span class="per">${b.period} · genesis</span>`,
+      );
+    }
   });
 
   it('renders each shown block with all three meter styles', () => {
@@ -116,8 +152,13 @@ describe('block list', () => {
   });
 
   it('shows the nonce and the work ratio', () => {
+    // The name promised both and the body checked only the nonce. The ratio is
+    // what the meter's caption states, and it is derived — a page printing the
+    // nonce beside a ratio it did not compute from that nonce would have been
+    // invisible here.
     const newest = getBlocks()[0]!;
     expect(html()).toContain(newest.nonce.toLocaleString('en-US'));
+    expect(html()).toContain(`${newest.workRatio.toFixed(2)}×`);
   });
 
   it('says a silent month is silent, in Vietnamese', () => {
@@ -301,7 +342,15 @@ describe('work meter markup', () => {
 
 describe('chrome language', () => {
   it('keeps explorer terms in English', () => {
-    expect(html()).toContain('Block');
-    expect(html()).toContain('Nonce');
+    // Scoped to the block cards' own chrome. A bare `toContain('Block')` was
+    // satisfied by the nav's `Blocks` label, which `Base.astro` renders on
+    // every page in the site, so nothing about the word "Block" could fail.
+    const cards = html().slice(html().indexOf('<div class="row"'));
+    expect(cards.length, 'the homepage rendered no block cards').toBeGreaterThan(0);
+    expect(cards).toContain('<h2 id="block-');
+    expect(cards).toMatch(/class="sr-only">Block #\d+/);
+    expect(cards).toContain('Nonce');
+    expect(cards).toContain('Merkle');
+    expect(cards).toContain('Hash');
   });
 });

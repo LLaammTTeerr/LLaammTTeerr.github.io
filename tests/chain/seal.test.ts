@@ -82,9 +82,34 @@ describe('planBlocks', () => {
     expect(drafts).toEqual([]);
   });
 
-  it('is a no-op when re-run at the same clock', () => {
-    const txs = [tx('2026-07-01', 'a')];
-    expect(planBlocks(txs, OPTS)).toEqual(planBlocks(txs, OPTS));
+  it('places every transaction exactly once, losing and duplicating none', () => {
+    // This replaces `expect(planBlocks(txs, OPTS)).toEqual(planBlocks(txs,
+    // OPTS))` — two calls to a pure function with identical arguments. `seal.ts`
+    // reads no clock and holds no module state, so no mutation could ever make
+    // the two sides disagree; it asserted determinism of `===` itself. Build
+    // idempotence, which is what that test was reaching for, is pinned for real
+    // in `build.test.ts` ("is byte-identical when re-run at the same clock" and
+    // the pending-file equivalent), which re-read from disk.
+    //
+    // What planning genuinely owes its caller is conservation: a transaction
+    // dropped here vanishes from the chain, and one placed twice is sealed
+    // twice. The fixture spans a sealed month, a size split and the still-open
+    // month, so every branch of the placement is crossed.
+    const txs = [
+      tx('2026-06-10', 'a'),
+      ...['b', 'c', 'd', 'e', 'f'].map((s, i) => tx(`2026-07-0${i + 1}`, s)),
+      tx('2026-08-01', 'g'),
+    ];
+    const { drafts, open } = planChain(txs, OPTS);
+    // Anti-vacuity: all three branches really are exercised.
+    expect(drafts.length, 'nothing sealed, so the split is untested').toBeGreaterThan(1);
+    expect(open, 'nothing left open, so the open branch is untested').not.toBeNull();
+
+    const placed = [...drafts.flatMap((d) => d.transactions), ...open!.transactions];
+    expect(placed.map((t) => t.slug).sort()).toEqual(txs.map((t) => t.slug).sort());
+    expect(new Set(placed.map((t) => t.slug)).size, 'a transaction was placed twice').toBe(
+      placed.length,
+    );
   });
 
   it('orders amendments after ordinary transactions within a block', () => {

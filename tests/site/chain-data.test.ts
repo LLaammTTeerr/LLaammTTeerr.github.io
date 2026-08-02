@@ -48,14 +48,25 @@ describe('splitHashWork', () => {
     });
   });
 
-  it('reconstructs the input and highlights exactly `difficulty` zeros for a real committed block', () => {
-    // Pins the split against the actual chain rather than a hand-built
-    // string, so a mismatch between `difficulty` and what the hash really
-    // starts with (a bug in either place) would show up here.
-    const newest = getBlocks()[0]!;
-    const work = splitHashWork(newest.shortHash, newest.difficulty);
-    expect(work.marker + work.zeros + work.rest).toBe(newest.shortHash);
-    expect(work.zeros).toBe('0'.repeat(newest.difficulty));
+  it('highlights exactly the zeros a real committed block was mined to find', () => {
+    // Pins the split against the actual chain rather than a hand-built string,
+    // so a mismatch between `difficulty` and what the hash really starts with
+    // (a bug in either place) would show up here.
+    //
+    // Reconstruction — `marker + zeros + rest === input` — used to stand here
+    // and cannot fail: the three fields are contiguous slices of the input, so
+    // it is true by construction for any implementation. What is real is that
+    // the highlighted prefix is zeros the *committed mined hash* actually
+    // carries, which is a fact about the ledger and not about the split.
+    for (const block of getBlocks()) {
+      const work = splitHashWork(block.shortHash, block.difficulty);
+      expect(work.zeros, `block #${block.height}`).toBe('0'.repeat(block.difficulty));
+      expect(
+        block.hash.startsWith(`0x${work.zeros}`),
+        `block #${block.height} highlighted zeros its mined hash does not have`,
+      ).toBe(true);
+      expect(block.difficulty, `block #${block.height} committed no proof of work`).toBeGreaterThan(0);
+    }
   });
 
   it('clamps to the string available rather than slicing past its end', () => {
@@ -170,13 +181,21 @@ describe('getBlock', () => {
 });
 
 describe('getPosts', () => {
-  it('excludes amendments', () => {
-    expect(getPosts().every((t) => t.type === 'post')).toBe(true);
-  });
-
-  it('returns posts newest first by date', () => {
-    const dates = getPosts().map((p) => p.date);
-    expect([...dates].sort().reverse()).toEqual(dates);
+  // The committed ledger holds one transaction and it is a post, so `every(...
+  // === 'post')` and "already in date order" are both vacuously true here —
+  // proved by mutation: deleting either the `.filter` or the `.sort` from
+  // `getPosts` left this file green. Both behaviours are discriminated in
+  // `tests/site/chain-data-longer-chain.test.ts`, against a mocked chain that
+  // holds an amendment and three posts out of date order. What stays here is
+  // the concrete fact about the shipped ledger.
+  it('returns exactly the post transactions the committed ledger holds', () => {
+    const posts = getPosts();
+    const committed = getChain()
+      .blocks.flatMap((b) => b.transactions)
+      .filter((t) => t.type === 'post');
+    expect(committed).toHaveLength(1);
+    expect(posts.map((t) => t.hash)).toEqual(committed.map((t) => t.hash));
+    expect(posts[0]!.slug).toBe('2026-06-15-genesis');
   });
 });
 
@@ -192,19 +211,28 @@ describe('getStats', () => {
     expect(getStats().height).toBe(getBlocks()[0]!.height);
   });
 
+  // Amendments are transactions too (§3.9): committed to merkleRoot and
+  // counted in txCount. This ledger holds one transaction and one post, so a
+  // post count agrees by coincidence — which is the very mistake this test's
+  // comment warns against, and it stayed green under it. The discriminating
+  // version, on a chain holding an amendment, is in
+  // `tests/site/chain-data-longer-chain.test.ts`; this pins the shipped
+  // ledger's own number.
   it("counts every transaction from the headers' committed txCount", () => {
-    // Amendments are transactions too (§3.9): committed to merkleRoot and
-    // counted in txCount. A post count agrees only while the ledger holds
-    // none, and would disagree with the block pages on the first one.
     const committed = getChain().blocks.reduce((n, b) => n + b.txCount, 0);
     expect(committed).toBe(1);
     expect(getStats().transactions).toBe(1);
     expect(getStats().transactions).toBe(committed);
   });
 
-  it('counts the assets in the committed registry', () => {
+  // `assets` is `[]` on the committed ledger, so `0 === 0` holds for any
+  // implementation. A non-empty registry is counted in
+  // `tests/site/chain-data-longer-chain.test.ts`; what is real here is that
+  // nothing was minted and `getAssets` agrees with the count.
+  it('reports an empty registry for a chain that minted no token', () => {
+    expect(getChain().assets).toEqual([]);
     expect(getStats().assets).toBe(0);
-    expect(getStats().assets).toBe(getChain().assets.length);
+    expect(getAssets()).toHaveLength(0);
   });
 
   it('counts distinct addresses across from and to', () => {

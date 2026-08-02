@@ -389,17 +389,27 @@ describe('buildChain', () => {
     expect(amendmentBlock.transactions[0]!.type).toBe('amendment');
   });
 
-  it('never carries two post transactions for the same slug', async () => {
+  it('never carries two post transactions for the same slug, sealed or open', async () => {
+    // It read `after.chain.blocks` alone, and at this clock the duplicate lands
+    // in the PENDING block, which it never inspected: dropping
+    // `&& !sealedPostSlugs.has(t.slug)` from build.ts — the exact regression the
+    // sibling test above documents — left this green while nine other tests in
+    // this file went red. The chain is sealed history plus the open block, so
+    // uniqueness has to be asserted over both.
     const { postsDir, assetsDir, lockPath } = workspace();
     await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
     const target = join(postsDir, '2026-06-15-first.md');
     writeFileSync(target, readFileSync(target, 'utf8') + '\nMột dòng sửa lại.\n');
     const after = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-11-10', config: CONFIG });
 
-    const postSlugs = after.chain.blocks
-      .flatMap((b) => b.transactions)
-      .filter((t) => t.type === 'post')
-      .map((t) => t.slug);
+    const everywhere = [
+      ...after.chain.blocks.flatMap((b) => b.transactions),
+      ...(after.pending?.transactions ?? []),
+    ];
+    // Anti-vacuity: the edit really did produce an open transaction to check.
+    expect(after.pending!.transactions.length).toBeGreaterThan(0);
+    const postSlugs = everywhere.filter((t) => t.type === 'post').map((t) => t.slug);
+    expect(postSlugs).toContain('2026-06-15-first');
     expect(new Set(postSlugs).size).toBe(postSlugs.length);
   });
 
