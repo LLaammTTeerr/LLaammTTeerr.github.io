@@ -1,9 +1,10 @@
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { CHAIN_CONFIG } from '../../chain.config';
 import { normalizeBody } from '../chain/canonical';
 import { sha256Hex } from '../chain/hash';
 import { readLock } from '../chain/lock';
+import { isStale, PENDING_PATH, readPending } from '../chain/pending';
 import { parsePost } from '../chain/post';
 import type { AssetRecord, Block, Chain, Hex, Transaction } from '../chain/types';
 
@@ -107,6 +108,8 @@ export interface BlockView extends Block {
   isEmpty: boolean;
   workRatio: number;
   shortHash: string;
+  /** Always `true` on a sealed block — lets `AnyBlockView` discriminate. */
+  sealed: true;
 }
 
 function toView(block: Block): BlockView {
@@ -116,6 +119,7 @@ function toView(block: Block): BlockView {
     isEmpty: block.transactions.length === 0,
     workRatio: workRatio(block.nonce, block.difficulty),
     shortHash: shortHash(block.hash),
+    sealed: true,
   };
 }
 
@@ -183,45 +187,96 @@ export async function getPostContent(
   return { slug, body, contentHash: tx.contentHash, tx };
 }
 
-export interface PendingPost {
-  slug: string;
-  title: string;
-  date: string;
-  tags: string[];
+export interface PendingBlockView {
+  /** Always `false` on the open block — lets `AnyBlockView` discriminate. */
+  sealed: false;
+  /** The height this block will take once it seals. */
+  height: number;
+  /** YYYY-MM — the recorded placement (§3.6); does not slide with the clock. */
+  period: string;
+  /** Recorded transactions, in the order `chain:build` committed them. */
+  transactions: Transaction[];
+  txCount: number;
+  /** Sum over `transactions`. */
+  gasUsed: number;
+  /** Sum over `transactions`. */
+  value: number;
+  /** How many transactions a block holds before sealing — the "1/4 giao dịch" fill. */
+  maxTxPerBlock: number;
+  /** The last calendar day of `period`, YYYY-MM-DD. */
+  sealsOn: string;
 }
 
-export interface PendingBlock {
-  /** The open calendar month, YYYY-MM. */
-  period: string;
-  /** Newest first, matching sealed blocks. */
-  posts: PendingPost[];
+/** Discriminates a sealed block from the still-open one on `sealed`. */
+export type AnyBlockView = (BlockView & { sealed: true }) | PendingBlockView;
+
+const ZERO_HASH = '0x' + '00'.repeat(32);
+
+/**
+ * The committed tip's hash — the block a recorded open block must still be
+ * attached to for `isStale` to accept it. Found by height rather than by
+ * array position: nothing here guarantees `chain.blocks` is height-ordered
+ * (`getBlocks` itself sorts before use), so the last array element is not
+ * reliably the tip.
+ */
+function tipHash(chain: Chain): Hex {
+  let tip: Block | null = null;
+  for (const block of chain.blocks) {
+    if (tip === null || block.height > tip.height) tip = block;
+  }
+  return tip ? tip.hash : ZERO_HASH;
 }
 
 /**
- * §3.6, §9 — the open block. The engine withholds a partial current month from
- * the lock, so a post published this month is on disk and on no block. Without
- * this it would have no page, no URL and no feed entry, which looks exactly
- * like a failed publish.
+ * The last calendar day of `period` (`YYYY-MM`), as `YYYY-MM-DD`.
  *
- * A post is pending when its slug appears in no sealed block. `now` is supplied
- * by the caller, never read here, so builds stay deterministic (§14).
+ * Reads no clock — this is pure arithmetic on the recorded string.
+ * `period`'s month is 1-based; `Date.UTC(y, m, 0)` asks for day 0 of the
+ * *zero-based* month `m`, i.e. the day before that month starts, which is
+ * the last day of the recorded (1-based) month `m` itself. UTC's own
+ * calendar folds in February and leap years on its own — nothing here
+ * special-cases them, and a future edit should not "fix" that in.
  */
-export function getPendingBlock(
-  now: string,
-  postsDir: string = POSTS_DIR,
-): PendingBlock | null {
-  const sealed = new Set(getPosts().map((t) => t.slug));
+function sealsOn(period: string): string {
+  const [yearStr = '', monthStr = ''] = period.split('-');
+  const last = new Date(Date.UTC(Number(yearStr), Number(monthStr), 0));
+  const month = String(last.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(last.getUTCDate()).padStart(2, '0');
+  return `${last.getUTCFullYear()}-${month}-${day}`;
+}
 
-  const posts: PendingPost[] = readdirSync(postsDir)
-    .filter((f) => f.endsWith('.md'))
-    .map((f) => join(postsDir, f))
-    .map((path) => parsePost(path, readFileSync(path, 'utf8')))
-    .filter((p) => !sealed.has(p.slug))
-    .map((p) => ({ slug: p.slug, title: p.title, date: p.date, tags: p.tags }))
-    .sort((a, b) => b.date.localeCompare(a.date) || b.slug.localeCompare(a.slug));
+/**
+ * §3.6, §9 — the open block, exactly as `chain:build` recorded it.
+ *
+ * Reads `chain.pending.json` rather than rebuilding the open block from
+ * `content/posts/`. Recomputing it here is the defect Task 1 removed from
+ * the engine (see the module doc on `PendingLock` in `src/chain/pending.ts`):
+ * block membership must be a fact recorded once, or a transaction's
+ * placement can slide forward forever and a month can seal empty while
+ * holding a post. Takes no arguments and reads no clock (§14) — the recorded
+ * file already carries everything needed to render it.
+ *
+ * A pending file recorded against a tip this chain no longer has belongs to
+ * a different history; `null` rather than showing hashes attached to the
+ * wrong chain.
+ */
+export function getPendingBlock(): PendingBlockView | null {
+  const pending = readPending(PENDING_PATH);
+  if (pending === null) return null;
+  if (isStale(pending, tipHash(getChain()))) return null;
 
-  if (posts.length === 0) return null;
-  return { period: now.slice(0, 7), posts };
+  const view: PendingBlockView = {
+    sealed: false,
+    height: pending.height,
+    period: pending.period,
+    transactions: pending.transactions,
+    txCount: pending.transactions.length,
+    gasUsed: pending.transactions.reduce((sum, t) => sum + t.gasUsed, 0),
+    value: pending.transactions.reduce((sum, t) => sum + t.value, 0),
+    maxTxPerBlock: CHAIN_CONFIG.maxTxPerBlock,
+    sealsOn: sealsOn(pending.period),
+  };
+  return deepFreeze(view);
 }
 
 export function getAssets(): AssetRecord[] {

@@ -1,12 +1,25 @@
-import { describe, it, expect } from 'vitest';
-import { mkdtempSync, writeFileSync, cpSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { CHAIN_CONFIG } from '../../chain.config';
 import { shortHash, splitHashWork } from '../../src/site/chain-data';
 import {
   getChain, getBlocks, getBlock, getPosts, getAssets, getStats,
   workRatio, expectedAttempts, getPendingBlock, researchHours,
 } from '../../src/site/chain-data';
+import { readPending, type PendingLock } from '../../src/chain/pending';
+import type { Transaction } from '../../src/chain/types';
+
+// `getPendingBlock` reads a recorded file via `readPending`, with no
+// arguments and no injectable path — it always reads the real
+// `chain.pending.json` at the repo root. Mocking `readPending` (rather than
+// writing that file in place) lets these tests control what it returns
+// without touching the real working tree, which `astro build` sandboxes
+// elsewhere in this suite (`tests/site/sandbox.ts`) go out of their way to
+// avoid for exactly this reason. `isStale` and everything else in the module
+// stay real, so the staleness check under test is the actual implementation.
+vi.mock('../../src/chain/pending', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/chain/pending')>();
+  return { ...actual, readPending: vi.fn() };
+});
 
 describe('expectedAttempts', () => {
   it('is 16^difficulty', () => {
@@ -275,53 +288,123 @@ describe('cache immutability', () => {
 });
 
 describe('getPendingBlock', () => {
-  function postsWith(extra?: { name: string; body: string }): string {
-    const dir = mkdtempSync(join(tmpdir(), 'pending-'));
-    cpSync('content/posts', dir, { recursive: true });
-    if (extra) writeFileSync(join(dir, extra.name), extra.body);
-    return dir;
+  const HASH = '0x' + 'a'.repeat(64);
+  const HASH2 = '0x' + 'b'.repeat(64);
+  const ADDR = '0x' + 'c'.repeat(40);
+
+  function pendingTx(overrides: Partial<Transaction> = {}): Transaction {
+    return {
+      hash: HASH,
+      type: 'post',
+      slug: 'bai-viet',
+      title: 'Bài viết',
+      date: '2026-08-05',
+      tags: ['essay'],
+      series: null,
+      from: ADDR,
+      to: [],
+      contentHash: HASH2,
+      assets: [],
+      gasUsed: 12,
+      value: 2,
+      research: null,
+      amends: null,
+      ...overrides,
+    };
   }
 
-  it('returns null when every post on disk is already sealed', () => {
-    expect(getPendingBlock('2026-08-02', postsWith())).toBeNull();
+  // `prevHash` defaults to the real chain's actual tip, so the fixture reads
+  // as fresh unless a test deliberately overrides it — the staleness test does.
+  function pendingFixture(overrides: Partial<PendingLock> = {}): PendingLock {
+    return {
+      version: 1,
+      period: '2026-08',
+      height: getStats().height + 1,
+      prevHash: getBlocks()[0]!.hash,
+      transactions: [pendingTx()],
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    vi.mocked(readPending).mockReset();
   });
 
-  it('reports a post that is on disk but in no sealed block', () => {
-    const dir = postsWith({
-      name: '2026-08-05-moi.md',
-      body: '---\ntitle: "Bài mới"\ndate: 2026-08-05\ntags: [cp]\n---\n\nNội dung.\n',
-    });
-    const pending = getPendingBlock('2026-08-10', dir);
+  it('returns null when no pending file exists', () => {
+    vi.mocked(readPending).mockReturnValue(null);
+    expect(getPendingBlock()).toBeNull();
+  });
+
+  it('exposes the recorded transactions with their recorded hashes', () => {
+    // Not recomputed. The point of the file is that the site shows what
+    // chain:build committed, so a hash on the page is one you can diff. HASH
+    // and HASH2 are fabricated, not derivable from any real content — if the
+    // implementation tried to recompute them from disk instead of trusting
+    // the recorded file, this would not come back matching.
+    const recorded = pendingTx({ hash: HASH, contentHash: HASH2 });
+    vi.mocked(readPending).mockReturnValue(pendingFixture({ transactions: [recorded] }));
+
+    const pending = getPendingBlock();
     expect(pending).not.toBeNull();
-    expect(pending!.period).toBe('2026-08');
-    expect(pending!.posts.map((p) => p.slug)).toEqual(['2026-08-05-moi']);
-    expect(pending!.posts[0]!.title).toBe('Bài mới');
+    expect(pending!.transactions).toEqual([recorded]);
+    expect(pending!.transactions[0]!.hash).toBe(HASH);
+    expect(pending!.transactions[0]!.contentHash).toBe(HASH2);
   });
 
-  it('takes its period from the clock, not from the newest post', () => {
-    // The open block is the current month, whether or not anything landed in it.
-    const dir = postsWith({
-      name: '2026-08-05-moi.md',
-      body: '---\ntitle: "Bài mới"\ndate: 2026-08-05\ntags: [cp]\n---\n\nNội dung.\n',
-    });
-    expect(getPendingBlock('2026-09-01', dir)!.period).toBe('2026-09');
+  it('refuses a pending file written against a different tip', () => {
+    // A stale file must not render as though it belonged to this chain.
+    const foreignTip = '0x' + 'f'.repeat(64);
+    expect(foreignTip).not.toBe(getBlocks()[0]!.hash);
+    vi.mocked(readPending).mockReturnValue(pendingFixture({ prevHash: foreignTip }));
+    expect(getPendingBlock()).toBeNull();
   });
 
-  it('orders pending posts newest first, like sealed blocks', () => {
-    const dir = postsWith({
-      name: '2026-08-01-a.md',
-      body: '---\ntitle: "A"\ndate: 2026-08-01\ntags: [cp]\n---\n\nA.\n',
-    });
-    writeFileSync(join(dir, '2026-08-09-b.md'),
-      '---\ntitle: "B"\ndate: 2026-08-09\ntags: [cp]\n---\n\nB.\n');
-    expect(getPendingBlock('2026-08-10', dir)!.posts.map((p) => p.slug))
-      .toEqual(['2026-08-09-b', '2026-08-01-a']);
+  it('reports the month end as the seal date', () => {
+    vi.mocked(readPending).mockReturnValue(pendingFixture({ period: '2026-08' }));
+    expect(getPendingBlock()!.sealsOn).toBe('2026-08-31');
   });
 
-  it('does not read the clock itself', () => {
-    // Determinism (§14): the caller supplies `now`, as everywhere else.
-    const a = getPendingBlock('2026-08-10', postsWith());
-    const b = getPendingBlock('2026-08-10', postsWith());
-    expect(a).toEqual(b);
+  it('reports the last day of February, including a leap year', () => {
+    // §sealsOn — arithmetic only, no clock. Pins both the common case and
+    // the leap-year case so neither can silently regress to a fixed 28.
+    vi.mocked(readPending).mockReturnValue(pendingFixture({ period: '2026-02' }));
+    expect(getPendingBlock()!.sealsOn).toBe('2026-02-28');
+
+    vi.mocked(readPending).mockReturnValue(pendingFixture({ period: '2024-02' }));
+    expect(getPendingBlock()!.sealsOn).toBe('2024-02-29');
+  });
+
+  it('sums gasUsed and value across the recorded transactions', () => {
+    const a = pendingTx({ hash: HASH, gasUsed: 10, value: 1 });
+    const b = pendingTx({ hash: HASH2, slug: 'bai-hai', gasUsed: 20, value: 3 });
+    vi.mocked(readPending).mockReturnValue(pendingFixture({ transactions: [a, b] }));
+
+    const pending = getPendingBlock()!;
+    expect(pending.txCount).toBe(2);
+    expect(pending.gasUsed).toBe(30);
+    expect(pending.value).toBe(4);
+  });
+
+  it('carries the recorded height and marks itself unsealed', () => {
+    vi.mocked(readPending).mockReturnValue(pendingFixture({ height: 7 }));
+    const pending = getPendingBlock()!;
+    expect(pending.sealed).toBe(false);
+    expect(pending.height).toBe(7);
+  });
+
+  it('reports maxTxPerBlock from the chain config, for the fill indicator', () => {
+    vi.mocked(readPending).mockReturnValue(pendingFixture());
+    expect(getPendingBlock()!.maxTxPerBlock).toBe(4);
+    expect(getPendingBlock()!.maxTxPerBlock).toBe(CHAIN_CONFIG.maxTxPerBlock);
+  });
+
+  it('deep-freezes the returned view, like getChain', () => {
+    vi.mocked(readPending).mockReturnValue(pendingFixture());
+    const pending = getPendingBlock()!;
+    expect(Object.isFrozen(pending)).toBe(true);
+    expect(Object.isFrozen(pending.transactions)).toBe(true);
+    expect(() => {
+      (pending as { height: number }).height = 999;
+    }).toThrow(TypeError);
   });
 });
