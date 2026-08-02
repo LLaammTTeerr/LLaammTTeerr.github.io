@@ -141,6 +141,27 @@ export function getPosts(): Transaction[] {
     .sort((a, b) => b.date.localeCompare(a.date));
 }
 
+/**
+ * §3.6 — post transactions in the still-open block: published, hashed, in the
+ * chain, and not yet sealed.
+ *
+ * Separate from `getPosts()` rather than folded into it. Every existing caller
+ * of `getPosts()` reads fields only a sealed transaction has a truthful answer
+ * for — the block it was sealed in, the `Sealed` stamp, the confirmed hash —
+ * and silently widening it would make each of those assert something about a
+ * transaction the chain has not committed to yet. A route that wants both asks
+ * for both, and says which is which.
+ *
+ * Amendments are filtered out for the same reason `getPosts()` filters them:
+ * they are ledger entries about a post, not a post, and they carry no slug to
+ * build a page from (§3.9).
+ */
+export function getPendingPosts(): Transaction[] {
+  const pending = getPendingBlock();
+  if (pending === null) return [];
+  return pending.transactions.filter((t) => t.type === 'post');
+}
+
 const POSTS_DIR = 'content/posts';
 
 export interface PostContent {
@@ -219,7 +240,19 @@ export async function getPostContent(
   slug: string,
   postsDir: string = POSTS_DIR,
 ): Promise<PostContent> {
-  const tx = getPosts().find((t) => t.slug === slug);
+  // Sealed first, then the open block. A slug cannot be in both: `buildChain`
+  // drops a live post whose slug is already sealed, representing later edits
+  // to it as amendments (§3.9).
+  //
+  // A pending post gets exactly the same treatment from here on, deliberately.
+  // It is not in `chain.lock.json`, but it *is* recorded in
+  // `chain.pending.json` with a `contentHash` derived from the same file, so
+  // there is a committed value to check the body against — and skipping the
+  // check for it would leave the one window in which every freshly published
+  // post lives unguarded, which is precisely where an unrecorded edit is most
+  // likely. What sealing adds is immutability, not identity (§3.6).
+  const sealed = getPosts().find((t) => t.slug === slug);
+  const tx = sealed ?? getPendingPosts().find((t) => t.slug === slug);
   if (!tx) {
     throw new Error(`no transaction on the chain for post "${slug}"`);
   }
@@ -238,9 +271,16 @@ export async function getPostContent(
   const expected = amendment === null ? tx.contentHash : amendment.contentHash;
 
   if (actual !== expected) {
+    // The remedy is the same command either way, but not the same event: an
+    // edit to a *sealed* post is recorded as an amendment (§3.9), while an
+    // edit to one still in the open block simply re-hashes its transaction —
+    // nothing is committed yet for an amendment to be evidence against
+    // (§3.6). Naming an amendment there would tell the author to expect a
+    // ledger entry that will not appear.
+    const records = sealed === undefined ? 'record the edit' : 'record the edit as an amendment';
     throw new Error(
       `${path} does not match the chain: committed ${expected.slice(0, 10)}…, ` +
-        `on disk ${actual.slice(0, 10)}… — re-run \`npm run chain:build\` to record the edit as an amendment`,
+        `on disk ${actual.slice(0, 10)}… — re-run \`npm run chain:build\` to ${records}`,
     );
   }
 

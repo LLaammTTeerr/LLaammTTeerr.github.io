@@ -1,6 +1,6 @@
 ---
 import type { Transaction } from '../chain/types';
-import { getBlocks, researchHours } from '../site/chain-data';
+import { getBlocks, getPendingBlock, researchHours } from '../site/chain-data';
 import PendingState from './PendingState.astro';
 // `.meta`, `.hash` and `.num` are BlockCard's dense-metadata classes
 // (src/styles/chain.css) — reused verbatim here rather than redefined, so
@@ -9,10 +9,22 @@ import PendingState from './PendingState.astro';
 import '../styles/chain.css';
 import '../styles/post.css';
 
-interface Props { tx: Transaction; pending?: boolean }
-const { tx, pending = false } = Astro.props;
+// `pending` is required on purpose, with no default. A caller that forgot it
+// used to render `Sealed` over an unconfirmed transaction — the one falsehood
+// §3.6 is most explicit about ("a pending hash presented with the same
+// authority as a sealed one would be the single most misleading thing this
+// site could display"). Every caller now has to say which state it is in.
+interface Props { tx: Transaction; pending: boolean }
+const { tx, pending } = Astro.props;
 
-const block = getBlocks().find((b) => b.transactions.some((t) => t.hash === tx.hash));
+// A pending transaction is in no sealed block, and `getBlocks()` reads sealed
+// history only — searching it for one found nothing and rendered `—` for the
+// block it is plainly in. The open block is where it is, so that is where it
+// is looked up. Both views carry `height` and `period`, which is all this row
+// reads; nothing here touches a field only a sealed block has.
+const block = pending
+  ? getPendingBlock()
+  : getBlocks().find((b) => b.transactions.some((t) => t.hash === tx.hash));
 const readMinutes = Math.max(1, Math.round(tx.gasUsed / 200));
 // null when the author declared no `research` — §3.8 wants an em dash there,
 // not the `0.0` the chain (correctly) committed.
@@ -32,7 +44,7 @@ const hours = researchHours(tx.value);
       <span class="hash">{tx.hash}</span>
     )}</dd>
     <dt>Block</dt>
-    <dd>{block ? <a href={`/block/${block.height}`}>#{block.height}</a> : '—'} · {block?.period}</dd>
+    <dd>{block ? <a href={`/block/${block.height}`}>#{block.height}</a> : '—'} · {block?.period}{pending ? ' · đang mở' : ''}</dd>
     <dt>Timestamp</dt><dd>{tx.date}</dd>
     <dt>From</dt><dd><span class="addr">{tx.from}</span></dd>
     <dt>To</dt>

@@ -180,6 +180,20 @@ describe('a post that declares no research hours', () => {
     }
     writeFileSync(lockPath, JSON.stringify(lock, null, 2) + '\n');
 
+    // The open block, when the repository has one, is rendered on the homepage
+    // beside the sealed cards, and its transactions come from a second file the
+    // loop above never touches. Zeroing only the lock would leave a genuinely
+    // declared figure on the page and fail the assertion below for a reason
+    // that has nothing to do with the em dash.
+    const pendingPath = join(dir, 'chain.pending.json');
+    if (existsSync(pendingPath)) {
+      const pending = JSON.parse(readFileSync(pendingPath, 'utf8')) as {
+        transactions: { value: number }[];
+      };
+      for (const tx of pending.transactions) tx.value = 0;
+      writeFileSync(pendingPath, JSON.stringify(pending, null, 2) + '\n');
+    }
+
     const build = buildSandbox(dir);
     expect(build.status, `sandbox build failed:\n${build.output}`).toBe(0);
 

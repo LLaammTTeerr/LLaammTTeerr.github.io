@@ -1,10 +1,24 @@
 import { describe, it, expect } from 'vitest';
 import { readDist } from './dist';
-import { getBlocks, getStats } from '../../src/site/chain-data';
+import { getBlocks, getPendingBlock, getStats } from '../../src/site/chain-data';
 import { meterGeometry } from '../../src/site/meter';
 
 // Read inside each test, never at module level — see tests/site/dist.ts.
 const html = () => readDist('index.html');
+
+/**
+ * How many block cards the homepage should hold: every sealed block, plus the
+ * open one when there is something unsealed.
+ *
+ * `getBlocks()` alone is the sealed count, and the homepage renders the open
+ * block above them. The committed chain has no open block, so today these two
+ * numbers agree — but the moment a post is published into the current month
+ * and `chain.pending.json` is committed beside the lock, a per-block count
+ * written as `getBlocks().length` starts failing on a correctly rendered page.
+ * The outline assertions below are about "one heading per card", not about the
+ * sealed count, so they count cards.
+ */
+const renderedBlocks = () => getBlocks().length + (getPendingBlock() === null ? 0 : 1);
 
 describe('stats bar', () => {
   it('shows chain height, transactions, addresses and difficulty', () => {
@@ -80,12 +94,12 @@ describe('document outline', () => {
   });
 
   it('gives every block a heading of its own', () => {
-    expect(headings().filter((l) => l === 2)).toHaveLength(getBlocks().length);
+    expect(headings().filter((l) => l === 2)).toHaveLength(renderedBlocks());
   });
 
   it('gives every article an accessible name from a real heading', () => {
     const articles = [...html().matchAll(/<article\b[^>]*>/g)].map((m) => m[0]);
-    expect(articles.length).toBe(getBlocks().length);
+    expect(articles.length).toBe(renderedBlocks());
     for (const tag of articles) {
       const labelledBy = /aria-labelledby="([^"]+)"/.exec(tag)?.[1];
       const label = /aria-label="([^"]+)"/.exec(tag);

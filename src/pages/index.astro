@@ -2,12 +2,18 @@
 import Base from '../layouts/Base.astro';
 import StatsBar from '../components/StatsBar.astro';
 import BlockCard from '../components/BlockCard.astro';
-import { getBlocks } from '../site/chain-data';
+import { getBlocks, getPendingBlock } from '../site/chain-data';
+import type { AnyBlockView } from '../site/chain-data';
 // No chain.css import here: StatsBar, BlockCard and WorkMeter each import
 // the styles they need, so a new route that renders them cannot ship
 // unstyled by forgetting a page-level import.
 
-const blocks = getBlocks();
+// The chain reads backwards into history (§9), and the open block is the
+// newest thing on it — one height above the tip — so it heads the list. It is
+// absent whenever nothing is unsealed, which is most of the time; the list is
+// then exactly what it was before.
+const pending = getPendingBlock();
+const blocks: AnyBlockView[] = pending === null ? getBlocks() : [pending, ...getBlocks()];
 ---
 
 <Base title="Blogchain — lamter.eth">

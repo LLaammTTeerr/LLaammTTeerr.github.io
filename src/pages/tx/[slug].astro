@@ -1,16 +1,34 @@
 ---
 import Base from '../../layouts/Base.astro';
 import TxPanel from '../../components/TxPanel.astro';
-import { getPostContent, getPosts } from '../../site/chain-data';
+import { getPendingPosts, getPostContent, getPosts } from '../../site/chain-data';
 import { renderMarkdown } from '../../site/markdown';
 import '../../styles/post.css';
 import '../../styles/katex.css';
 
+/**
+ * Every post in the chain gets a page — sealed or not (§3.6). A post
+ * published into the still-open month has a real hash and a real transaction
+ * the moment `chain:build` records it; withholding its page until month-end
+ * would make a freshly published post indistinguishable from a publishing
+ * failure.
+ *
+ * `pending` travels with each path rather than being re-derived in the page:
+ * the two lists are the only place that knows which block a transaction came
+ * from, and `TxPanel` requires the answer.
+ *
+ * No clock is read here, and none is passed: `getPendingBlock()` returns the
+ * placement `chain:build` recorded (§14), so this route renders the same pages
+ * on any day for the same chain.
+ */
 export function getStaticPaths() {
-  return getPosts().map((tx) => ({ params: { slug: tx.slug! }, props: { tx } }));
+  return [
+    ...getPosts().map((tx) => ({ params: { slug: tx.slug! }, props: { tx, pending: false } })),
+    ...getPendingPosts().map((tx) => ({ params: { slug: tx.slug! }, props: { tx, pending: true } })),
+  ];
 }
 
-const { tx } = Astro.props;
+const { tx, pending } = Astro.props;
 // Throws if the file on disk no longer matches the chain — the build fails
 // rather than shipping a page whose verify control would contradict it.
 const content = await getPostContent(tx.slug!);
@@ -18,7 +36,7 @@ const html = await renderMarkdown(content.body);
 ---
 
 <Base title={`${tx.title} — Blogchain`} description={`${tx.title} · ${tx.gasUsed} từ`}>
-  <TxPanel tx={tx} />
+  <TxPanel tx={tx} pending={pending} />
   <article class="post">
     <h1>{tx.title}</h1>
     <p class="byline">{tx.date} · {tx.tags.map((t) => `#${t}`).join(' ')}</p>
