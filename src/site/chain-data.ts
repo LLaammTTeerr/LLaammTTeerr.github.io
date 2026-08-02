@@ -69,14 +69,22 @@ export interface HashWork {
  * a block commit to a stricter target than the chain requires, and
  * `verifyBlock` checks the hash against that committed value.
  *
- * Clamped to the string actually available, so a `difficulty` longer than
- * `hash` (or than what a `shortHash` still has visible before its `…`)
- * degrades to "everything after 0x is proven" rather than slicing past the
- * end of the string.
+ * Clamped to the hex *actually visible*, which for a `shortHash` is the six
+ * characters before its `…` and not the whole string. Clamping against the
+ * string length instead painted the ellipsis itself as a proven zero at
+ * difficulty 7, and a real hex digit from the hash's tail at difficulty 8 —
+ * characters the miner never had to find, rendered in the reader's accent as
+ * proof of work. §3.4 makes that reachable: the chain's difficulty is
+ * configurable and a block may commit to a stricter target than the floor.
+ *
+ * A difficulty past what is visible degrades to "every visible character is
+ * proven" rather than overclaiming.
  */
 export function splitHashWork(hash: string, difficulty: number): HashWork {
-  const n = Math.min(Math.max(difficulty, 0), Math.max(hash.length - 2, 0));
-  return { marker: hash.slice(0, 2), zeros: hash.slice(2, 2 + n), rest: hash.slice(2 + n) };
+  const body = hash.slice(2);
+  const visible = (body.split('…')[0] ?? '').length;
+  const n = Math.min(Math.max(difficulty, 0), visible);
+  return { marker: hash.slice(0, 2), zeros: body.slice(0, n), rest: body.slice(n) };
 }
 
 /**

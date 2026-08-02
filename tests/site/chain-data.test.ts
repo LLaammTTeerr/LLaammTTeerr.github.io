@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { mkdtempSync, writeFileSync, cpSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { splitHashWork } from '../../src/site/chain-data';
+import { shortHash, splitHashWork } from '../../src/site/chain-data';
 import {
   getChain, getBlocks, getBlock, getPosts, getAssets, getStats,
   workRatio, expectedAttempts, getPendingBlock, researchHours,
@@ -47,6 +47,35 @@ describe('splitHashWork', () => {
 
   it('clamps to the string available rather than slicing past its end', () => {
     expect(splitHashWork('0x00', 5)).toEqual({ marker: '0x', zeros: '00', rest: '' });
+  });
+
+  it('clamps to the hex a shortHash still shows, not to the whole string', () => {
+    // The caller (BlockCard) passes a `shortHash`, where only six hex
+    // characters precede the `…`. Clamping against the string length painted
+    // the ellipsis as a proven zero at difficulty 7 and a real hex digit from
+    // the hash's tail at difficulty 8 — both reachable, since §3.4 makes the
+    // chain's difficulty configurable and lets a block commit to a stricter
+    // target than the floor.
+    const short = shortHash(`0x${'0'.repeat(8)}${'b'.repeat(56)}`);
+    expect(short).toBe('0x000000…bbbbbb');
+    for (const difficulty of [7, 8, 20]) {
+      const work = splitHashWork(short, difficulty);
+      expect(work.zeros, `difficulty ${difficulty} overclaimed the visible proof`).toBe('000000');
+      expect(work.rest).toBe('…bbbbbb');
+    }
+  });
+
+  it('marks nothing but zeros at any difficulty, for the shape the caller passes', () => {
+    // The invariant the whole highlight rests on: every marked character is
+    // one the miner had to find. BlockCard always passes a `shortHash`, which
+    // shows six hex characters — so however strict a block's committed target,
+    // at most those six can be presented as proof, and never the `…`.
+    const short = shortHash(`0x${'0'.repeat(8)}${'b'.repeat(56)}`);
+    for (let difficulty = 0; difficulty <= 20; difficulty++) {
+      const work = splitHashWork(short, difficulty);
+      expect(work.zeros, `difficulty ${difficulty} marked a non-zero character`).toMatch(/^0*$/);
+      expect(work.marker + work.zeros + work.rest, 'the split lost or duplicated characters').toBe(short);
+    }
   });
 
   it('treats a zero or negative difficulty as no highlighted prefix', () => {
