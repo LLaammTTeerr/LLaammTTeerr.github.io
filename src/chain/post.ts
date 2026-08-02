@@ -59,6 +59,16 @@ export function parsePost(filePath: string, raw: string): PostInput {
   if (!Number.isFinite(research) || research < 0) {
     throw new Error(`${filePath}: "research" must be a non-negative number`);
   }
+  // §3.2 — research is fixed at exactly one decimal place when hashed
+  // (canonicalPostTx uses formatResearch, i.e. toFixed(1)). A value with
+  // more precision would silently round on the way into the hash while
+  // `tx.value` kept the unrounded number, so the displayed and hashed
+  // values would disagree. Reject at the door instead of rounding silently.
+  if (Math.round(research * 10) !== research * 10) {
+    throw new Error(
+      `${filePath}: "research" must have at most one decimal place, got ${research}`,
+    );
+  }
 
   return {
     slug: basename(filePath).replace(/\.md$/, ''),

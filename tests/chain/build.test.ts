@@ -87,6 +87,83 @@ describe('buildChain', () => {
     expect(amendments[0]!.date).toBe('2026-06-15');
   });
 
+  it('replaces the post with the amendment in the new block, not alongside it', async () => {
+    // Regression: an edited post has a new contentHash, hence a new tx
+    // hash, so filtering pending work on hash alone let the edited post
+    // slip back in as a fresh "post" transaction sealed next to its own
+    // amendment — duplicating the post on the chain.
+    const { postsDir, lockPath } = workspace();
+    await buildChain({ postsDir, lockPath, now: '2026-09-10', config: CONFIG });
+    const target = join(postsDir, '2026-06-15-first.md');
+    writeFileSync(target, readFileSync(target, 'utf8') + '\nMột dòng sửa lại.\n');
+    const after = await buildChain({ postsDir, lockPath, now: '2026-11-10', config: CONFIG });
+
+    // The amendment's own block, not necessarily the last block on the
+    // chain — a backdated-into-a-sealed-period amendment can be followed by
+    // further, later, empty months (§3.6's own already-tested rule).
+    const amendmentBlock = after.chain.blocks.find((b) =>
+      b.transactions.some((t) => t.type === 'amendment'),
+    )!;
+    expect(amendmentBlock.txCount).toBe(1);
+    expect(amendmentBlock.transactions[0]!.type).toBe('amendment');
+  });
+
+  it('never carries two post transactions for the same slug', async () => {
+    const { postsDir, lockPath } = workspace();
+    await buildChain({ postsDir, lockPath, now: '2026-09-10', config: CONFIG });
+    const target = join(postsDir, '2026-06-15-first.md');
+    writeFileSync(target, readFileSync(target, 'utf8') + '\nMột dòng sửa lại.\n');
+    const after = await buildChain({ postsDir, lockPath, now: '2026-11-10', config: CONFIG });
+
+    const postSlugs = after.chain.blocks
+      .flatMap((b) => b.transactions)
+      .filter((t) => t.type === 'post')
+      .map((t) => t.slug);
+    expect(new Set(postSlugs).size).toBe(postSlugs.length);
+  });
+
+  it('does not compound: a second distinct edit yields exactly one further amendment', async () => {
+    const { postsDir, lockPath } = workspace();
+    await buildChain({ postsDir, lockPath, now: '2026-09-10', config: CONFIG });
+    const target = join(postsDir, '2026-06-15-first.md');
+
+    writeFileSync(target, readFileSync(target, 'utf8') + '\nMột dòng sửa lại.\n');
+    await buildChain({ postsDir, lockPath, now: '2026-11-10', config: CONFIG });
+
+    writeFileSync(target, readFileSync(target, 'utf8') + '\nMột dòng sửa khác.\n');
+    const after = await buildChain({ postsDir, lockPath, now: '2026-12-10', config: CONFIG });
+
+    expect(after.amendments).toBe(1);
+    const postSlugs = after.chain.blocks
+      .flatMap((b) => b.transactions)
+      .filter((t) => t.type === 'post')
+      .map((t) => t.slug);
+    expect(new Set(postSlugs).size).toBe(postSlugs.length);
+    const amendmentCount = after.chain.blocks
+      .flatMap((b) => b.transactions)
+      .filter((t) => t.type === 'amendment').length;
+    expect(amendmentCount).toBe(2);
+  });
+
+  it('does not re-charge gas or research hours for an edited post', async () => {
+    const { postsDir, lockPath } = workspace();
+    const before = await buildChain({ postsDir, lockPath, now: '2026-09-10', config: CONFIG });
+    const target = join(postsDir, '2026-06-15-first.md');
+    writeFileSync(target, readFileSync(target, 'utf8') + '\nMột dòng sửa lại.\n');
+    const after = await buildChain({ postsDir, lockPath, now: '2026-11-10', config: CONFIG });
+
+    const amendmentBlock = after.chain.blocks.find((b) =>
+      b.transactions.some((t) => t.type === 'amendment'),
+    )!;
+    // The amendment itself carries no gas/value (asserted elsewhere); the
+    // original post's numbers must not be re-summed into this block.
+    expect(amendmentBlock.gasUsed).toBe(0);
+    expect(amendmentBlock.value).toBe(0);
+    // And the original block's totals — sealed before the edit — must be
+    // unchanged.
+    expect(after.chain.blocks[0]).toEqual(before.chain.blocks[0]);
+  });
+
   it('leaves the original transaction untouched after an amendment', async () => {
     const { postsDir, lockPath } = workspace();
     const before = await buildChain({ postsDir, lockPath, now: '2026-09-10', config: CONFIG });
@@ -150,6 +227,27 @@ describe('buildChain', () => {
     await expect(
       buildChain({ postsDir, lockPath, now: '2026-10-10', config: CONFIG }),
     ).rejects.toThrow(/refusing to extend/);
+  });
+
+  it('does not persist a chain that fails its own post-build verification', async () => {
+    // §10 — writeLock must never run against a result buildChain itself
+    // knows is broken. A later build using a looser difficulty than the
+    // chain's established difficulty mines new blocks that satisfy the
+    // *new* target but not the chain-wide difficulty already on record,
+    // producing an invalid chain. buildChain must catch this itself before
+    // writing, rather than trusting that mining always yields a valid
+    // result — otherwise the corrupt chain would be persisted, and the
+    // *next* run would hit the pre-append guard and refuse to start at all.
+    const { postsDir, lockPath } = workspace();
+    await buildChain({ postsDir, lockPath, now: '2026-09-10', config: CONFIG });
+    const before = readFileSync(lockPath, 'utf8');
+
+    const looseConfig = { ...CONFIG, difficulty: 0 };
+    await expect(
+      buildChain({ postsDir, lockPath, now: '2026-11-10', config: looseConfig }),
+    ).rejects.toThrow(/refusing to write/);
+
+    expect(readFileSync(lockPath, 'utf8')).toBe(before);
   });
 
   it('matches the golden snapshot at a pinned clock', async () => {

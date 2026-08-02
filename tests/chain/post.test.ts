@@ -52,6 +52,20 @@ describe('parsePost', () => {
     const raw = RAW.replace(/title:.*\n/, '');
     expect(() => parsePost('a/2026-07-28-x.md', raw)).toThrow(/2026-07-28-x\.md/);
   });
+
+  it('accepts a research value with exactly one decimal place', () => {
+    const raw = RAW.replace('research: 12.5', 'research: 12.5');
+    expect(parsePost('a/2026-07-28-x.md', raw).research).toBe(12.5);
+  });
+
+  it('rejects a research value with more than one decimal place', () => {
+    // §3.2 — research is hashed at one decimal place (toFixed(1)); a value
+    // with more precision would silently round on the way into the hash
+    // while tx.value kept the unrounded number, so the ledger's hashed and
+    // displayed values would disagree.
+    const raw = RAW.replace('research: 12.5', 'research: 12.35');
+    expect(() => parsePost('a/2026-07-28-x.md', raw)).toThrow(/one decimal place/);
+  });
 });
 
 describe('toTransaction', () => {

@@ -110,12 +110,23 @@ export async function buildChain(opts: BuildOptions): Promise<BuildResult> {
   const sealedPeriods = new Set(chain.blocks.map((b) => b.period));
   const sealedTxs = chain.blocks.flatMap((b) => b.transactions);
   const sealedHashes = new Set(sealedTxs.map((t) => t.hash));
+  const sealedPostSlugs = new Set(
+    sealedTxs.filter((t) => t.type === 'post').map((t) => t.slug),
+  );
 
   const live = await readPostTransactions(opts.postsDir, from);
   const amendments = await detectAmendments(sealedTxs, live, from);
 
-  // Anything not already committed is pending.
-  const pending = [...live, ...amendments].filter((t) => !sealedHashes.has(t.hash));
+  // §3.9 — a sealed post's later edits are represented by amendments, not by
+  // re-publishing the post. Filtering on hash alone misses this: an edit
+  // changes the content hash and therefore the transaction hash, so the new
+  // "post" transaction would otherwise slip through as pending and be
+  // sealed alongside its own amendment, duplicating the post and compounding
+  // on every subsequent edit.
+  const pending = [
+    ...live.filter((t) => !sealedHashes.has(t.hash) && !sealedPostSlugs.has(t.slug)),
+    ...amendments,
+  ];
 
   const lastBlock = chain.blocks.at(-1) ?? null;
   const drafts = planBlocks(pending, {
@@ -161,6 +172,18 @@ export async function buildChain(opts: BuildOptions): Promise<BuildResult> {
     prev = block;
     minted++;
     amendmentsSealed += draft.transactions.filter((t) => t.type === 'amendment').length;
+  }
+
+  // §10 — never persist a chain that fails its own verification. Without
+  // this, a build that produced a broken chain would still write it to
+  // disk, and the *next* run would hit the pre-append guard above and
+  // refuse to start at all — requiring a manual revert to recover.
+  const final = await verifyChain(chain);
+  if (!final.ok) {
+    const bad = final.blocks.filter((b) => !b.ok).map((b) => `#${b.height}`);
+    throw new Error(
+      `build produced an invalid chain at block ${bad.join(', ')} — refusing to write ${opts.lockPath}`,
+    );
   }
 
   writeLock(opts.lockPath, chain);

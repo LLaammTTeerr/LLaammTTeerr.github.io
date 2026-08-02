@@ -1,18 +1,15 @@
 import { CHAIN_CONFIG } from '../chain.config';
 import { buildChain } from '../src/chain/build';
 import { verifyChain } from '../src/chain/verify';
+import { resolveNow } from './resolve-now';
 
-/**
- * The clock enters the system here and nowhere else. `--now=YYYY-MM-DD`
- * overrides it, which is what makes reproducible builds possible.
- */
-function resolveNow(argv: string[]): string {
-  const flag = argv.find((a) => a.startsWith('--now='));
-  if (flag) return flag.slice('--now='.length);
-  return new Date().toISOString().slice(0, 10);
+let now: string;
+try {
+  now = resolveNow(process.argv.slice(2));
+} catch (err) {
+  console.error((err as Error).message);
+  process.exit(1);
 }
-
-const now = resolveNow(process.argv.slice(2));
 
 const { chain, minted, amendments } = await buildChain({
   postsDir: 'content/posts',
