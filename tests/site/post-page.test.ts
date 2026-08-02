@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readDist } from './dist';
-import { getPosts } from '../../src/site/chain-data';
+import { getBlocks, getPosts } from '../../src/site/chain-data';
 
 const slug = () => getPosts()[0]!.slug!;
 const page = () => readDist(`tx/${slug()}/index.html`);
@@ -15,11 +15,21 @@ describe('post page', () => {
   it('shows the transaction panel with the committed hash', () => {
     const tx = getPosts()[0]!;
     expect(page()).toContain(tx.hash);
-    expect(page()).toContain('Transaction');
+    // Anchored to the panel's own head markup, not a bare substring: the
+    // nav's "Transactions" link (present on every page via Base.astro)
+    // would otherwise satisfy a bare toContain('Transaction') even if
+    // TxPanel rendered nothing at all.
+    expect(page()).toContain('<span class="lbl">Transaction</span>');
   });
 
   it('names the block the post was sealed in', () => {
-    expect(page()).toMatch(/Block/);
+    // Derived from the chain, not hard-coded, and anchored to the exact
+    // link markup TxPanel renders — a bare /Block/ regex would (and did)
+    // pass on any page, since Base.astro's nav renders a "Blocks" link
+    // regardless of whether TxPanel names a block at all.
+    const tx = getPosts()[0]!;
+    const block = getBlocks().find((b) => b.transactions.some((t) => t.hash === tx.hash))!;
+    expect(page()).toContain(`<a href="/block/${block.height}">#${block.height}</a>`);
   });
 
   it('renders the post title as the page h1', () => {
@@ -33,8 +43,14 @@ describe('post page', () => {
   });
 
   it('shows gas and value from the committed transaction', () => {
+    // Anchored to the panel's own <span class="num"> markup. A bare
+    // toContain(String(tx.gasUsed)) passed even with TxPanel's gas/value
+    // spans deleted entirely: the same digits are echoed in the page's
+    // <meta description> (built from tx.gasUsed independently) and can
+    // also coincide with digits inside the tx hash printed just above.
     const tx = getPosts()[0]!;
-    expect(page()).toContain(String(tx.gasUsed));
+    expect(page()).toContain(`<span class="num">${tx.gasUsed}</span>`);
+    expect(page()).toContain(`<span class="num">${tx.value.toFixed(1)}</span>`);
   });
 
   it('links to each tag address the post sent to', () => {
