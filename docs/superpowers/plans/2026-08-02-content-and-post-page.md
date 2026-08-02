@@ -490,6 +490,11 @@ In `src/site/markdown.ts`:
 
 ```ts
 import rehypeShiki from '@shikijs/rehype';
+import { createCssVariablesTheme } from 'shiki';
+
+// shiki 4.x does not ship `css-variables` as a bundled theme name — passing the
+// string throws. The theme must be constructed.
+const cssVarTheme = createCssVariablesTheme();
 
 const processor = unified()
   .use(remarkParse)
@@ -502,15 +507,15 @@ const processor = unified()
   // ten of them; this way code inherits whichever the reader picked, with no
   // JavaScript and no second stylesheet per palette.
   .use(rehypeShiki, {
-    theme: 'css-variables',
+    theme: cssVarTheme,
     langs: ['cpp', 'c', 'python', 'typescript', 'javascript', 'bash', 'json', 'html', 'css', 'yaml', 'markdown'],
     fallbackLanguage: 'text',
   })
   .use(rehypeStringify);
 ```
 
-If `@shikijs/rehype` rejects `css-variables` as a theme name in the installed
-version, **stop and report it** rather than falling back to a fixed theme —
+If `@shikijs/rehype` rejects the constructed theme in the installed version,
+**stop and report it** rather than falling back to a fixed theme —
 palette-following code is the requirement, not a nicety. The alternative is
 Shiki's `cssVariablePrefix` option or a `themes: { light, dark }` pair, but
 neither follows eleven palettes, so that is a decision to bring back, not to make.
