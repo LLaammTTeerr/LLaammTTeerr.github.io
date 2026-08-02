@@ -377,6 +377,35 @@ describe('buildChain', () => {
     expect(after.pending!.transactions[0]!.hash).not.toBe(before.pending!.transactions[0]!.hash);
   });
 
+  it('stays silent when the tip is in the current month', async () => {
+    // Five brand-new posts in the current month: four seal, one stays open.
+    // Nothing was lost and nothing is suspicious — the tip is the block this
+    // very build sealed. Measured against the *pre-build* tip this fired, and
+    // the message then called a month that had just been sealed "already over".
+    // A warning that fires on the ordinary case trains the reader to ignore it.
+    const { postsDir, assetsDir, lockPath } = workspace();
+    // The chain must already have a tip in a PAST month, or the two readings of
+    // "the tip" agree and this pins nothing: on an empty lock `lastBlock` is
+    // null and both conditions are silent for the same reason.
+    const before = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
+    expect(before.chain.blocks.at(-1)!.period).toBe('2026-08');
+
+    for (const d of ['01', '02', '03', '04', '05']) {
+      writeFileSync(
+        join(postsDir, `2026-09-${d}-moi.md`),
+        `---\ntitle: "Bài ${d}"\ndate: 2026-09-${d}\ntags: [essay]\n---\n\nNội dung.\n`,
+      );
+    }
+    const result = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-20', config: CONFIG });
+
+    // This build sealed into the current month, so the open transaction is
+    // plainly its own work. Read against the pre-build tip (2026-08) it looks
+    // like a past month and fires.
+    expect(result.pending!.transactions).toHaveLength(1);
+    expect(result.chain.blocks.at(-1)!.period).toBe('2026-09');
+    expect(result.unrecorded).toEqual([]);
+  });
+
   it('reports unsealed transactions that no record accounts for', async () => {
     // The whole guarantee rests on a sibling file a user can delete, `git
     // clean`, or lose in a merge. Losing it silently reinstates the sliding

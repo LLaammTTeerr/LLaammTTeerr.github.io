@@ -395,12 +395,19 @@ export async function buildChain(opts: BuildOptions): Promise<BuildResult> {
         };
   writePending(pendingPath, openBlock);
 
-  // A transaction left open once the tip's month is over was placed by some
-  // earlier build, so a record for it should already exist. If none covers it,
-  // the record was lost and its placement has just been reassigned.
-  const tipPeriodIsPast = lastBlock !== null && lastBlock.period < monthOf(opts.now);
+  // Measured against the tip as it stands AFTER sealing, not the one this build
+  // started from. If this build just sealed into the current month, the
+  // transactions still open are plainly its own work and there is nothing to
+  // report — five new posts sealing four and leaving one open is the ordinary
+  // case. Using the pre-build tip fired there and, because the message reports
+  // the post-build tip, claimed a month that had just been sealed was "over".
+  //
+  // A tip still in a past month is the suspicious shape: nothing sealed into
+  // the current month, yet transactions are open with no record naming them.
+  const tipPeriod = prev !== null ? prev.period : null;
+  const tipMonthIsPast = tipPeriod !== null && tipPeriod < monthOf(opts.now);
   const unrecorded =
-    openBlock === null || !tipPeriodIsPast
+    openBlock === null || !tipMonthIsPast
       ? []
       : openBlock.transactions.filter((t) => !recordedPeriods.has(txIdentity(t)));
 

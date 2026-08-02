@@ -42,19 +42,23 @@ if (pending !== null) {
   console.log(`  →  chain.pending.json records the open ${pending.period} block; commit it beside chain.lock.json`);
 }
 
+// Deliberately claims nothing about *why* these have no record. The build has
+// no memory of earlier runs, so it cannot tell a transaction created just now
+// from one whose record was deleted — and a warning that asserts the wrong
+// cause is worse than none, because it teaches the reader to discount it.
 if (unrecorded.length > 0) {
   console.error('');
   console.error(
-    `  WARNING  ${unrecorded.length} unsealed transaction(s) had no recorded placement, ` +
-      `though the tip's month (${chain.blocks.at(-1)!.period}) is already over:`,
+    `  WARNING  ${unrecorded.length} unsealed transaction(s) were placed with no record naming them:`,
   );
   for (const t of unrecorded) {
     console.error(`    ${t.type} ${t.slug ?? `amending ${t.amends}`}`);
   }
   console.error(
-    '  If chain.pending.json was deleted or lost, their placement has just been reassigned\n' +
-      '  to the current month, and the month they were really waiting in will seal empty.\n' +
-      '  If they are simply new, this is expected — commit chain.pending.json to record them.',
+    '  This build cannot tell whether they are new or whether chain.pending.json was lost.\n' +
+      '  If they are new, the record just written covers them from the next build on.\n' +
+      '  If it was lost, their placement has been reassigned and the month they were\n' +
+      '  waiting in may seal as an empty block. Committing chain.pending.json prevents this.',
   );
 }
 
