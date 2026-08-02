@@ -11,6 +11,10 @@ function tempFile(name: string): string {
 
 const chain: Chain = { version: 1, difficulty: 5, blocks: [] };
 
+// Fixture with deliberately inconsistent difficulty to verify field-level serialization:
+// chain.difficulty = 5, block.difficulty = 3. This is intentional — the fixture is used
+// only for serialization testing and the distinct values ensure the test catches any
+// confusion between levels.
 const populated: Chain = {
   version: 1,
   difficulty: 5,
@@ -24,7 +28,7 @@ const populated: Chain = {
       txCount: 2,
       gasUsed: 2840,
       value: 12.5,
-      difficulty: 5,
+      difficulty: 3,
       nonce: 148203,
       hash: '0x' + 'ef'.repeat(32),
       transactions: [
@@ -223,7 +227,9 @@ describe('serializeChain', () => {
     expect(postTx.value).toBe(9.5);
     expect(amendmentTx.value).toBe(2.8);
 
-    expect(block.difficulty).toBe(5);
+    // Verify difficulty at both levels (deliberately different to catch serialization confusion)
+    expect(parsed.difficulty).toBe(5); // chain level
+    expect(block.difficulty).toBe(3); // block level, distinct to verify no level confusion
   });
 });
 
