@@ -1,3 +1,4 @@
+import rehypeShiki from '@shikijs/rehype';
 import type { Element, Parents, Root } from 'hast';
 import rehypeKatex from 'rehype-katex';
 import rehypeStringify from 'rehype-stringify';
@@ -5,8 +6,22 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import remarkParse from 'remark-parse';
 import remarkRehype from 'remark-rehype';
+import { createCssVariablesTheme } from 'shiki';
 import { unified } from 'unified';
 import { visit } from 'unist-util-visit';
+
+/**
+ * Shiki's `css-variables` theme is generated on demand, not one of the
+ * bundled TextMate themes — passing the *name* `'css-variables'` to
+ * `@shikijs/rehype` throws (`Theme \`css-variables\` is not included in this
+ * bundle`), confirmed against the installed shiki@4.4.1. The theme *object*
+ * from `createCssVariablesTheme` is the documented way to get it
+ * (https://shiki.style/guide/theme-colors#css-variables-theme) and produces
+ * the identical `var(--shiki-*)` output the string form would have, so this
+ * is the same design decision, just invoked through the API that actually
+ * works — not a fallback to a fixed theme.
+ */
+const cssVariablesTheme = createCssVariablesTheme({ name: 'css-variables', variablePrefix: '--shiki-' });
 
 /** URL-bearing attributes we police, keyed by the element that carries them. */
 const URL_ATTRS: Readonly<Record<string, readonly string[]>> = {
@@ -111,6 +126,15 @@ const processor = unified()
   // sibling and leave only the aria-hidden tree, so a screen reader would get
   // nothing at all for every formula, not a formula read twice.
   .use(rehypeKatex)
+  // `css-variables` emits var(--shiki-*) rather than baking a theme's colours
+  // in. With eleven reader-selectable palettes a fixed theme would clash with
+  // ten of them; this way code inherits whichever the reader picked, with no
+  // JavaScript and no second stylesheet per palette.
+  .use(rehypeShiki, {
+    theme: cssVariablesTheme,
+    langs: ['cpp', 'c', 'python', 'typescript', 'javascript', 'bash', 'json', 'html', 'css', 'yaml', 'markdown'],
+    fallbackLanguage: 'text',
+  })
   .use(rehypeSafeUrls)
   .use(rehypeStringify);
 

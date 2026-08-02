@@ -183,4 +183,39 @@ describe('renderMarkdown', () => {
       expect(unstyled).toEqual([]);
     });
   });
+
+  describe('code highlighting', () => {
+    it('highlights a fenced code block', async () => {
+      const html = await renderMarkdown('```cpp\nint main() { return 0; }\n```\n');
+      expect(html).toContain('<pre');
+      expect(html).toContain('<span');
+    });
+
+    it('emits css variables, not baked colours, so code follows the palette', async () => {
+      const html = await renderMarkdown('```cpp\nint x = 1;\n```\n');
+      expect(html).toContain('var(--shiki-');
+      // A baked hex colour would mean code ignores ten of the eleven palettes.
+      expect(html).not.toMatch(/color:\s*#[0-9a-f]{6}/i);
+    });
+
+    it('handles a language it does not know without throwing', async () => {
+      const html = await renderMarkdown('```khongbiet\nnội dung\n```\n');
+      expect(html).toContain('nội dung');
+    });
+
+    it('handles a fence with no language', async () => {
+      const html = await renderMarkdown('```\nnội dung\n```\n');
+      expect(html).toContain('nội dung');
+    });
+
+    it('escapes code content rather than executing it', async () => {
+      const html = await renderMarkdown('```html\n<script>alert(1)</script>\n```\n');
+      expect(html).not.toContain('<script>alert');
+    });
+
+    it('renders Vietnamese inside a code comment', async () => {
+      const html = await renderMarkdown('```cpp\n// sắp xếp theo khối\n```\n');
+      expect(html).toContain('sắp xếp theo khối');
+    });
+  });
 });

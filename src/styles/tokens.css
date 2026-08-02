@@ -88,6 +88,30 @@
   --good: #1a7f37; --warn: #9a6700; --bad: #cf222e;
 }
 
+/* Shiki's css-variables theme resolves these. Mapping them onto the palette
+   tokens means highlighted code follows whichever theme the reader picked,
+   with no JavaScript and no second stylesheet per palette.
+   Every name on the right (--txt, --surf, --h-num, --h-hash, --dim, --h-tag,
+   --h-addr, --acc) is defined on :root and re-defined identically in every
+   [data-palette="…"] block above, so this mapping resolves under all eleven
+   palettes, not just the default.
+   These deliberately reuse the same token roles the chain metadata uses — a
+   string in code and a hash in a table share a colour, which is the point:
+   one palette, one meaning per hue. */
+:root {
+  --shiki-foreground: var(--txt);
+  --shiki-background: var(--surf);
+  --shiki-token-constant: var(--h-num);
+  --shiki-token-string: var(--h-hash);
+  --shiki-token-comment: var(--dim);
+  --shiki-token-keyword: var(--h-tag);
+  --shiki-token-parameter: var(--txt);
+  --shiki-token-function: var(--h-addr);
+  --shiki-token-string-expression: var(--h-hash);
+  --shiki-token-punctuation: var(--dim);
+  --shiki-token-link: var(--acc);
+}
+
 /* Intensity decides which roles actually take a hue. Minimal is the default,
    so it lives on :root and needs no attribute. */
 :root {
