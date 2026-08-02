@@ -133,14 +133,33 @@ function stateHash(tx: Transaction): Promise<Hex> | null {
 }
 
 /**
- * §3.9 — a sealed post whose transaction hash no longer matches produces an
- * amendment transaction rather than a rewrite. Amendments already recorded in
- * the lock are not re-emitted.
+ * §3.9 — a sealed post whose transaction hash no longer matches the state the
+ * chain last recorded it in produces an amendment transaction rather than a
+ * rewrite. A post already recorded in its current state emits nothing, so an
+ * unchanged build adds no transaction.
  *
  * Detection is on the full `post/1` hash, not the content hash: a retitle, a tag
  * change or a corrected research figure leaves the body untouched, and
  * comparing content hashes would let every such edit vanish — no amendment, no
  * transaction, no warning, and stale metadata on the chain forever.
+ *
+ * The comparison is against the post's **latest** recorded state and nothing
+ * else. Comparing against the set of every state ever recorded — which is what
+ * this did — meant reverting a post to an earlier amended state looked "already
+ * covered": no amendment was emitted, while the chain's newest amendment went
+ * on asserting a different body. Since the site renders the latest recorded
+ * state, that left the file on disk permanently unrenderable, failing the build
+ * with the advice to run this very command, which recorded nothing, forever.
+ * Reverting a change is an ordinary thing to do, so it must be recordable.
+ *
+ * A revert therefore emits an amendment identical in every canonical field to
+ * the one that first recorded that state, and so identical in hash — the same
+ * state honestly produces the same transaction id. Nothing on the chain
+ * requires transaction hashes to be unique across blocks (the Merkle root
+ * commits each block's own list, and `verifyChain` recomputes each transaction
+ * from its own fields), and the alternative — a sequence number in the
+ * canonical form — would make the hash depend on history rather than on the
+ * state it attests.
  */
 async function detectAmendments(
   sealed: Transaction[],
@@ -150,11 +169,15 @@ async function detectAmendments(
 ): Promise<Transaction[]> {
   const currentBySlug = new Map(current.map((t) => [t.slug, t]));
 
-  const alreadyAmended = new Set<string>();
+  // The state each post was last recorded in, keyed by the original's hash.
+  // `sealed` arrives in ascending block order and later writes overwrite
+  // earlier ones, so what survives is the newest amendment to each post —
+  // ordering this map is load-bearing, not incidental.
+  const recordedState = new Map<Hex, Hex>();
   for (const tx of sealed) {
-    if (tx.type !== 'amendment') continue;
+    if (tx.type !== 'amendment' || tx.amends === null) continue;
     const state = await stateHash(tx);
-    if (state !== null) alreadyAmended.add(`${tx.amends}:${state}`);
+    if (state !== null) recordedState.set(tx.amends, state);
   }
 
   const out: Transaction[] = [];
@@ -174,8 +197,10 @@ async function detectAmendments(
       );
     }
 
-    if (live.hash === original.hash) continue;
-    if (alreadyAmended.has(`${original.hash}:${live.hash}`)) continue;
+    // Nothing to record only when the file already *is* the chain's latest
+    // word on this post: its newest amendment, or the original itself when
+    // none amends it.
+    if (live.hash === (recordedState.get(original.hash) ?? original.hash)) continue;
 
     const hash = await sha256Hex(
       canonicalAmendmentTx({
@@ -234,7 +259,14 @@ export async function buildChain(opts: BuildOptions): Promise<BuildResult> {
   }
 
   const sealedPeriods = new Set(chain.blocks.map((b) => b.period));
-  const sealedTxs = chain.blocks.flatMap((b) => b.transactions);
+  // Ascending by height, explicitly: `detectAmendments` reads the *last*
+  // amendment to a post as the state the chain currently records, so this
+  // order decides which body the site is allowed to render. Sorting a copy
+  // rather than trusting the lock's array order keeps that from resting on a
+  // file-layout assumption.
+  const sealedTxs = [...chain.blocks]
+    .sort((a, b) => a.height - b.height)
+    .flatMap((b) => b.transactions);
   const sealedHashes = new Set(sealedTxs.map((t) => t.hash));
   const sealedPostSlugs = new Set(
     sealedTxs.filter((t) => t.type === 'post').map((t) => t.slug),

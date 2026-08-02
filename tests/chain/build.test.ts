@@ -218,6 +218,88 @@ describe('buildChain', () => {
     expect((await verifyChain(sealV3.chain)).ok).toBe(true);
   });
 
+  it('records a revert to an earlier state that is already sealed as an amendment', async () => {
+    // Three states, and the third is what makes this test able to fail: with
+    // only v1 and v2 there is nothing to tell "the latest recorded state" from
+    // "any state ever recorded", and both readings pass.
+    //
+    // Detection used to dedupe against every historical state, so reverting
+    // v3 → v2 looked "already covered" and emitted nothing, while the chain's
+    // newest amendment went on asserting v3. The site renders the latest
+    // recorded state, so the file on disk became permanently unrenderable and
+    // the build failed forever with advice to run this command — which
+    // recorded nothing. Reverting an edit is ordinary; it must be recordable.
+    const { postsDir, assetsDir, lockPath } = workspace();
+    await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
+    const target = join(postsDir, '2026-06-15-first.md');
+    const v1 = readFileSync(target, 'utf8');
+
+    const v2 = v1 + '\nPhiên bản hai.\n';
+    writeFileSync(target, v2);
+    await buildChain({ postsDir, assetsDir, lockPath, now: '2026-11-10', config: CONFIG });
+    await buildChain({ postsDir, assetsDir, lockPath, now: '2026-12-10', config: CONFIG });
+
+    writeFileSync(target, v2 + '\nPhiên bản ba.\n');
+    await buildChain({ postsDir, assetsDir, lockPath, now: '2027-01-10', config: CONFIG });
+    const atV3 = await buildChain({ postsDir, assetsDir, lockPath, now: '2027-02-10', config: CONFIG });
+    expect(sealedAmendments(atV3)).toHaveLength(2);
+    expect(atV3.pending).toBeNull();
+
+    // Back to v2 — a state the chain has recorded before, but not the one it
+    // records now.
+    writeFileSync(target, v2);
+    const reverted = await buildChain({ postsDir, assetsDir, lockPath, now: '2027-02-10', config: CONFIG });
+
+    const recorded = pendingAmendments(reverted);
+    expect(recorded, 'the revert was recorded nowhere — the build cannot be unstuck').toHaveLength(1);
+    // The recorded state is v2's body, not v3's: this is the chain's new
+    // latest word, and the one the site will be allowed to render.
+    const v2ContentHash = sealedAmendments(atV3)[0]!.contentHash;
+    expect(recorded[0]!.contentHash).toBe(v2ContentHash);
+    expect(recorded[0]!.amends).toBe(atV3.chain.blocks[0]!.transactions[0]!.hash);
+
+    // An identical state honestly produces an identical transaction id; the
+    // chain does not require uniqueness across blocks, and it still verifies.
+    expect(recorded[0]!.hash).toBe(sealedAmendments(atV3)[0]!.hash);
+    const sealed = await buildChain({ postsDir, assetsDir, lockPath, now: '2027-03-10', config: CONFIG });
+    expect(sealed.amendments).toBe(1);
+    expect((await verifyChain(sealed.chain)).ok).toBe(true);
+
+    // And once recorded it settles: no further amendment on an unchanged build.
+    const again = await buildChain({ postsDir, assetsDir, lockPath, now: '2027-04-10', config: CONFIG });
+    expect(again.amendments).toBe(0);
+    expect(pendingAmendments(again)).toHaveLength(0);
+    expect(sealedAmendments(again)).toHaveLength(3);
+  });
+
+  it('records a revert all the way back to the sealed original', async () => {
+    // The same rule at the other end of the range: the original is only the
+    // "current" state while nothing amends it. Once an amendment says
+    // otherwise, restoring the published text is a change like any other and
+    // has to be written down, or the site would render text the chain's newest
+    // record contradicts.
+    const { postsDir, assetsDir, lockPath } = workspace();
+    const before = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-09-10', config: CONFIG });
+    const original = before.chain.blocks[0]!.transactions[0]!;
+    const target = join(postsDir, '2026-06-15-first.md');
+    const v1 = readFileSync(target, 'utf8');
+
+    writeFileSync(target, v1 + '\nPhiên bản hai.\n');
+    await buildChain({ postsDir, assetsDir, lockPath, now: '2026-11-10', config: CONFIG });
+    await buildChain({ postsDir, assetsDir, lockPath, now: '2026-12-10', config: CONFIG });
+
+    writeFileSync(target, v1);
+    const reverted = await buildChain({ postsDir, assetsDir, lockPath, now: '2026-12-10', config: CONFIG });
+
+    const recorded = pendingAmendments(reverted);
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0]!.contentHash).toBe(original.contentHash);
+    expect(recorded[0]!.title).toBe(original.title);
+    // The post transaction itself is untouched — a revert is an amendment, not
+    // a rewrite of sealed history.
+    expect(reverted.chain.blocks[0]).toEqual(before.chain.blocks[0]);
+  });
+
   it('collapses successive edits made while the amendment is still pending', async () => {
     // An unconfirmed transaction can still be replaced. Editing again before
     // the open block seals supersedes the pending amendment rather than

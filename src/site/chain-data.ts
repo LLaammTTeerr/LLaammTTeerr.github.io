@@ -198,19 +198,19 @@ function latestAmendment(txHash: Hex): Transaction | null {
  * mismatch, so a drifted file fails the build instead of shipping a page whose
  * "Verify this transaction" button would contradict what the reader just read.
  *
- * A body is accepted when it hashes to the sealed transaction's `contentHash`
- * or to that of the latest amendment to it (§3.9) — both recorded, committed
- * values, so nothing unverified is admitted. Comparing against the sealed hash
- * alone was a closed loop: an edit to a sealed post fails this check, the
- * error says to run `chain:build`, `chain:build` records the amendment
- * correctly, and the very same check fails again on the very same hash,
- * forever. The sealed hash is by design the one thing an amendment cannot
- * change.
+ * Exactly one body is acceptable: the one the chain's latest record names —
+ * the newest amendment's `contentHash` (§3.9), or the sealed transaction's
+ * when nothing amends it. Comparing against the sealed hash alone was a closed
+ * loop: an edit to a sealed post fails this check, the error says to run
+ * `chain:build`, `chain:build` records the amendment correctly, and the very
+ * same check fails again on the very same hash, forever. The sealed hash is by
+ * design the one thing an amendment cannot change.
  *
- * The sealed hash stays acceptable even once amendments exist, because
- * reverting a post to the text that sealed emits no new amendment
- * (`detectAmendments` skips it: the post is back to its original hash) — so
- * refusing it would restore the same loop in reverse.
+ * Widening this to "any recorded state" would close the loop too, and would be
+ * wrong: the page would render a body the chain's own newest amendment
+ * contradicts. Every rejection here has a remedy that works, because
+ * `detectAmendments` records any divergence from the latest state — including
+ * a revert to an earlier one.
  *
  * `postsDir` is a parameter only so tests can point at a fixture; production
  * callers use the default.
@@ -232,24 +232,22 @@ export async function getPostContent(
   const body = normalizeBody(parsePost(path, readFileSync(path, 'utf8')).body);
   const actual = await sha256Hex(body);
   const amendment = latestAmendment(tx.hash);
-  const recorded = amendment === null ? [tx.contentHash] : [tx.contentHash, amendment.contentHash];
+  // The chain's latest word on this post — what the file must match, and what
+  // the error names. Reporting the sealed hash once an amendment supersedes it
+  // would send the author chasing text the chain has already moved on from.
+  const expected = amendment === null ? tx.contentHash : amendment.contentHash;
 
-  if (!recorded.includes(actual)) {
-    // Reports the chain's *latest* record for this post, which is what the
-    // file is expected to match after a `chain:build` — naming the sealed hash
-    // once an amendment supersedes it would send the author chasing text the
-    // chain has already moved on from.
-    const expected = amendment === null ? tx.contentHash : amendment.contentHash;
+  if (actual !== expected) {
     throw new Error(
       `${path} does not match the chain: committed ${expected.slice(0, 10)}…, ` +
         `on disk ${actual.slice(0, 10)}… — re-run \`npm run chain:build\` to record the edit as an amendment`,
     );
   }
 
-  // `actual` is by definition the recorded hash that matched — the sealed
-  // one or the amendment's — so the page renders a body and a hash that
-  // belong to each other and the verify control can only agree.
-  return { slug, body, contentHash: actual, tx };
+  // The recorded hash that matched — the amendment's, or the sealed one — so
+  // the page renders a body and a hash that belong to each other and the
+  // verify control can only agree.
+  return { slug, body, contentHash: expected, tx };
 }
 
 export interface PendingBlockView {

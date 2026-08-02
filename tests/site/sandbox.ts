@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { cpSync, mkdtempSync, symlinkSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -23,9 +23,9 @@ import { fileURLToPath } from 'node:url';
 const ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 
 /**
- * Everything `astro build` reads. `node_modules` is symlinked rather than
- * copied (500 MB); `dist/` and `.astro/` are deliberately absent so the
- * sandbox build cannot pass by finding a stale artefact.
+ * Everything `astro build` and `chain:build` read. `node_modules` is symlinked
+ * rather than copied (500 MB); `dist/` and `.astro/` are deliberately absent so
+ * the sandbox build cannot pass by finding a stale artefact.
  *
  * If a future source directory is added and not listed here, the control
  * build in the drift test fails loudly rather than the sandbox silently
@@ -37,13 +37,26 @@ const COPIED = [
   'chain.lock.json',
   'package.json',
   'tsconfig.json',
+  'scripts',
   'src',
   'content',
 ];
 
+/**
+ * The open block exists only while something is unsealed, so it cannot go in
+ * `COPIED` — most repository states have no such file. It must still be copied
+ * when it is there: a post body may be vouched for by a *pending* amendment
+ * alone, and a sandbox that silently dropped the record would fail its control
+ * build for a reason that has nothing to do with what the test is checking.
+ */
+const COPIED_IF_PRESENT = ['chain.pending.json'];
+
 export function sandboxRepo(): string {
   const dir = mkdtempSync(join(tmpdir(), 'blogchain-build-'));
   for (const entry of COPIED) cpSync(join(ROOT, entry), join(dir, entry), { recursive: true });
+  for (const entry of COPIED_IF_PRESENT) {
+    if (existsSync(join(ROOT, entry))) cpSync(join(ROOT, entry), join(dir, entry));
+  }
   symlinkSync(join(ROOT, 'node_modules'), join(dir, 'node_modules'));
   return dir;
 }
@@ -60,6 +73,23 @@ export function buildSandbox(dir: string): BuildResult {
   const result = spawnSync(
     process.execPath,
     [join(ROOT, 'node_modules/astro/bin/astro.mjs'), 'build'],
+    { cwd: dir, encoding: 'utf8' },
+  );
+  return { status: result.status, output: (result.stdout ?? '') + (result.stderr ?? '') };
+}
+
+/**
+ * Runs a real `chain:build` inside the sandbox at an injected clock, mining and
+ * writing that copy's own `chain.lock.json` and `chain.pending.json`.
+ *
+ * `now` is required: the clock enters the system only through `--now=`
+ * (see `scripts/resolve-now.ts`), and a test that let it default to today's
+ * date would seal different months depending on when it ran.
+ */
+export function chainBuildSandbox(dir: string, now: string): BuildResult {
+  const result = spawnSync(
+    join(ROOT, 'node_modules/tsx/dist/cli.mjs'),
+    ['scripts/build-chain.ts', `--now=${now}`],
     { cwd: dir, encoding: 'utf8' },
   );
   return { status: result.status, output: (result.stdout ?? '') + (result.stderr ?? '') };

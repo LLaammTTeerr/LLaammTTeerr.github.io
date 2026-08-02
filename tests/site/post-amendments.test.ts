@@ -183,14 +183,23 @@ describe('getPostContent, on a post the chain has amended', () => {
     await expect(getPostContent(SLUG, v3.dir)).rejects.toThrow(/does not match the chain/);
   });
 
-  it('still accepts the sealed body itself', async () => {
-    // Reverting an edited post to the text that sealed is legitimate: the
-    // engine emits no amendment for it (`live.hash === original.hash`), so
-    // refusing it would brick the build with advice that cannot help — the
-    // exact loop this task removes.
-    const content = await getPostContent(SLUG, v1.dir);
-    expect(content.contentHash).toBe(v1.contentHash);
+  it('refuses even the sealed body once an amendment supersedes it', async () => {
+    // The sealed body is only the current state while nothing amends it. Here
+    // the chain's latest word is v3, so rendering v1 would show text the
+    // ledger's own newest record contradicts — the same fault as rendering a
+    // superseded amendment, and no more acceptable for being the original.
+    //
+    // This is refusable precisely because it is now recordable: reverting a
+    // post to its published text emits an amendment saying so
+    // (`detectAmendments` compares against the latest recorded state), so the
+    // error's advice works instead of looping.
+    await expect(getPostContent(SLUG, v1.dir)).rejects.toThrow(/does not match the chain/);
   });
+
+  // The unamended case — sealed body accepted because the sealed hash *is*
+  // the latest record — is covered against the real ledger in
+  // `tests/site/content.test.ts`, which carries no amendments. Restating it
+  // here with this fixture would prove nothing: every post in it is amended.
 
   it('refuses a body matching neither the sealed transaction nor any amendment', async () => {
     // The guarantee. An edit made without running `chain:build` is not a

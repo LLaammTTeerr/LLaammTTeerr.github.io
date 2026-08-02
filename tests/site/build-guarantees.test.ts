@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { sandboxRepo, buildSandbox } from './sandbox';
+import { sandboxRepo, buildSandbox, chainBuildSandbox } from './sandbox';
 import { getPosts } from '../../src/site/chain-data';
 
 /**
@@ -58,6 +58,106 @@ describe('the build refuses a post body that has drifted from the chain', () => 
       'a page was emitted for a drifted post',
     ).toBe(false);
   }, 120_000);
+});
+
+describe('the edit cycle a published post actually goes through', () => {
+  /**
+   * The whole loop, on a real chain: edit, record, build, and — the part that
+   * used to be impossible — go back.
+   *
+   * Both halves of this were closed loops that no unit test could have caught,
+   * because each needs `chain:build` and `astro build` to agree with each other
+   * across a real ledger:
+   *
+   *  - the site compared the file against the *sealed* content hash, which an
+   *    amendment by design cannot change, so any edit to a published post
+   *    failed the build forever;
+   *  - the engine deduped new amendments against *every* state it had ever
+   *    recorded, so a revert to an earlier one was recorded nowhere, and the
+   *    site — which renders the latest recorded state — refused it forever.
+   *
+   * Three states are the minimum that can tell "the latest recorded state"
+   * from "any state ever recorded": with only v1 and v2 the revert target and
+   * the current state are the same thing.
+   */
+  function bodyOf(dir: string): string {
+    return readFileSync(join(dir, POST), 'utf8');
+  }
+
+  it('seals v1, amends to v2, amends to v3, then reverts to v2 and still builds', () => {
+    const dir = sandboxRepo();
+    const path = join(dir, POST);
+    const v1 = bodyOf(dir);
+    const v2 = v1 + '\nPhiên bản hai.\n';
+    const v3 = v2 + 'Phiên bản ba.\n';
+
+    // v2 — recorded in the open block, then sealed by the next month's build.
+    writeFileSync(path, v2);
+    const amendV2 = chainBuildSandbox(dir, '2026-08-05');
+    expect(amendV2.status, `chain:build failed:\n${amendV2.output}`).toBe(0);
+    expect(amendV2.output).toMatch(/pending\s+1 txn/);
+    expect(chainBuildSandbox(dir, '2026-09-05').status).toBe(0);
+
+    // v3 — likewise, so both amendments are confirmed history.
+    writeFileSync(path, v3);
+    expect(chainBuildSandbox(dir, '2026-09-05').status).toBe(0);
+    const sealV3 = chainBuildSandbox(dir, '2026-10-05');
+    expect(sealV3.status, `chain:build failed:\n${sealV3.output}`).toBe(0);
+
+    const atV3 = buildSandbox(dir);
+    expect(atV3.status, `the build refused the state it had just recorded:\n${atV3.output}`).toBe(0);
+    expect(readFileSync(join(dir, 'dist/tx', SLUG, 'index.html'), 'utf8')).toContain('Phiên bản ba.');
+
+    // The revert. v2 is a state the chain has recorded before, but not the one
+    // it records now — so it is a change, and `chain:build` must write it down.
+    writeFileSync(path, v2);
+    const revert = chainBuildSandbox(dir, '2026-10-05');
+    expect(revert.status, `chain:build failed:\n${revert.output}`).toBe(0);
+    expect(
+      revert.output,
+      'the revert was recorded nowhere, so the build below can never be unstuck',
+    ).toMatch(/pending\s+1 txn/);
+
+    const atV2 = buildSandbox(dir);
+    expect(
+      atV2.status,
+      `the build refused a body chain:build had just recorded — the loop is back:\n${atV2.output}`,
+    ).toBe(0);
+
+    const page = readFileSync(join(dir, 'dist/tx', SLUG, 'index.html'), 'utf8');
+    expect(page, 'the page did not show the reverted body').toContain('Phiên bản hai.');
+    expect(
+      page,
+      'the page still shows the superseded body — the chain records v2 and the site rendered v3',
+    ).not.toContain('Phiên bản ba.');
+  }, 300_000);
+
+  it('still refuses an edit made without running chain:build, mid-cycle', () => {
+    // The guarantee, checked where it is easiest to lose: a chain that already
+    // carries a pending amendment. Accepting anything that had ever been
+    // recorded, or anything at all, would pass every test above and be
+    // worthless.
+    const dir = sandboxRepo();
+    const path = join(dir, POST);
+    writeFileSync(path, readFileSync(path, 'utf8') + '\nPhiên bản hai.\n');
+    expect(chainBuildSandbox(dir, '2026-08-05').status).toBe(0);
+    expect(buildSandbox(dir).status).toBe(0);
+
+    // One more edit, and this time no `chain:build`.
+    writeFileSync(path, readFileSync(path, 'utf8') + '\nChưa được ghi lại.\n');
+    const build = buildSandbox(dir);
+    expect(
+      build.status,
+      `the build shipped a body no transaction vouches for:\n${build.output}`,
+    ).not.toBe(0);
+    expect(build.output).toMatch(/does not match the chain/);
+    expect(build.output).toContain(POST);
+    expect(build.output).toMatch(/committed 0x[0-9a-f]{8}…, on disk 0x[0-9a-f]{8}…/);
+    expect(
+      existsSync(join(dir, 'dist/tx', SLUG, 'index.html')),
+      'a page was emitted for a body the chain does not record',
+    ).toBe(false);
+  }, 300_000);
 });
 
 describe('a post that declares no research hours', () => {
