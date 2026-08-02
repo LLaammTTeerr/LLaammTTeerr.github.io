@@ -9,17 +9,17 @@ exports[`buildChain > matches the golden snapshot at a pinned clock 1`] = `
       "height": 0,
       "period": "2026-06",
       "prevHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
-      "merkleRoot": "0x57f00ef41d3c0bcbdd757225e04a8025b18176a27461469c99e38959ef548cbd",
+      "merkleRoot": "0x849a1ef2605c68907631fa8e1d101a31c272d9eea09eef6b6166681b31d1719e",
       "timestamp": "2026-06-20T00:00:00Z",
       "txCount": 2,
       "gasUsed": 28,
       "value": 14.5,
       "difficulty": 2,
-      "nonce": 589,
-      "hash": "0x006f624b6984d51f2ab098b3f6f15760c0bf43d7b4877d13d27fda28768d454a",
+      "nonce": 44,
+      "hash": "0x0007954be1470267676f837d06832dcc887aa83e3f5e9d2900ddb1506d4c2c7b",
       "transactions": [
         {
-          "hash": "0x2d280cae40138ffe6fde1f20129548ccb4933931ccfac2eca0e140dbf153c268",
+          "hash": "0x74d66b59e3cc0f485961b43ba607549493a791526688a8b2344e182705589cbe",
           "type": "post",
           "slug": "2026-06-15-first",
           "title": "Bài viết đầu tiên",
@@ -38,7 +38,7 @@ exports[`buildChain > matches the golden snapshot at a pinned clock 1`] = `
           "amends": null
         },
         {
-          "hash": "0x29bf618b50969cce916dd907d8dbd1b1cb81d45d420f859eb7147c8d4ea1c47d",
+          "hash": "0xff1a390cd46d0be665001d2eef1697fb3ea59699c83fb8489da9813bf5f0e9fa",
           "type": "post",
           "slug": "2026-06-20-second",
           "title": "Ghi chú về thuật toán",
@@ -64,18 +64,18 @@ exports[`buildChain > matches the golden snapshot at a pinned clock 1`] = `
     {
       "height": 1,
       "period": "2026-07",
-      "prevHash": "0x006f624b6984d51f2ab098b3f6f15760c0bf43d7b4877d13d27fda28768d454a",
-      "merkleRoot": "0x58785b4f3ea07c41e7ffe918285eba63ac431cf8d43ee4dcb6718bfa7d3fcc65",
+      "prevHash": "0x0007954be1470267676f837d06832dcc887aa83e3f5e9d2900ddb1506d4c2c7b",
+      "merkleRoot": "0xac3aa1145ae197bd99f636f2ecedbba87c6aaaf1b4156c4b1f6612f923ff612a",
       "timestamp": "2026-07-05T00:00:00Z",
       "txCount": 1,
       "gasUsed": 8,
       "value": 0,
       "difficulty": 2,
-      "nonce": 111,
-      "hash": "0x00074480e3a228dab80b474407150bbf1f088379d778dc9c4851046c7167c436",
+      "nonce": 218,
+      "hash": "0x0033d7f87ffe3f0f78e27d29657ca651278f40a819a7a02773c42dc0c0ffd199",
       "transactions": [
         {
-          "hash": "0x58785b4f3ea07c41e7ffe918285eba63ac431cf8d43ee4dcb6718bfa7d3fcc65",
+          "hash": "0xac3aa1145ae197bd99f636f2ecedbba87c6aaaf1b4156c4b1f6612f923ff612a",
           "type": "post",
           "slug": "2026-07-05-third",
           "title": "Vì sao tôi bỏ Vim",
@@ -98,15 +98,15 @@ exports[`buildChain > matches the golden snapshot at a pinned clock 1`] = `
     {
       "height": 2,
       "period": "2026-08",
-      "prevHash": "0x00074480e3a228dab80b474407150bbf1f088379d778dc9c4851046c7167c436",
+      "prevHash": "0x0033d7f87ffe3f0f78e27d29657ca651278f40a819a7a02773c42dc0c0ffd199",
       "merkleRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
       "timestamp": "2026-08-31T00:00:00Z",
       "txCount": 0,
       "gasUsed": 0,
       "value": 0,
       "difficulty": 2,
-      "nonce": 320,
-      "hash": "0x003500574a9cc30f78f2c34e2151abba13a7dba8f42a371863c30235bd2b524f",
+      "nonce": 45,
+      "hash": "0x0025442ee3ffff9937515169f01a90c25137d74558c5840f1ec3e392d7969a6a",
       "transactions": []
     }
   ]

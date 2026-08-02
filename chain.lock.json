@@ -6,17 +6,17 @@
       "height": 0,
       "period": "2026-06",
       "prevHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
-      "merkleRoot": "0x0a405befac4e426af3778755d98b74f4d0e244d7afbbcc5789a73c59e2aa017a",
+      "merkleRoot": "0x5a085ebd40d5bb660c934df3b1749268bda8132366796ef3dba0c961c26d6920",
       "timestamp": "2026-06-15T00:00:00Z",
       "txCount": 1,
       "gasUsed": 44,
       "value": 1,
       "difficulty": 5,
-      "nonce": 2948469,
-      "hash": "0x00000380e222abc8cfa306fd660af2bd3dd02eacec30e399f50e86181ea42f4c",
+      "nonce": 536894,
+      "hash": "0x0000050187ee0e941bb122dbb9e0e4b2c2e39aac723d410188e2cd49dd30b0f4",
       "transactions": [
         {
-          "hash": "0x0a405befac4e426af3778755d98b74f4d0e244d7afbbcc5789a73c59e2aa017a",
+          "hash": "0x5a085ebd40d5bb660c934df3b1749268bda8132366796ef3dba0c961c26d6920",
           "type": "post",
           "slug": "2026-06-15-genesis",
           "title": "Khối đầu tiên",
@@ -39,15 +39,15 @@
     {
       "height": 1,
       "period": "2026-07",
-      "prevHash": "0x00000380e222abc8cfa306fd660af2bd3dd02eacec30e399f50e86181ea42f4c",
+      "prevHash": "0x0000050187ee0e941bb122dbb9e0e4b2c2e39aac723d410188e2cd49dd30b0f4",
       "merkleRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
       "timestamp": "2026-07-31T00:00:00Z",
       "txCount": 0,
       "gasUsed": 0,
       "value": 0,
       "difficulty": 5,
-      "nonce": 198676,
-      "hash": "0x0000040193fb3b0c18508382896f9bb09ba239e88fb580788d6972ec1b41781c",
+      "nonce": 1007944,
+      "hash": "0x00000afea2a515ac960d4a1cea83f2b34eed893196efcb49b5b6568841303571",
       "transactions": []
     }
   ]

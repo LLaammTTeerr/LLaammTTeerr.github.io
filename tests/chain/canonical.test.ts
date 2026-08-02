@@ -76,7 +76,7 @@ describe('canonicalPostTx', () => {
   it('emits the exact field order from the spec', () => {
     expect(canonicalPostTx(base)).toBe(
       [
-        'tx/1',
+        'post/1',
         "title:Mo's Algorithm",
         'date:2026-07-28',
         'tags:algorithm,cp',
@@ -121,11 +121,10 @@ describe('canonicalAmendmentTx', () => {
     contentHash: '0xbeef',
   };
 
-  it('emits the exact tx/2 field order', () => {
+  it('emits the exact amendment/1 field order', () => {
     expect(canonicalAmendmentTx(base)).toBe(
       [
-        'tx/2',
-        'type:amendment',
+        'amendment/1',
         'amends:0xdead',
         'date:2026-07-28',
         "title:Mo's Algorithm",
@@ -158,6 +157,16 @@ describe('canonicalAmendmentTx', () => {
 
   it('has no trailing newline', () => {
     expect(canonicalAmendmentTx(base).endsWith('\n')).toBe(false);
+  });
+
+  it('gives posts and amendments distinct, independently versioned prefixes', () => {
+    expect(canonicalPostTx(base).startsWith('post/1\n')).toBe(true);
+    expect(
+      canonicalAmendmentTx({
+        amends: '0xdead', date: '2026-07-28', title: 'x', tags: [],
+        series: null, research: 0, from: '0xaaaa', contentHash: '0xbeef',
+      }).startsWith('amendment/1\n'),
+    ).toBe(true);
   });
 });
 

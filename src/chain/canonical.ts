@@ -33,7 +33,7 @@ export interface CanonicalPostFields {
 export function canonicalPostTx(p: CanonicalPostFields): string {
   const tags = p.tags.map((t) => t.toLowerCase()).sort();
   return [
-    'tx/1',
+    'post/1',
     `title:${p.title}`,
     `date:${p.date}`,
     `tags:${tags.join(',')}`,
@@ -56,21 +56,21 @@ export interface CanonicalAmendmentFields {
 }
 
 /**
- * §3.9 — the amendment form, version `tx/2`.
+ * §3.9 — the amendment form.
+ *
+ * Each record type carries its own prefix and its own version, bumped only when
+ * that type's format changes. `post/1` and `amendment/1` are different shapes,
+ * not two versions of one thing, so they never share a number.
  *
  * An edit to a sealed post may change nothing but its metadata: a retitle, a
- * new tag, a corrected research figure. `tx/1` covers those fields, so an
- * amendment must too — otherwise a metadata-only edit produces no hash change,
- * no amendment, and the ledger keeps the stale values forever.
- *
- * `tx/1` (posts) is unchanged. The on-disk chain carries no amendments, so
- * nothing needs migrating.
+ * new tag, a corrected research figure. The post form covers those fields, so
+ * an amendment must too — otherwise a metadata-only edit produces no hash
+ * change, no amendment, and the ledger keeps the stale values forever.
  */
 export function canonicalAmendmentTx(a: CanonicalAmendmentFields): string {
   const tags = a.tags.map((t) => t.toLowerCase()).sort();
   return [
-    'tx/2',
-    'type:amendment',
+    'amendment/1',
     `amends:${a.amends}`,
     `date:${a.date}`,
     `title:${a.title}`,
