@@ -30,7 +30,7 @@ describe('renderMarkdown', () => {
     expect(await renderMarkdown('[x](/tx/abc)\n')).toContain('href="/tx/abc"');
   });
 
-  it('escapes raw HTML rather than passing it through', async () => {
+  it('drops raw HTML rather than passing it through', async () => {
     // Bodies are hashed into the chain, but a body is still author input and
     // the rendered page carries reader preferences and a verify control.
     const html = await renderMarkdown('<script>alert(1)</script>\n');
@@ -40,5 +40,65 @@ describe('renderMarkdown', () => {
   it('is deterministic', async () => {
     const md = '# Tiêu đề\n\nmột đoạn văn.\n';
     expect(await renderMarkdown(md)).toBe(await renderMarkdown(md));
+  });
+
+  describe('unsafe URL protocols', () => {
+    // Dropping raw author HTML but passing through a `javascript:` href would
+    // be an inconsistent application of the same rationale: a body hashed
+    // into the chain is tamper-evident, not safe, and the page around it
+    // carries reader preferences and a verify control either way.
+
+    it('unwraps a javascript: link to its plain text, not just stripping href', async () => {
+      // A hrefless `<a>` isn't reliably inert to assistive tech, so the
+      // element itself is unwrapped rather than left in place with the
+      // attribute removed.
+      const html = await renderMarkdown('[x](javascript:alert(1))\n');
+      expect(html).toBe('<p>x</p>');
+      expect(html).not.toMatch(/javascript:/i);
+      expect(html).not.toContain('<a');
+    });
+
+    it('unwraps a javascript: link regardless of case', async () => {
+      const html = await renderMarkdown('[x](JaVaScRiPt:alert(1))\n');
+      expect(html).toBe('<p>x</p>');
+      expect(html).not.toMatch(/javascript:/i);
+    });
+
+    it('unwraps a data: link', async () => {
+      const html = await renderMarkdown('[x](data:text/html,<script>alert(1)</script>)\n');
+      expect(html).toBe('<p>x</p>');
+      expect(html).not.toMatch(/data:/i);
+    });
+
+    it('drops a javascript: image, not just its src', async () => {
+      // An <img> has no text children, so unwrapping it leaves nothing.
+      const html = await renderMarkdown('![x](javascript:alert(1))\n');
+      expect(html).toBe('<p></p>');
+      expect(html).not.toMatch(/javascript:/i);
+      expect(html).not.toContain('<img');
+    });
+
+    it('keeps a site-relative link intact', async () => {
+      expect(await renderMarkdown('[x](/tx/abc)\n')).toContain('href="/tx/abc"');
+    });
+
+    it('keeps an https link intact', async () => {
+      expect(await renderMarkdown('[x](https://example.com)\n')).toContain(
+        'href="https://example.com"'
+      );
+    });
+
+    it('keeps a mailto link intact', async () => {
+      expect(await renderMarkdown('[x](mailto:a@b.c)\n')).toContain('href="mailto:a@b.c"');
+    });
+
+    it('keeps a protocol-relative link intact', async () => {
+      // No explicit scheme to check, so it inherits the page's own protocol —
+      // this is a deliberate choice, not an oversight, and worth a test so a
+      // future refactor can't silently flip it either way.
+      expect(await renderMarkdown('[x](//example.com/a)\n')).toContain(
+        'href="//example.com/a"'
+      );
+    });
   });
 });

@@ -244,7 +244,7 @@ describe('renderMarkdown', () => {
     expect(await renderMarkdown('[x](/tx/abc)\n')).toContain('href="/tx/abc"');
   });
 
-  it('escapes raw HTML rather than passing it through', async () => {
+  it('drops raw HTML rather than passing it through', async () => {
     // Bodies are hashed into the chain, but a body is still author input and
     // the rendered page carries reader preferences and a verify control.
     const html = await renderMarkdown('<script>alert(1)</script>\n');
@@ -275,10 +275,15 @@ import { unified } from 'unified';
 /**
  * §6.1 — renders the verified body from `getPostContent`.
  *
- * `allowDangerousHtml` is deliberately off. A body is hashed into the chain,
- * which makes it tamper-evident, not safe: the author is still typing it, and
- * the page around it carries reader preferences and a verify control. Raw HTML
- * in a post is escaped rather than passed through.
+ * `allowDangerousHtml` is deliberately off, so `remarkRehype` DROPS author HTML
+ * at the mdast→hast stage rather than entity-escaping it — a `<div>` in a post
+ * vanishes rather than showing as visible markup. A stray `<` in prose is
+ * escaped normally.
+ *
+ * The reason: hashing a body makes it tamper-evident, not safe. The author is
+ * still typing it, and the page around it carries reader preferences and a
+ * verify control. The same argument governs URL protocols — see the guard
+ * below, without which `[x](javascript:…)` would render as a live anchor.
  */
 const processor = unified()
   .use(remarkParse)
