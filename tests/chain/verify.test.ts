@@ -367,6 +367,64 @@ describe('structurally invalid input', () => {
     expect(result.blocks[0]!.reason).toMatch(/transaction #0.*from/);
   });
 
+  it('reports a numeric "assets" instead of throwing', async () => {
+    const chain = await validChain();
+    (chain.blocks[0]!.transactions[0] as unknown as { assets: unknown }).assets = 5;
+    await expect(verifyChain(chain)).resolves.toBeDefined();
+    const result = await verifyChain(chain);
+    expect(result.ok).toBe(false);
+    expect(result.blocks[0]!.reason).toMatch(/transaction #0.*assets/);
+  });
+
+  it('reports a null "assets" instead of throwing', async () => {
+    const chain = await validChain();
+    (chain.blocks[0]!.transactions[0] as unknown as { assets: unknown }).assets = null;
+    await expect(verifyChain(chain)).resolves.toBeDefined();
+    const result = await verifyChain(chain);
+    expect(result.ok).toBe(false);
+    expect(result.blocks[0]!.reason).toMatch(/transaction #0.*assets/);
+  });
+
+  it('reports an object "assets" instead of throwing', async () => {
+    const chain = await validChain();
+    (chain.blocks[0]!.transactions[0] as unknown as { assets: unknown }).assets = { a: 1 };
+    await expect(verifyChain(chain)).resolves.toBeDefined();
+    const result = await verifyChain(chain);
+    expect(result.ok).toBe(false);
+    expect(result.blocks[0]!.reason).toMatch(/transaction #0.*assets/);
+  });
+
+  it('reports an "assets" array containing a malformed hash', async () => {
+    const chain = await validChain();
+    chain.blocks[0]!.transactions[0]!.assets = ['0xzz'];
+    await expect(verifyChain(chain)).resolves.toBeDefined();
+    const result = await verifyChain(chain);
+    expect(result.ok).toBe(false);
+    expect(result.blocks[0]!.reason).toMatch(/transaction #0.*asset hash/);
+  });
+
+  it('reports an "assets" array containing a truncated hash', async () => {
+    const chain = await validChain();
+    chain.blocks[0]!.transactions[0]!.assets = ['0x' + 'a'.repeat(63)];
+    await expect(verifyChain(chain)).resolves.toBeDefined();
+    const result = await verifyChain(chain);
+    expect(result.ok).toBe(false);
+    expect(result.blocks[0]!.reason).toMatch(/transaction #0.*asset hash/);
+  });
+
+  it('accepts a string "assets" without throwing, but still reports it invalid', async () => {
+    // Spreading a string does not throw the way spreading a number or object
+    // does — `[...'nope']` yields characters — so this path is safe today only
+    // by accident. The array check must catch it deliberately rather than
+    // relying on that accident.
+    const chain = await validChain();
+    (chain.blocks[0]!.transactions[0] as unknown as { assets: unknown }).assets = 'nope';
+    await expect(verifyChain(chain)).resolves.toBeDefined();
+    const result = await verifyChain(chain);
+    expect(result.ok).toBe(false);
+    expect(result.blocks[0]!.reason).toMatch(/transaction #0.*assets/);
+  });
+
   it('reports an amendment with a deleted "research" key instead of throwing (R1 path B)', async () => {
     // The structural check permits `research` to be `undefined` (an amendment
     // read from a hand-edited ledger with the key deleted), but

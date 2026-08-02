@@ -54,6 +54,12 @@ function transactionProblem(tx: unknown, index: number): string | null {
   if (!isHexOfLength(tx.contentHash, 64)) {
     return `${at} field "contentHash" is not a 0x-prefixed 64-hex-digit string`;
   }
+  if (!Array.isArray(tx.assets)) return `${at} field "assets" is not an array`;
+  for (const a of tx.assets) {
+    if (!isHexOfLength(a, 64)) {
+      return `${at} has an asset hash that is not a 0x-prefixed 64-hex-digit string`;
+    }
+  }
   for (const field of ['slug', 'title', 'series', 'amends']) {
     if (!isStringOrNull(tx[field])) return `${at} field "${field}" is not a string or null`;
   }
