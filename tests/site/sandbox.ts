@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdtempSync, symlinkSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readFileSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -93,4 +93,22 @@ export function chainBuildSandbox(dir: string, now: string): BuildResult {
     { cwd: dir, encoding: 'utf8' },
   );
   return { status: result.status, output: (result.stdout ?? '') + (result.stderr ?? '') };
+}
+
+/**
+ * Slugs (and amended hashes) recorded in a sandbox's open block.
+ *
+ * Tests must assert that *their own* fixture is pending, never that the open
+ * block holds exactly N transactions. The sandbox inherits the real repo's
+ * `chain.pending.json`, so the moment the author publishes something in the
+ * current month and commits it, every exact-count assertion starts failing for
+ * a reason unrelated to what it tests.
+ */
+export function pendingIdsIn(dir: string): string[] {
+  const path = join(dir, 'chain.pending.json');
+  if (!existsSync(path)) return [];
+  const parsed = JSON.parse(readFileSync(path, 'utf8')) as {
+    transactions?: { slug?: string | null; amends?: string | null }[];
+  };
+  return (parsed.transactions ?? []).map((t) => t.slug ?? t.amends ?? '').filter(Boolean);
 }

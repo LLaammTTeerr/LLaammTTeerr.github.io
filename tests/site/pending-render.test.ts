@@ -1,7 +1,7 @@
 import { it, expect, beforeAll } from 'vitest';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { sandboxRepo, buildSandbox, chainBuildSandbox } from './sandbox';
+import { sandboxRepo, buildSandbox, chainBuildSandbox, pendingIdsIn } from './sandbox';
 import { readDist } from './dist';
 
 /**
@@ -73,8 +73,13 @@ beforeAll(() => {
   if (chain.status !== 0) {
     throw new Error(`chain:build failed in the sandbox:\n${chain.output}`);
   }
-  if (!/pending\s+1 txn/.test(chain.output)) {
-    throw new Error(`the fixture post did not land in the open block:\n${chain.output}`);
+  // Assert THIS fixture is pending, not that the open block holds exactly one
+  // transaction: the sandbox inherits the repo's own chain.pending.json, so a
+  // count would break the day the author publishes in the current month.
+  if (!pendingIdsIn(dir).includes('2026-08-10-bai-dang-cho')) {
+    throw new Error(
+      `the fixture post did not land in the open block (pending: ${pendingIdsIn(dir).join(', ') || 'none'}):\n${chain.output}`,
+    );
   }
 
   const build = buildSandbox(dir);

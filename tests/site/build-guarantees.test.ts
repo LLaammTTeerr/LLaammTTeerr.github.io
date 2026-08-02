@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { sandboxRepo, buildSandbox, chainBuildSandbox } from './sandbox';
+import { sandboxRepo, buildSandbox, chainBuildSandbox, pendingIdsIn } from './sandbox';
 import { getPosts } from '../../src/site/chain-data';
 
 /**
@@ -95,7 +95,9 @@ describe('the edit cycle a published post actually goes through', () => {
     writeFileSync(path, v2);
     const amendV2 = chainBuildSandbox(dir, '2026-08-05');
     expect(amendV2.status, `chain:build failed:\n${amendV2.output}`).toBe(0);
-    expect(amendV2.output).toMatch(/pending\s+1 txn/);
+    // This post's own amendment, not a total — see pendingIdsIn. An amendment
+    // is recorded under the hash it amends, which is the sealed post's.
+    expect(pendingIdsIn(dir)).toContain(getPosts()[0]!.hash);
     expect(chainBuildSandbox(dir, '2026-09-05').status).toBe(0);
 
     // v3 — likewise, so both amendments are confirmed history.
@@ -116,7 +118,7 @@ describe('the edit cycle a published post actually goes through', () => {
     expect(
       revert.output,
       'the revert was recorded nowhere, so the build below can never be unstuck',
-    ).toMatch(/pending\s+1 txn/);
+    ).toMatch(/pending\s+\d+ txn/);
 
     const atV2 = buildSandbox(dir);
     expect(
