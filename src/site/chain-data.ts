@@ -152,11 +152,65 @@ export interface PostContent {
 }
 
 /**
+ * §3.9 — the most recent amendment to the transaction `txHash`, or `null` if
+ * nothing amends it. This is the chain's latest word on that post's body.
+ *
+ * Order is the whole substance of this function. The open block is searched
+ * first because everything in it is newer than everything sealed. The sealed
+ * blocks are then walked in **ascending height**, keeping the last match, so
+ * the newest amendment wins: `getChain().blocks` is the lock's own order and
+ * `getBlocks()` is the reverse of it, and either one traversed the wrong way
+ * silently settles on the *oldest* amendment — accepting the body from two
+ * edits ago and refusing the one the author just recorded, with an error
+ * message telling them to record it again.
+ *
+ * Sorted by height rather than trusting array position: `tipHash` above
+ * already documents that nothing guarantees the lock is height-ordered, and
+ * this must not become the one place that assumes it. (Within a single block,
+ * transaction order is the canonical seal order — by `amends` then hash, not
+ * by time — so two amendments to one post sealed in the same block cannot be
+ * told apart chronologically. Nothing on an amendment records when it was
+ * made, so there is no better signal to use; `detectAmendments` emits at most
+ * one per post per build, which keeps that shape rare.)
+ */
+function latestAmendment(txHash: Hex): Transaction | null {
+  const amends = (t: Transaction): boolean => t.type === 'amendment' && t.amends === txHash;
+
+  const pending = getPendingBlock();
+  if (pending !== null) {
+    let newest: Transaction | null = null;
+    for (const tx of pending.transactions) if (amends(tx)) newest = tx;
+    if (newest !== null) return newest;
+  }
+
+  const ascending = [...getChain().blocks].sort((a, b) => a.height - b.height);
+  let latest: Transaction | null = null;
+  for (const block of ascending) {
+    for (const tx of block.transactions) if (amends(tx)) latest = tx;
+  }
+  return latest;
+}
+
+/**
  * §3.1 — the ledger commits a `contentHash` and stores no body, so nothing
  * structurally prevents the site rendering different text beside a hash that
  * vouches for other text. This re-derives the hash from disk and refuses a
  * mismatch, so a drifted file fails the build instead of shipping a page whose
  * "Verify this transaction" button would contradict what the reader just read.
+ *
+ * A body is accepted when it hashes to the sealed transaction's `contentHash`
+ * or to that of the latest amendment to it (§3.9) — both recorded, committed
+ * values, so nothing unverified is admitted. Comparing against the sealed hash
+ * alone was a closed loop: an edit to a sealed post fails this check, the
+ * error says to run `chain:build`, `chain:build` records the amendment
+ * correctly, and the very same check fails again on the very same hash,
+ * forever. The sealed hash is by design the one thing an amendment cannot
+ * change.
+ *
+ * The sealed hash stays acceptable even once amendments exist, because
+ * reverting a post to the text that sealed emits no new amendment
+ * (`detectAmendments` skips it: the post is back to its original hash) — so
+ * refusing it would restore the same loop in reverse.
  *
  * `postsDir` is a parameter only so tests can point at a fixture; production
  * callers use the default.
@@ -177,14 +231,25 @@ export async function getPostContent(
 
   const body = normalizeBody(parsePost(path, readFileSync(path, 'utf8')).body);
   const actual = await sha256Hex(body);
-  if (actual !== tx.contentHash) {
+  const amendment = latestAmendment(tx.hash);
+  const recorded = amendment === null ? [tx.contentHash] : [tx.contentHash, amendment.contentHash];
+
+  if (!recorded.includes(actual)) {
+    // Reports the chain's *latest* record for this post, which is what the
+    // file is expected to match after a `chain:build` — naming the sealed hash
+    // once an amendment supersedes it would send the author chasing text the
+    // chain has already moved on from.
+    const expected = amendment === null ? tx.contentHash : amendment.contentHash;
     throw new Error(
-      `${path} does not match the chain: committed ${tx.contentHash.slice(0, 10)}…, ` +
+      `${path} does not match the chain: committed ${expected.slice(0, 10)}…, ` +
         `on disk ${actual.slice(0, 10)}… — re-run \`npm run chain:build\` to record the edit as an amendment`,
     );
   }
 
-  return { slug, body, contentHash: tx.contentHash, tx };
+  // `actual` is by definition the recorded hash that matched — the sealed
+  // one or the amendment's — so the page renders a body and a hash that
+  // belong to each other and the verify control can only agree.
+  return { slug, body, contentHash: actual, tx };
 }
 
 export interface PendingBlockView {
