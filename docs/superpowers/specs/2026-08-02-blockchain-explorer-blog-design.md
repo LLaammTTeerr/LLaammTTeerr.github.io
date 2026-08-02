@@ -344,6 +344,27 @@ the month's activity as something it was not.
 The chain records committed history, not the author's editing process. A version
 that was never sealed was never part of the chain.
 
+**Reverting is an ordinary edit.** Restoring a post to a state the chain already
+sealed emits a new amendment like any other. Detection compares the live post
+against the *latest* recorded state — the newest amendment, or the original post
+when nothing amends it — not against the set of every state ever recorded. The
+looser rule silently discards a revert, and since a discarded revert leaves the
+file on disk disagreeing with the chain, the site build then fails permanently
+with advice that cannot work.
+
+A consequence follows, and it is intended: an exact revert produces an amendment
+identical in every canonical field, and therefore identical in hash, to the one
+that first recorded that state. **Transaction hashes are content-addresses, not
+serial numbers**, so two transactions attesting the same state are the same
+transaction hash — the chain still verifies, because the blocks holding them
+differ and their Merkle roots differ with them. Adding a sequence number to the
+canonical form would make a hash depend on the history that produced it rather
+than the state it attests, which is the opposite of what §3.2 is for.
+
+Nothing may therefore assume a transaction hash is unique across the chain. A
+route or lookup keyed on `txHash` must handle more than one match; keying on a
+post's `slug` is unique and is what the site uses.
+
 Detection compares the **full canonical transaction hash**, not just the body
 hash — otherwise an edit to a post's title, tags, series, or research hours would
 change the transaction hash while leaving the content hash untouched, and would
