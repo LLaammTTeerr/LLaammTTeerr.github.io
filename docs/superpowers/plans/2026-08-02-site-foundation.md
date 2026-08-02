@@ -4,15 +4,16 @@
 
 **Goal:** Stand up the Astro site with a typed view over the ledger, the palette and intensity token system, working reader preferences, and a homepage rendering the real chain.
 
-**Architecture:** Astro in static mode. A `src/site/` layer sits between the chain engine and the templates: it reads `chain.lock.json` once at build time and exposes typed, presentation-shaped queries, so no `.astro` file ever touches raw ledger JSON. All eleven palettes and three intensities are CSS custom properties keyed off `data-*` attributes on `<html>`, applied by a blocking inline script before first paint. Every meter style renders statically with CSS choosing one, so the site works with JavaScript disabled.
+**Architecture:** Astro 7 in static mode. A `src/site/` layer sits between the chain engine and the templates: it reads `chain.lock.json` once at build time and exposes typed, presentation-shaped queries, so no `.astro` file ever touches raw ledger JSON. All eleven palettes and three intensities are CSS custom properties keyed off `data-*` attributes on `<html>`, applied by a blocking inline script before first paint. Every meter style renders statically with CSS choosing one, so the site works with JavaScript disabled.
 
-**Tech Stack:** Astro 5, TypeScript, Vitest (already present), Fontsource for self-hosted fonts. No CSS framework, no client framework — the interactive surface in this plan is one small vanilla script.
+**Tech Stack:** Astro 7, TypeScript, Vitest (already present), Fontsource for self-hosted fonts. No CSS framework, no client framework — the interactive surface in this plan is one small vanilla script.
 
 Implements spec §6 (the homepage row), §9 and §9.1 from `docs/superpowers/specs/2026-08-02-blockchain-explorer-blog-design.md`. Read §9 and §9.1 before starting.
 
 ## Global Constraints
 
-- **Node ≥ 20.** Astro 5 requires it; the repo already pins it.
+- **Node ≥ 20.** Astro requires it; the repo already pins it.
+- **Astro 7.x.** Astro 5 pulls `sharp` with high-severity libvips advisories and a vulnerable `vite`/`esbuild`; 7 is current and clean. `npm audit` must report no high or critical findings at the end of Task 1.
 - **The site is static.** `output: 'static'`, no SSR adapter, no server. `npm run build` must produce a directory of files servable by any static host.
 - **`src/chain/` is not modified by this plan.** The engine is merged and reviewed. If a template needs data the engine does not expose, add it to `src/site/`, not to `src/chain/`.
 - **`.astro` files never read `chain.lock.json` directly.** They import from `src/site/chain-data.ts`.
@@ -43,7 +44,7 @@ Implements spec §6 (the homepage row), §9 and §9.1 from `docs/superpowers/spe
 - [ ] **Step 1: Install Astro**
 
 ```bash
-npm install astro@^5.0.0
+npm install astro@^7.0.0
 npm install --save-dev @fontsource/be-vietnam-pro @fontsource/jetbrains-mono
 ```
 
@@ -159,8 +160,8 @@ describe('static build output', () => {
 
   it('is a real HTML document', () => {
     const html = readDist('index.html');
-    expect(html()).toContain('<!DOCTYPE html>');
-    expect(html()).toContain('</html>');
+    expect(html).toContain('<!DOCTYPE html>');
+    expect(html).toContain('</html>');
   });
 
   it('ships no server entrypoint', () => {
@@ -1032,9 +1033,9 @@ describe('built homepage', () => {
 
   it('renders all three meter markups so no-JS readers see the default', () => {
     const html = readDist('index.html');
-    expect(html()).toContain('meter-m1');
-    expect(html()).toContain('meter-m2');
-    expect(html()).toContain('meter-m3');
+    expect(html).toContain('meter-m1');
+    expect(html).toContain('meter-m2');
+    expect(html).toContain('meter-m3');
   });
 
   it('declares the document language as Vietnamese', () => {
