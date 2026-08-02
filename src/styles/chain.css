@@ -44,7 +44,7 @@
 
 .txs { list-style: none; margin: 0.9rem 0 0; padding: 0.8rem 0 0; border-top: 1px solid var(--line); }
 .txs li { display: flex; flex-wrap: wrap; gap: 0.5rem 0.9rem; align-items: baseline; }
-.txs .t { font-size: 1.02rem; font-weight: 600; }
+.txs .t { margin: 0; font-size: 1.02rem; font-weight: 600; }
 .txs .g { font-family: var(--mono); font-size: 0.7rem; color: var(--dim); margin-left: auto; }
 .silent { margin: 0.55rem 0 0; color: var(--dim); font-size: 0.9rem; font-style: italic; }
 
@@ -54,11 +54,12 @@
 .work-top .luck { margin-left: auto; }
 .work-top .luck.over { color: var(--warn); }
 .work-top .luck.good { color: var(--good); }
+.meter .bar-wrap { position: relative; margin-top: 0.45rem; }
 .meter .bar { position: relative; height: 5px; background: var(--bg);
-  border: 1px solid var(--line2); border-radius: 3px; margin-top: 0.45rem; overflow: hidden; }
+  border: 1px solid var(--line2); border-radius: 3px; overflow: hidden; }
 .meter .bar i { display: block; height: 100%; background: var(--warn); }
 .meter .bar i.good { background: var(--good); }
-.meter .bar .tick { position: absolute; top: -3px; bottom: -3px; width: 1px;
+.meter .tick { position: absolute; top: -3px; bottom: -3px; width: 1px;
   background: var(--dim); left: 33.33%; }
 .meter .scale, .meter .cap { display: flex; justify-content: space-between;
   font-family: var(--mono); font-size: 0.6rem; color: var(--dim); margin-top: 0.25rem; }

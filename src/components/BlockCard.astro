@@ -12,7 +12,8 @@ const { block, isNewest, isOldest } = Astro.props;
     <span class={`n${block.isEmpty ? ' q' : ''}`}>#{block.height}</span>
     <span class={`dot${block.isEmpty ? ' q' : ''}`}></span>
   </div>
-  <article class={`card${block.isEmpty ? ' empty' : ''}`}>
+  <article class={`card${block.isEmpty ? ' empty' : ''}`} aria-labelledby={`block-${block.height}-heading`}>
+    <h2 id={`block-${block.height}-heading`} class="sr-only">Block #{block.height} · {block.period}</h2>
     <div class="card-top">
       <span class="per">{block.period}{block.isGenesis ? ' · genesis' : ''}</span>
       <span class="stamp">Sealed</span>
@@ -28,7 +29,7 @@ const { block, isNewest, isOldest } = Astro.props;
       <ul class="txs">
         {block.transactions.map((tx) => (
           <li>
-            <span class="t">{tx.title ?? 'Amendment'}</span>
+            <h3 class="t">{tx.title ?? 'Amendment'}</h3>
             <span class="g">{tx.gasUsed} từ · {tx.value.toFixed(1)} giờ</span>
           </li>
         ))}

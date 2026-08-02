@@ -1,34 +1,11 @@
 ---
-import { expectedAttempts } from '../site/chain-data';
+import { meterGeometry } from '../site/meter';
 
 interface Props { nonce: number; difficulty: number }
 const { nonce, difficulty } = Astro.props;
 
-const expected = expectedAttempts(difficulty);
-const ratio = nonce / expected;
-const lucky = ratio < 1;
-
-// M1: the bar caps at 3x so an unlucky block stays on scale; the tick marks 1x.
-const barPct = Math.min(ratio / 3, 1) * 100;
-
-// M2: twelve segments spanning 3x, so four segments is exactly 1x expected.
-const perSegment = (expected * 3) / 12;
-const segments = Array.from({ length: 12 }, (_, i) => {
-  const filled = (nonce - i * perSegment) / perSegment;
-  return Math.max(0, Math.min(1, filled)) * 100;
-});
-
-// M3: cumulative probability 1 - e^-x, sampled every 0.25x across 0..3x.
-const CURVE = Array.from({ length: 13 }, (_, i) => {
-  const x = i * 0.25;
-  return { x: (x / 3) * 200, y: 38 - (1 - Math.exp(-x)) * 34 };
-});
-const path = CURVE.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(' ');
-const markX = (Math.min(ratio, 3) / 3) * 200;
-const markY = 38 - (1 - Math.exp(-Math.min(ratio, 3))) * 34;
-const fillPath = `${CURVE.filter((p) => p.x <= markX)
-  .map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(2)},${p.y.toFixed(2)}`)
-  .join(' ')} L${markX.toFixed(2)},${markY.toFixed(2)} L${markX.toFixed(2)},38 Z`;
+const { ratio, lucky, expected, barPct, perSegment, segments, path, markX, markY, fillPath } =
+  meterGeometry(nonce, difficulty);
 ---
 
 <div class="work">
@@ -40,7 +17,10 @@ const fillPath = `${CURVE.filter((p) => p.x <= markX)
   </div>
 
   <div class="meter meter-m1">
-    <div class="bar"><span class="tick"></span><i class={lucky ? 'good' : ''} style={`width:${barPct}%`}></i></div>
+    <div class="bar-wrap">
+      <div class="bar"><i class={lucky ? 'good' : ''} style={`width:${barPct}%`}></i></div>
+      <span class="tick"></span>
+    </div>
     <div class="scale"><span>0</span><span>1× · {expected.toLocaleString('en-US')}</span><span>3×</span></div>
   </div>
 
