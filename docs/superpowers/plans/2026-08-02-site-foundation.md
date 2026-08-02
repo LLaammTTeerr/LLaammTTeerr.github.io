@@ -12,7 +12,7 @@ Implements spec §6 (the homepage row), §9 and §9.1 from `docs/superpowers/spe
 
 ## Global Constraints
 
-- **Node ≥ 20.** Astro requires it; the repo already pins it.
+- **Node ≥ 22.12.0.** Astro 7 requires it — a stricter floor than the engine's ≥ 20. `package.json`'s `engines.node` must say so, or a CI runner on Node 20 fails later as a mysterious `astro build` crash rather than a clear version mismatch.
 - **Astro 7.x.** Astro 5 pulls `sharp` with high-severity libvips advisories and a vulnerable `vite`/`esbuild`; 7 is current and clean. `npm audit` must report no high or critical findings at the end of Task 1.
 - **The site is static.** `output: 'static'`, no SSR adapter, no server. `npm run build` must produce a directory of files servable by any static host.
 - **`src/chain/` is not modified by this plan.** The engine is merged and reviewed. If a template needs data the engine does not expose, add it to `src/site/`, not to `src/chain/`.
