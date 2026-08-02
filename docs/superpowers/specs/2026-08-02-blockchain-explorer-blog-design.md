@@ -95,7 +95,21 @@ body:<hex sha256 of the normalized body>
 ```
 
 `txHash = sha256(canonical)`, rendered as `0x` + 64 lowercase hex characters.
-Displayed truncated with a middle ellipsis and a click-to-copy affordance.
+
+Displayed truncated with a middle ellipsis **in lists** — block cards, address
+pages, the mempool — where hashes are scanned rather than read. On a record's own
+detail page the full 64 characters are rendered, because that page exists to be
+verified from: a reader with JavaScript disabled must still be able to select the
+hash and check it, and a truncated value plus a copy button that cannot run
+defeats the guarantee the hash is there to provide. This is the convention public
+explorers follow, and it keeps verification working on the no-JS path (§7).
+
+A block hash's leading zeros — the ones its own committed `difficulty` proves were
+mined — are marked in the reader's accent colour wherever the hash appears. The
+length comes from the block's own `difficulty`, not the chain floor, since §3.4
+permits a block to commit to a stricter target. Merkle roots are never marked:
+they are computed, not mined, so an empty block's all-zero merkle root must not be
+dressed up as proof of work it never did.
 
 `research` is the one field not derivable from the body (§3.8), which is exactly
 why it is committed to the hash: an author-declared number displayed beside
