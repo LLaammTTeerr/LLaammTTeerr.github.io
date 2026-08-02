@@ -140,6 +140,27 @@ describe('renderMarkdown', () => {
       expect(html).toContain('aria-hidden="true"');
     });
 
+    it('colours a malformed formula through a palette token, never a literal hex', async () => {
+      // KaTeX's `errorColor` default is `#cc0000`, emitted as an inline
+      // style that beats every stylesheet — a hard-coded colour that is wrong
+      // in ten of the eleven palettes, shipped by a single TeX typo. The CSS
+      // colour audits cannot see it: it is injected into the HTML at render
+      // time, not into any stylesheet.
+      //
+      // Each of these is an ordinary authoring mistake or a deliberately
+      // untrusted command (`trust` is off, so `\href` is an error path).
+      for (const input of ['$\\frac{1}{$', '$\\nosuchcommand{x}$', '$\\href{https://a}{x}$']) {
+        const html = await renderMarkdown(input);
+        // Doubles as the anti-vacuity check: an input KaTeX rendered cleanly
+        // would carry no error colour at all and fail here.
+        expect(html, `"${input}" took no error path, so it proves nothing`).toContain('var(--bad)');
+        expect(html, `"${input}" shipped a hard-coded colour`).not.toMatch(/color(?::|=")\s*#/i);
+      }
+      // The parse-error path also carries the class the vendored stylesheet
+      // targets; the unknown-command path styles the offending token inline.
+      expect(await renderMarkdown('$\\frac{1}{$')).toContain('katex-error');
+    });
+
     it('renders only classes the vendored stylesheet actually styles', async () => {
       // Guards against `katex`, `rehype-katex`, and `micromark-extension-math`
       // resolving to *different* katex versions (rehype-katex only declares a

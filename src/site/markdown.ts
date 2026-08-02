@@ -125,7 +125,17 @@ const processor = unified()
   // sibling, not to stand alone. Forcing `output: 'html'` would drop that
   // sibling and leave only the aria-hidden tree, so a screen reader would get
   // nothing at all for every formula, not a formula read twice.
-  .use(rehypeKatex)
+  //
+  // `errorColor` is set because KaTeX's default is the literal `#cc0000`,
+  // emitted as an *inline* `style="color:…"` on `.katex-error`, which beats
+  // every stylesheet and every one of the eleven palettes. The trigger surface
+  // is ordinary authoring — an unbalanced brace, an unsupported command, and
+  // every `\href`/`\url`/`\includegraphics`, all of which are error paths here
+  // because `trust` is off. `--bad` is defined on `:root` and re-defined in all
+  // ten `[data-palette]` blocks, so the error text follows the reader's choice.
+  // The MathML `mathcolor` attribute cannot resolve a CSS variable, which is
+  // harmless: `.katex-mathml` is visually hidden and exists for screen readers.
+  .use(rehypeKatex, { errorColor: 'var(--bad)' })
   // `css-variables` emits var(--shiki-*) rather than baking a theme's colours
   // in. With eleven reader-selectable palettes a fixed theme would clash with
   // ten of them; this way code inherits whichever the reader picked, with no
