@@ -282,4 +282,33 @@ describe('blockTimestamp', () => {
     const draft = { period: '2026-07', transactions: [tx('2026-07-20', 'a')] };
     expect(blockTimestamp(draft, '2026-06-30T00:00:00Z')).toBe('2026-07-20T00:00:00Z');
   });
+
+  it('bounds a future-dated transaction to its own period, not the transaction date', () => {
+    // A future-dated post is already placed in the current open period by
+    // `planBlocks`'s membership rule; its own block must not be stamped
+    // beyond the period it actually belongs to.
+    const draft = { period: '2026-09', transactions: [tx('2027-03-04', 'future')] };
+    expect(blockTimestamp(draft, '2026-08-31T00:00:00Z')).toBe('2026-09-30T00:00:00Z');
+  });
+
+  it('does not let a poisoned timestamp propagate into later, unaffected blocks', () => {
+    // Simulates the regression: a 2027-dated post used to make block 2026-09's
+    // timestamp 2027-03-04, which then propagated via the monotonic clamp
+    // into every later block forever. Now each block is bounded by its own
+    // period, so the chain recovers.
+    const b0709 = blockTimestamp(
+      { period: '2026-09', transactions: [tx('2027-03-04', 'future')] },
+      '2026-08-31T00:00:00Z',
+    );
+    expect(b0709).toBe('2026-09-30T00:00:00Z');
+
+    const b0710 = blockTimestamp({ period: '2026-10', transactions: [] }, b0709);
+    expect(b0710).toBe('2026-10-31T00:00:00Z');
+
+    const b0711 = blockTimestamp(
+      { period: '2026-11', transactions: [tx('2026-11-05', 'ordinary')] },
+      b0710,
+    );
+    expect(b0711).toBe('2026-11-05T00:00:00Z');
+  });
 });

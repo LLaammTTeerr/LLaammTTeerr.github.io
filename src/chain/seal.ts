@@ -149,12 +149,23 @@ export function planBlocks(pending: Transaction[], opts: PlanOptions): BlockDraf
 /**
  * §3.4 — timestamps derive from content, never from build time, and never
  * decrease along the chain.
+ *
+ * The content date is also bounded by the block's own period: a future-dated
+ * transaction is already placed in the current open period (see
+ * `planBlocks`), so without this bound its date would leak into the block's
+ * timestamp and, via the monotonic clamp below, into every later block too —
+ * permanently poisoning the chain's timestamps from one stray future post.
  */
 export function blockTimestamp(draft: BlockDraft, prevTimestamp: string | null): string {
-  const contentDate =
+  const periodLastDay = lastDayOfMonth(draft.period);
+  const latestTxDate =
     draft.transactions.length === 0
-      ? lastDayOfMonth(draft.period)
+      ? periodLastDay
       : draft.transactions.map((t) => t.date).sort().at(-1)!;
+  // `YYYY-MM-DD` sorts lexicographically the same as it sorts chronologically,
+  // so plain string comparison suffices (see `minPeriod`/`maxPeriod` above,
+  // which rely on the same fact for `YYYY-MM` periods).
+  const contentDate = latestTxDate < periodLastDay ? latestTxDate : periodLastDay;
 
   const candidate = `${contentDate}T00:00:00Z`;
   if (prevTimestamp !== null && prevTimestamp > candidate) return prevTimestamp;

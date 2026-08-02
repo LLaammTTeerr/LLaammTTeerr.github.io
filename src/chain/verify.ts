@@ -33,15 +33,26 @@ function isStringOrNull(value: unknown): boolean {
   return value === null || typeof value === 'string';
 }
 
+/** `0x` followed by exactly `len` lowercase hex digits. */
+function isHexOfLength(value: unknown, len: number): boolean {
+  return typeof value === 'string' && new RegExp(`^0x[0-9a-f]{${len}}$`).test(value);
+}
+
 function transactionProblem(tx: unknown, index: number): string | null {
   const at = `transaction #${index}`;
   if (!isRecord(tx)) return `${at} is not an object`;
-  if (typeof tx.hash !== 'string') return `${at} field "hash" is not a string`;
+  if (!isHexOfLength(tx.hash, 64)) {
+    return `${at} field "hash" is not a 0x-prefixed 64-hex-digit string`;
+  }
   if (tx.type !== 'post' && tx.type !== 'amendment') {
     return `${at} field "type" is not "post" or "amendment"`;
   }
-  for (const field of ['date', 'from', 'contentHash']) {
-    if (typeof tx[field] !== 'string') return `${at} field "${field}" is not a string`;
+  if (typeof tx.date !== 'string') return `${at} field "date" is not a string`;
+  if (!isHexOfLength(tx.from, 40)) {
+    return `${at} field "from" is not a 0x-prefixed 40-hex-digit string`;
+  }
+  if (!isHexOfLength(tx.contentHash, 64)) {
+    return `${at} field "contentHash" is not a 0x-prefixed 64-hex-digit string`;
   }
   for (const field of ['slug', 'title', 'series', 'amends']) {
     if (!isStringOrNull(tx[field])) return `${at} field "${field}" is not a string or null`;
@@ -49,7 +60,7 @@ function transactionProblem(tx: unknown, index: number): string | null {
   for (const field of ['gasUsed', 'value']) {
     if (!isFiniteNumber(tx[field])) return `${at} field "${field}" is not a finite number`;
   }
-  if (tx.research !== null && tx.research !== undefined && !isFiniteNumber(tx.research)) {
+  if (tx.research != null && !isFiniteNumber(tx.research)) {
     return `${at} field "research" is not a finite number or null`;
   }
   if (!Array.isArray(tx.tags) || tx.tags.some((t) => typeof t !== 'string')) {
@@ -109,7 +120,7 @@ async function expectedTxHash(tx: Transaction): Promise<Hex | null> {
       }),
     );
   }
-  if (tx.title === null || tx.amends === null || tx.research === null) return null;
+  if (tx.title === null || tx.amends === null || tx.research == null) return null;
   return sha256Hex(
     canonicalAmendmentTx({
       amends: tx.amends,

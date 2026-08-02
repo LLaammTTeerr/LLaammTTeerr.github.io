@@ -9,6 +9,8 @@ import type { Block, Chain, Transaction } from '../../src/chain/types';
 
 const DIFFICULTY = 2;
 const ZERO = '0x' + '00'.repeat(32);
+/** A well-formed 20-byte address, so fixtures pass the R1 shape check. */
+const FROM = '0x' + 'aa'.repeat(20);
 
 /** A post transaction whose hash genuinely commits to its own fields. */
 async function tx(slug: string): Promise<Transaction> {
@@ -18,7 +20,7 @@ async function tx(slug: string): Promise<Transaction> {
     tags: [],
     series: null,
     research: 1,
-    from: '0xaaaa',
+    from: FROM,
     contentHash: ZERO,
   };
   return {
@@ -47,7 +49,7 @@ async function amendmentTx(amends: string, title: string): Promise<Transaction> 
     tags: ['cp'],
     series: null,
     research: 3.5,
-    from: '0xaaaa',
+    from: FROM,
     contentHash: ZERO,
   };
   return {
@@ -330,6 +332,53 @@ describe('structurally invalid input', () => {
     expect(result.ok).toBe(false);
     expect(result.blocks).toEqual([]);
   });
+
+  it('reports an odd-length transaction hash instead of throwing (R1 path A)', async () => {
+    // `merkleRootHex` -> `fromHex` throws on an odd number of hex digits.
+    // Truncating a hash by one nibble used to crash the verifier instead of
+    // reporting it.
+    const chain = await validChain();
+    chain.blocks[0]!.transactions[0]!.hash = '0x' + 'a'.repeat(63);
+    await expect(verifyChain(chain)).resolves.toBeDefined();
+    const result = await verifyChain(chain);
+    expect(result.ok).toBe(false);
+    expect(result.blocks[0]!.reason).toMatch(/transaction #0.*hash/);
+  });
+
+  it('reports a non-hex transaction hash instead of throwing', async () => {
+    const chain = await validChain();
+    chain.blocks[0]!.transactions[0]!.hash = '0x' + 'z'.repeat(64);
+    await expect(verifyChain(chain)).resolves.toBeDefined();
+    const result = await verifyChain(chain);
+    expect(result.ok).toBe(false);
+    expect(result.blocks[0]!.reason).toMatch(/transaction #0.*hash/);
+  });
+
+  it('reports a malformed "from" address instead of throwing', async () => {
+    const chain = await validChain();
+    chain.blocks[0]!.transactions[0]!.from = '0xnotanaddress';
+    await expect(verifyChain(chain)).resolves.toBeDefined();
+    const result = await verifyChain(chain);
+    expect(result.ok).toBe(false);
+    expect(result.blocks[0]!.reason).toMatch(/transaction #0.*from/);
+  });
+
+  it('reports an amendment with a deleted "research" key instead of throwing (R1 path B)', async () => {
+    // The structural check permits `research` to be `undefined` (an amendment
+    // read from a hand-edited ledger with the key deleted), but
+    // `expectedTxHash` used to guard only `=== null`, so `formatResearch`
+    // received `undefined` and threw inside `.toFixed`.
+    const post = await tx('a');
+    const b0 = await makeBlock(0, ZERO, [post]);
+    const b1 = await makeBlock(1, b0.hash, [await amendmentTx(post.hash, 'Tiêu đề mới')]);
+    delete (b1.transactions[0] as unknown as { research?: unknown }).research;
+
+    const chain = { version: 1 as const, difficulty: DIFFICULTY, blocks: [b0, b1] };
+    await expect(verifyChain(chain)).resolves.toBeDefined();
+    const result = await verifyChain(chain);
+    expect(result.ok).toBe(false);
+    expect(result.blocks[1]!.txOk).toBe(false);
+  });
 });
 
 /**
@@ -394,6 +443,10 @@ describe('browser safety', () => {
           `${file} imports "${specifier}" — the verify.ts closure ships to browsers`,
         ).toBe(true);
       }
+      // The positive check above only catches `import`/`export ... from`
+      // specifiers. It would not catch `require('node:fs')` or a string built
+      // at runtime, so keep this substring check as a second, cheaper net.
+      expect(source, `${file} must stay browser-safe`).not.toContain('node:');
     }
   });
 });
