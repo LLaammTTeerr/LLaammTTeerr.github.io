@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { CHAIN_CONFIG } from '../../chain.config';
 import { normalizeBody } from '../chain/canonical';
@@ -50,6 +50,33 @@ export function workRatio(nonce: number, difficulty: number): number {
 /** `0xabc123…def456` — enough to recognise, short enough to sit in a table. */
 export function shortHash(hash: string): string {
   return `${hash.slice(0, 8)}…${hash.slice(-6)}`;
+}
+
+export interface HashWork {
+  /** The `0x` marker — not part of the proof, kept unhighlighted. */
+  marker: string;
+  /** The leading hex zeros a block of this difficulty actually had to find. */
+  zeros: string;
+  /** Everything after the proven zeros, including a `shortHash`'s `…`. */
+  rest: string;
+}
+
+/**
+ * Splits a hash (or a `shortHash` of one) into the leading zeros that prove
+ * `difficulty` was met and everything after, so the UI can highlight the
+ * mined prefix instead of showing an undifferentiated wall of hex. A block's
+ * own `difficulty` — not the chain's floor — is the correct length: §3.4 lets
+ * a block commit to a stricter target than the chain requires, and
+ * `verifyBlock` checks the hash against that committed value.
+ *
+ * Clamped to the string actually available, so a `difficulty` longer than
+ * `hash` (or than what a `shortHash` still has visible before its `…`)
+ * degrades to "everything after 0x is proven" rather than slicing past the
+ * end of the string.
+ */
+export function splitHashWork(hash: string, difficulty: number): HashWork {
+  const n = Math.min(Math.max(difficulty, 0), Math.max(hash.length - 2, 0));
+  return { marker: hash.slice(0, 2), zeros: hash.slice(2, 2 + n), rest: hash.slice(2 + n) };
 }
 
 export interface BlockView extends Block {
@@ -131,6 +158,47 @@ export async function getPostContent(
   }
 
   return { slug, body, contentHash: tx.contentHash, tx };
+}
+
+export interface PendingPost {
+  slug: string;
+  title: string;
+  date: string;
+  tags: string[];
+}
+
+export interface PendingBlock {
+  /** The open calendar month, YYYY-MM. */
+  period: string;
+  /** Newest first, matching sealed blocks. */
+  posts: PendingPost[];
+}
+
+/**
+ * §3.6, §9 — the open block. The engine withholds a partial current month from
+ * the lock, so a post published this month is on disk and on no block. Without
+ * this it would have no page, no URL and no feed entry, which looks exactly
+ * like a failed publish.
+ *
+ * A post is pending when its slug appears in no sealed block. `now` is supplied
+ * by the caller, never read here, so builds stay deterministic (§14).
+ */
+export function getPendingBlock(
+  now: string,
+  postsDir: string = POSTS_DIR,
+): PendingBlock | null {
+  const sealed = new Set(getPosts().map((t) => t.slug));
+
+  const posts: PendingPost[] = readdirSync(postsDir)
+    .filter((f) => f.endsWith('.md'))
+    .map((f) => join(postsDir, f))
+    .map((path) => parsePost(path, readFileSync(path, 'utf8')))
+    .filter((p) => !sealed.has(p.slug))
+    .map((p) => ({ slug: p.slug, title: p.title, date: p.date, tags: p.tags }))
+    .sort((a, b) => b.date.localeCompare(a.date) || b.slug.localeCompare(a.slug));
+
+  if (posts.length === 0) return null;
+  return { period: now.slice(0, 7), posts };
 }
 
 export function getAssets(): AssetRecord[] {

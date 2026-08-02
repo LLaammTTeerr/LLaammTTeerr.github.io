@@ -1,7 +1,10 @@
 import { describe, it, expect } from 'vitest';
+import { mkdtempSync, writeFileSync, cpSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   getChain, getBlocks, getBlock, getPosts, getAssets, getStats,
-  workRatio, expectedAttempts,
+  workRatio, expectedAttempts, getPendingBlock,
 } from '../../src/site/chain-data';
 
 describe('expectedAttempts', () => {
@@ -191,5 +194,57 @@ describe('cache immutability', () => {
     }).toThrow(TypeError);
     expect(getAssets()).toHaveLength(originalLength);
     expect(getChain().assets).toHaveLength(originalLength);
+  });
+});
+
+describe('getPendingBlock', () => {
+  function postsWith(extra?: { name: string; body: string }): string {
+    const dir = mkdtempSync(join(tmpdir(), 'pending-'));
+    cpSync('content/posts', dir, { recursive: true });
+    if (extra) writeFileSync(join(dir, extra.name), extra.body);
+    return dir;
+  }
+
+  it('returns null when every post on disk is already sealed', () => {
+    expect(getPendingBlock('2026-08-02', postsWith())).toBeNull();
+  });
+
+  it('reports a post that is on disk but in no sealed block', () => {
+    const dir = postsWith({
+      name: '2026-08-05-moi.md',
+      body: '---\ntitle: "Bài mới"\ndate: 2026-08-05\ntags: [cp]\n---\n\nNội dung.\n',
+    });
+    const pending = getPendingBlock('2026-08-10', dir);
+    expect(pending).not.toBeNull();
+    expect(pending!.period).toBe('2026-08');
+    expect(pending!.posts.map((p) => p.slug)).toEqual(['2026-08-05-moi']);
+    expect(pending!.posts[0]!.title).toBe('Bài mới');
+  });
+
+  it('takes its period from the clock, not from the newest post', () => {
+    // The open block is the current month, whether or not anything landed in it.
+    const dir = postsWith({
+      name: '2026-08-05-moi.md',
+      body: '---\ntitle: "Bài mới"\ndate: 2026-08-05\ntags: [cp]\n---\n\nNội dung.\n',
+    });
+    expect(getPendingBlock('2026-09-01', dir)!.period).toBe('2026-09');
+  });
+
+  it('orders pending posts newest first, like sealed blocks', () => {
+    const dir = postsWith({
+      name: '2026-08-01-a.md',
+      body: '---\ntitle: "A"\ndate: 2026-08-01\ntags: [cp]\n---\n\nA.\n',
+    });
+    writeFileSync(join(dir, '2026-08-09-b.md'),
+      '---\ntitle: "B"\ndate: 2026-08-09\ntags: [cp]\n---\n\nB.\n');
+    expect(getPendingBlock('2026-08-10', dir)!.posts.map((p) => p.slug))
+      .toEqual(['2026-08-09-b', '2026-08-01-a']);
+  });
+
+  it('does not read the clock itself', () => {
+    // Determinism (§14): the caller supplies `now`, as everywhere else.
+    const a = getPendingBlock('2026-08-10', postsWith());
+    const b = getPendingBlock('2026-08-10', postsWith());
+    expect(a).toEqual(b);
   });
 });
