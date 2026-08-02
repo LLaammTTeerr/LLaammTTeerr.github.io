@@ -1,6 +1,6 @@
 ---
 import type { Transaction } from '../chain/types';
-import { getBlocks } from '../site/chain-data';
+import { getBlocks, researchHours } from '../site/chain-data';
 // `.meta`, `.hash` and `.num` are BlockCard's dense-metadata classes
 // (src/styles/chain.css) — reused verbatim here rather than redefined, so
 // the transaction panel and the block cards read as the same monospace,
@@ -13,6 +13,9 @@ const { tx } = Astro.props;
 
 const block = getBlocks().find((b) => b.transactions.some((t) => t.hash === tx.hash));
 const readMinutes = Math.max(1, Math.round(tx.gasUsed / 200));
+// null when the author declared no `research` — §3.8 wants an em dash there,
+// not the `0.0` the chain (correctly) committed.
+const hours = researchHours(tx.value);
 ---
 
 <div class="txpanel">
@@ -32,7 +35,8 @@ const readMinutes = Math.max(1, Math.round(tx.gasUsed / 200));
       {tx.series ? <a class="tagname" href={`/address/${tx.series}.series`}>{tx.series}.series</a> : null}
     </dd>
     <dt>Gas used</dt><dd><span class="num">{tx.gasUsed}</span> từ · {readMinutes} phút đọc</dd>
-    <dt>Value</dt><dd><span class="num">{tx.value.toFixed(1)}</span> giờ nghiên cứu</dd>
+    <dt>Value</dt>
+    <dd>{hours ? <><span class="num">{hours}</span> giờ nghiên cứu</> : '—'}</dd>
     {tx.assets.length > 0 ? (
       <>
         <dt>Assets</dt>

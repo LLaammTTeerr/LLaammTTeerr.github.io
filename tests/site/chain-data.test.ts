@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { splitHashWork } from '../../src/site/chain-data';
 import {
   getChain, getBlocks, getBlock, getPosts, getAssets, getStats,
-  workRatio, expectedAttempts, getPendingBlock,
+  workRatio, expectedAttempts, getPendingBlock, researchHours,
 } from '../../src/site/chain-data';
 
 describe('expectedAttempts', () => {
@@ -52,6 +52,24 @@ describe('splitHashWork', () => {
   it('treats a zero or negative difficulty as no highlighted prefix', () => {
     expect(splitHashWork('0x00000abc', 0)).toEqual({ marker: '0x', zeros: '', rest: '00000abc' });
     expect(splitHashWork('0x00000abc', -3)).toEqual({ marker: '0x', zeros: '', rest: '00000abc' });
+  });
+});
+
+describe('researchHours', () => {
+  it('formats a declared figure at one decimal place, as the ledger serializes it', () => {
+    expect(researchHours(1)).toBe('1.0');
+    expect(researchHours(12.5)).toBe('12.5');
+  });
+
+  it('refuses to format the default as a figure', () => {
+    // §3.8: `research` is optional and "defaults to 0.0, which displays as —
+    // rather than a misleading 0". Returning null rather than '0.0' means a
+    // caller cannot print the default by accident: there is no number to print.
+    expect(researchHours(0)).toBeNull();
+  });
+
+  it('reports the declared hours of the one post on the committed chain', () => {
+    expect(researchHours(getPosts()[0]!.value)).toBe('1.0');
   });
 });
 

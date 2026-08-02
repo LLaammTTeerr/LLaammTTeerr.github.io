@@ -79,6 +79,21 @@ export function splitHashWork(hash: string, difficulty: number): HashWork {
   return { marker: hash.slice(0, 2), zeros: hash.slice(2, 2 + n), rest: hash.slice(2 + n) };
 }
 
+/**
+ * §3.8 — the author's declared hours of research, formatted for display, or
+ * `null` when nothing was declared.
+ *
+ * `research` is optional and the chain records its absence as `0.0`, which is
+ * the correct commitment. Rendering that `0.0` beside genuinely committed
+ * figures is not: it reads as "the author declares zero hours of research"
+ * when the author declared nothing at all. §3.8 is explicit — the default
+ * "displays as `—` rather than a misleading `0`". Callers substitute the em
+ * dash; this returns `null` so they cannot print the placeholder by accident.
+ */
+export function researchHours(value: number): string | null {
+  return value > 0 ? value.toFixed(1) : null;
+}
+
 export interface BlockView extends Block {
   isGenesis: boolean;
   isEmpty: boolean;

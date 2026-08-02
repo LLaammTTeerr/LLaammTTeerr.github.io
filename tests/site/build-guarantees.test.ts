@@ -7,8 +7,9 @@ import { getPosts } from '../../src/site/chain-data';
 /**
  * Guarantees that belong to the *build*, not to a function.
  *
- * `tests/site/content.test.ts` proves `getPostContent` refuses a drifted file.
- * Nothing binds the page to it: replacing
+ * `tests/site/content.test.ts` proves `getPostContent` refuses a drifted file,
+ * and `tests/site/chain-data.test.ts` proves `researchHours` never formats an
+ * undeclared value as a figure. Neither binds a page to either: replacing
  * `getPostContent(tx.slug!)` in `src/pages/tx/[slug].astro` with a bare
  * `readFileSync` of the post body — deleting the SHA-256 re-derivation
  * entirely — left all 412 unit tests green while the build shipped unverified
@@ -56,5 +57,44 @@ describe('the build refuses a post body that has drifted from the chain', () => 
       existsSync(join(dir, 'dist/tx', SLUG, 'index.html')),
       'a page was emitted for a drifted post',
     ).toBe(false);
+  }, 120_000);
+});
+
+describe('a post that declares no research hours', () => {
+  /**
+   * §3.8: `research` is optional and "defaults to `0.0`, which displays as `—`
+   * rather than a misleading `0`". The one post on the committed chain declares
+   * `1.0`, so the sealed ledger cannot exercise the default — and the sealed
+   * ledger must not be regenerated to make it. The sandbox's copy of
+   * `chain.lock.json` is set to `value: 0`, which is exactly what the engine
+   * commits for a post with no `research` key, and the real ledger is untouched.
+   */
+  it('renders an em dash on the post page and the block card, never 0.0', () => {
+    const dir = sandboxRepo();
+    const lockPath = join(dir, 'chain.lock.json');
+    const lock = JSON.parse(readFileSync(lockPath, 'utf8')) as {
+      blocks: { transactions: { value: number }[] }[];
+    };
+    for (const block of lock.blocks) {
+      for (const tx of block.transactions) tx.value = 0;
+    }
+    writeFileSync(lockPath, JSON.stringify(lock, null, 2) + '\n');
+
+    const build = buildSandbox(dir);
+    expect(build.status, `sandbox build failed:\n${build.output}`).toBe(0);
+
+    const post = readFileSync(join(dir, 'dist/tx', SLUG, 'index.html'), 'utf8');
+    expect(post).toContain('<dt>Value</dt><dd>—</dd>');
+    expect(
+      post,
+      'the post page printed a research figure the author never declared',
+    ).not.toMatch(/[\d.]+\s*<\/span>\s*giờ nghiên cứu/);
+
+    const home = readFileSync(join(dir, 'dist/index.html'), 'utf8');
+    expect(home).toMatch(/<span class="g">\d+ từ · —<\/span>/);
+    expect(
+      home,
+      'the block card printed a research figure the author never declared',
+    ).not.toMatch(/\d+\.\d+ giờ/);
   }, 120_000);
 });
