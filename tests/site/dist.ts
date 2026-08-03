@@ -117,3 +117,29 @@ export function cssPerPage(): Map<string, string> {
 export function withoutNamespaceUris(html: string): string {
   return html.replace(/\sxmlns(:[a-zA-Z0-9_-]+)?="[^"]*"/g, '');
 }
+
+/**
+ * Strips the `href` value out of every `<a>` tag, leaving every other
+ * `http(s)://` occurrence in the document intact.
+ *
+ * An anchor's `href` is a navigation target the reader chooses to follow, not
+ * a resource the page fetches on load — unlike a `<script src>`, a
+ * `<link rel="stylesheet" href>`, an `<img src>` or an `<svg>`'s
+ * `xlink:href`, none of which wait for a click. §9 forbids a page *load*
+ * touching a third party; it says nothing about a page naming one in a link
+ * the reader may or may not follow, and `src/site/markdown.ts` already
+ * allowlists `http`/`https` as safe URL schemes for exactly that reason
+ * (`SAFE_SCHEMES`). `/about`'s profile links (`src/site/profile.ts`) are the
+ * first real ones this build ships.
+ *
+ * Scoped to `<a ...>` tags only — matched and rewritten one attribute at a
+ * time inside `[^>]*`, which cannot cross a `>` and so cannot reach into a
+ * following tag. A `<link>`, `<img>`, `<script>` or any other element's own
+ * `href`/`src` is untouched, so this cannot excuse the hazards the "no built
+ * page references an absolute http(s) url" guard exists to catch.
+ */
+export function withoutAnchorHrefs(html: string): string {
+  return html.replace(/<a\b[^>]*\bhref="https?:\/\/[^"]*"[^>]*>/gi, (tag) =>
+    tag.replace(/href="https?:\/\/[^"]*"/i, 'href=""'),
+  );
+}

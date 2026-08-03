@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { cssPerPage, distPages, readDist, readDistCss, withoutNamespaceUris } from './dist';
+import { cssPerPage, distPages, readDist, readDistCss, withoutAnchorHrefs, withoutNamespaceUris } from './dist';
 import { parseRules, selectorParts, declaredValue, stripComments } from './css';
 import { METERS, DEFAULTS } from '../../src/site/themes';
 import { getBlocks, splitHashWork } from '../../src/site/chain-data';
@@ -27,10 +27,15 @@ describe('no external requests', () => {
   });
 
   it('no built page references an absolute http(s) url', () => {
+    // `withoutAnchorHrefs` first: `/about` links real placeholder urls in
+    // `<a href>` (src/site/profile.ts), which a reader may choose to follow
+    // but which no page *load* fetches — see its own doc comment for why
+    // that is not the hazard this guard exists to catch.
     for (const page of distPages()) {
-      expect(withoutNamespaceUris(readDist(page)), `${page} makes a third-party request`).not.toMatch(
-        /https?:\/\//,
-      );
+      expect(
+        withoutNamespaceUris(withoutAnchorHrefs(readDist(page))),
+        `${page} makes a third-party request`,
+      ).not.toMatch(/https?:\/\//);
     }
   });
 
@@ -55,6 +60,24 @@ describe('no external requests', () => {
       '<svg xmlns="http://www.w3.org/2000/svg"><image href="http://evil.example.com/x.png" /></svg>',
     ]) {
       expect(withoutNamespaceUris(real), `${real} was excused as a namespace`).toMatch(/https?:\/\//);
+    }
+  });
+
+  it('excuses an anchor href, and nothing else that carries the same url', () => {
+    const anchor = '<a href="https://github.com/your-handle">GitHub</a>';
+    expect(withoutAnchorHrefs(anchor)).not.toMatch(/https?:\/\//);
+    // The text of the link survives — only the attribute value is stripped.
+    expect(withoutAnchorHrefs(anchor)).toContain('>GitHub</a>');
+
+    for (const real of [
+      '<link rel="stylesheet" href="https://cdn.evil.example.com/tracker.css" />',
+      '<img src="https://tracker.example.com/pixel.gif" alt="" />',
+      '<script src="https://evil.example.com/x.js"></script>',
+      // Two anchors on one line: the non-greedy-looking `[^>]*` must not
+      // reach past the first tag's own `>` into the second's attributes.
+      '<a href="/local">local</a><img src="https://tracker.example.com/pixel.gif" />',
+    ]) {
+      expect(withoutAnchorHrefs(real), `${real} was excused as an anchor`).toMatch(/https?:\/\//);
     }
   });
 });
