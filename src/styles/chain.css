@@ -136,6 +136,28 @@ a.hash:hover { text-decoration-color: currentColor; }
 .c-step.todo .b { background: none; border: 1.5px solid var(--dim); }
 .c-arrow { color: var(--line2); }
 .c-fill { margin-left: auto; color: var(--dim); text-transform: none; letter-spacing: 0.04em; }
+/* §3.6 — the mempool. Drafts are not chain records, so the card that holds
+   them is deliberately not the card a block gets: no fill, dashed edges, and a
+   stamp in the muted token rather than in `--warn`, which `.stamp.open` uses
+   for the open block. `--warn` there means "published, waiting to be sealed";
+   a draft is not waiting for anything, it is outside the chain, and borrowing
+   the colour would say it is next in line. */
+.card.offchain { background: transparent; border-style: dashed; }
+.stamp.off { color: var(--dim); border-color: var(--line2); border-style: dashed; }
+.off-note { margin: 0.8rem 0 0; font-size: 0.9rem; line-height: 1.65; color: var(--dim); }
+.off-note strong { color: var(--txt); font-weight: 600; }
+.off-note a { color: var(--acc); text-underline-offset: 3px; }
+/* Not `.txs`: that list is transactions, and a draft must not be dressed as
+   one. Rows rather than a baseline flex line, with the date and the absent
+   fields under the title instead of aligned to the right of it. */
+.mem { list-style: none; margin: 0.9rem 0 0; padding: 0.8rem 0 0;
+  border-top: 1px dashed var(--line2); }
+.mem li { padding: 0.45rem 0; }
+.mem li + li { border-top: 1px solid var(--line); }
+.mem .t { margin: 0; font-size: 1.02rem; font-weight: 600; color: var(--txt); }
+.mem .d { font-family: var(--mono); font-size: 0.7rem; color: var(--dim); margin-right: 0.7rem; }
+.mem .g { font-family: var(--mono); font-size: 0.7rem; color: var(--dim); }
+
 .seg { display: inline-flex; gap: 2px; margin-left: 0.4rem; vertical-align: -1px; }
 .seg s { width: 0.5rem; height: 0.5rem; background: var(--line2); border-radius: 1px; display: block; }
 .seg s.on { background: var(--acc); }

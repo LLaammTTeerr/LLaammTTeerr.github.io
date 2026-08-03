@@ -1,0 +1,75 @@
+---
+import Base from '../layouts/Base.astro';
+import { getDrafts } from '../site/drafts';
+// `.card`, `.card-top`, `.stamp`, `.silent` and the `.mem`/`.offchain` rules
+// are all in chain.css — imported here for the same reason every other route
+// imports the styles it renders (see the note in WorkMeter.astro), so this
+// page cannot ship unstyled. `.page-head` lives in base.css, which
+// `Base.astro` always loads.
+import '../styles/chain.css';
+
+/**
+ * §3.6 — the mempool: **drafts**, which are not in the chain at all.
+ *
+ * The one page on this site where the honest answer to "what is its hash?" is
+ * that there isn't one. Everything around it is made of hashes, which is
+ * exactly why nothing here may borrow their vocabulary: a draft has no hash,
+ * no address, no gas, no value and no block, and `Draft`
+ * (`src/site/drafts.ts`) carries no field that could pretend otherwise.
+ *
+ * The distinction this page exists to keep is the one §3.6 states outright —
+ * a *pending* transaction is published, hashed and in the chain, waiting for
+ * the next seal; it belongs to the open block on `/blocks`, and it is not a
+ * draft. The prose below says so in as many words, because "mempool" in every
+ * other explorer means the pending set, and a reader arriving with that
+ * expectation will otherwise read this list as unconfirmed transactions.
+ *
+ * The empty list is the ordinary state, not an edge case: `content/drafts/`
+ * ships empty and usually stays that way. It gets a sentence of its own rather
+ * than a blank card, so the page reads as "nothing is waiting" instead of as a
+ * page that failed to load.
+ *
+ * No clock (§14): `getDrafts()` reads a directory and the dates the files
+ * declare.
+ */
+const drafts = getDrafts();
+---
+
+<Base title="Mempool — Blogchain" description="Bản nháp chưa đăng — chưa lên chuỗi.">
+  <div class="page-head">
+    <h1>Mempool</h1>
+    <span class="sub"><span class="num">{drafts.length}</span> bản nháp · chưa lên chuỗi</span>
+  </div>
+
+  <article class="card offchain" aria-label="Mempool">
+    <div class="card-top">
+      <span class="per">Bản nháp</span>
+      <span class="stamp off">Ngoài chuỗi</span>
+    </div>
+    <p class="off-note">
+      Đây là những bài đang viết, <strong>chưa lên chuỗi</strong>: không có hash, không có địa chỉ,
+      không có gas, không có giá trị, không thuộc khối nào. Chuỗi chưa biết gì về chúng.
+      Bài đã đăng nhưng chưa niêm phong thì đã nằm trong chuỗi rồi, ở khối đang mở trên
+      trang <a href="/blocks">Blocks</a> — không phải ở đây.
+    </p>
+    {drafts.length > 0 ? (
+      <ul class="mem">
+        {drafts.map((draft) => (
+          <li>
+            {/* Plain text, never a link: a draft has no page, and giving it one
+                would be the same claim as giving it a hash. */}
+            <h2 class="t">{draft.title}</h2>
+            <span class="d">{draft.date}</span>
+            {/* The em dash the open block already uses for a field the chain
+                has not committed to (`— chưa có, khối chưa đào` in
+                BlockCard.astro) — here for every such field at once, because a
+                draft has none of them. */}
+            <span class="g">— chưa băm, chưa lên chuỗi</span>
+          </li>
+        ))}
+      </ul>
+    ) : (
+      <p class="silent">Chưa có bản nháp nào trong mempool.</p>
+    )}
+  </article>
+</Base>
