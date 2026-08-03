@@ -21,6 +21,19 @@ vi.mock('../../src/chain/pending', async (importOriginal) => {
   return { ...actual, readPending: vi.fn() };
 });
 
+// The mock's default is "there is no pending file", which is what `readPending`
+// returns for a repo with no open block and is the state most of this file
+// assumes. A bare `vi.fn()` returns `undefined`, which is outside
+// `readPending`'s declared `PendingLock | null` contract — so any caller
+// checking `=== null` sails past it and dereferences nothing. That is not
+// hypothetical: it took out seventeen tests here the moment `getStats` started
+// consulting the open block, and the failure named a line inside the real
+// `readPending`, which the mock means never runs.
+beforeEach(() => {
+  vi.mocked(readPending).mockReset();
+  vi.mocked(readPending).mockReturnValue(null);
+});
+
 describe('expectedAttempts', () => {
   it('is 16^difficulty', () => {
     expect(expectedAttempts(1)).toBe(16);
@@ -420,9 +433,6 @@ describe('getPendingBlock', () => {
     };
   }
 
-  beforeEach(() => {
-    vi.mocked(readPending).mockReset();
-  });
 
   it('returns null when no pending file exists', () => {
     vi.mocked(readPending).mockReturnValue(null);
