@@ -34,6 +34,18 @@ function cardOf(html: string): string {
   return m[0];
 }
 
+/**
+ * The author-supplied card — bio and links, §5.1/D18's dashed "Ngoài chuỗi"
+ * treatment — or `null` when the profile has nothing to show. `class="card
+ * offchain"` (with the space) never matches `cardOf`'s `class="card"[^>]*
+ * data-address` pattern, so the two helpers cannot cross-match each other's
+ * card by accident.
+ */
+function offchainCardOf(html: string): string | null {
+  const m = /<article class="card offchain"[^>]*>[\s\S]*?<\/article>/.exec(html);
+  return m ? m[0] : null;
+}
+
 describe('the /about route', () => {
   it('builds a page the nav can link to', () => {
     expect(distPages()).toContain('about/index.html');
@@ -132,6 +144,70 @@ describe('the Research total, on a chain the committed ledger cannot discriminat
     // already there, it does not add another.
     expect(html).toContain('<dt>Txns</dt><dd><span class="num">1</span></dd>');
   }, 300_000);
+});
+
+describe('the off-chain marker on the author-supplied half (§5.1/D18)', () => {
+  /**
+   * `content/profile.md` is off-chain by the author's own decision (D18 in
+   * DECISIONS-2026-08-03.md) — nothing hashes it — but `/about` surrounds the
+   * bio with a real address and real totals, so unlabelled prose would read
+   * as though it carried the same guarantee. The fix reuses the mempool's own
+   * vocabulary (`src/pages/mempool.astro`): the dashed `.card.offchain`
+   * treatment, the `.stamp.off` "Ngoài chuỗi" badge, and the phrase
+   * `chưa lên chuỗi` in an `.off-note`.
+   */
+  it('says the bio is not on the chain, inside its own card — not as a claim about the whole page', () => {
+    const html = page();
+    const card = offchainCardOf(html);
+    expect(card, 'the real profile has a bio, so /about should render an off-chain card').not.toBeNull();
+    expect(card!).toContain('chưa lên chuỗi');
+    expect(card!).toContain('Ngoài chuỗi');
+
+    // Scoped, not vacuous: "the page contains the phrase somewhere" would
+    // also pass a version that stamped the whole page off-chain, or one that
+    // put the notice in the nav. It must sit with the bio specifically.
+    const committed = cardOf(html);
+    expect(committed, 'the off-chain phrase leaked into the committed address card').not.toContain(
+      'chưa lên chuỗi',
+    );
+    expect(committed, 'the off-chain badge leaked into the committed address card').not.toContain(
+      'Ngoài chuỗi',
+    );
+    const outsideTheCard = html.replace(card!, '');
+    expect(outsideTheCard, 'the marker also appears somewhere outside its own card').not.toContain(
+      'chưa lên chuỗi',
+    );
+  });
+
+  it('leaves the committed card reading as chain data — no off-chain badge, no dashed class', () => {
+    // The requirement's other half: the contrast comes from labelling the
+    // unverified half, not from weakening how the real data presents. If a
+    // later change wrapped the whole page in the dashed treatment, or moved
+    // the "Ngoài chuỗi" stamp onto the committed card, this catches it.
+    const committed = cardOf(page());
+    expect(committed).not.toContain('offchain');
+    expect(committed).not.toContain('class="stamp off"');
+    expect(committed).toContain('<span class="per">Address</span>');
+    expect(committed).toContain('<dt>Address</dt><dd><span class="addr">');
+    expect(committed).toContain('<dt>Txns</dt><dd><span class="num">');
+  });
+
+  it('renders no off-chain card, and no stray marker text, when the profile has nothing to show', () => {
+    const dir = sandboxRepo();
+    writeFileSync(
+      join(dir, 'content/profile.md'),
+      ['---', 'handle: lamter', 'name: lamter.eth', 'bio: ""', 'links: []', '---', ''].join('\n'),
+    );
+    const build = buildSandbox(dir);
+    expect(build.status, `sandbox build failed:\n${build.output}`).toBe(0);
+    const html = readFileSync(join(dir, 'dist/about/index.html'), 'utf8');
+
+    expect(offchainCardOf(html), 'an off-chain card rendered with nothing inside it to mark').toBeNull();
+    expect(html).not.toContain('chưa lên chuỗi');
+    expect(html).not.toContain('Ngoài chuỗi');
+    // The committed card is unaffected either way.
+    expect(cardOf(html)).toContain('<dt>Txns</dt><dd><span class="num">');
+  }, 120_000);
 });
 
 describe('the author bio', () => {

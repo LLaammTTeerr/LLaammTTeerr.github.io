@@ -24,7 +24,14 @@ import '../styles/chain.css';
  * The address always comes from `identityAddress`, never from anything
  * `content/profile.md` might also carry — a second, un-hash-checked copy of
  * the handle is exactly the kind of drift §3.7 exists to prevent. `getProfile`
- * supplies only the bio and links, which are not chain data at all.
+ * supplies only the bio and links.
+ *
+ * §5.1/D18 — the profile is off-chain by the author's own choice, and this
+ * page must say so: it is framed as an identity *address* page and surrounds
+ * the bio with a real address and real totals, so unlabelled prose would
+ * read as though it carried the same guarantee. The bio and links render
+ * inside their own dashed "Ngoài chuỗi" card, above and visibly distinct
+ * from the committed one — see `hasProfileContent` below.
  *
  * No clock is read here or under `src/site/` (§14): `senders()` reads the
  * ledger plus the recorded open block, and `getProfile()` reads a file on
@@ -59,6 +66,15 @@ const totalHours = researchHours(transactions.reduce((sum, t) => sum + currentVa
 // their hashes are not sealed yet; marked with the same `~` TxPanel and the
 // tag/series address pages use, never presented with a sealed hash's authority.
 const pendingHashes = new Set(getPendingPosts().map((t) => t.hash));
+
+// §5.1/D18 — `content/profile.md` is off-chain by the author's own choice: a
+// bio is identity metadata, not a claim about the chain's contents, and
+// nothing hashes it. But this page is framed as an identity *address* page
+// and surrounds the bio with a real address and real totals, so unlabelled
+// prose would inherit an authority nothing gave it. Nothing to mark when
+// there is nothing to show — an author who has written neither a bio nor a
+// link gets no empty "off-chain" card either.
+const hasProfileContent = bioHtml !== '' || links.length > 0;
 ---
 
 <Base
@@ -70,12 +86,29 @@ const pendingHashes = new Set(getPendingPosts().map((t) => t.hash));
     <span class="sub">Identity address</span>
   </div>
 
-  {bioHtml ? <div class="bio" set:html={bioHtml} /> : null}
-
-  {links.length > 0 ? (
-    <ul class="profile-links">
-      {links.map((link) => <li><a href={link.url}>{link.label}</a></li>)}
-    </ul>
+  {hasProfileContent ? (
+    // §5.1 — the author-supplied half, visibly distinct from the committed
+    // card below it: the same dashed `.card.offchain` treatment and `.stamp
+    // off` badge the mempool uses for a draft (src/pages/mempool.astro),
+    // reusing that vocabulary rather than inventing a second one. The note's
+    // own wording says the same thing the mempool's does: `chưa lên chuỗi`.
+    <article class="card offchain" aria-label="Thông tin do tác giả khai báo">
+      <div class="card-top">
+        <span class="per">Giới thiệu</span>
+        <span class="stamp off">Ngoài chuỗi</span>
+      </div>
+      <p class="off-note">
+        Tiểu sử và liên kết bên dưới do tác giả tự khai báo, <strong>chưa lên chuỗi</strong>:
+        không có hash, không được chuỗi xác minh. Địa chỉ, số giao dịch, giờ nghiên cứu và
+        lịch sử giao dịch trong thẻ bên dưới mới là dữ liệu chuỗi đã xác nhận.
+      </p>
+      {bioHtml ? <div class="bio" set:html={bioHtml} /> : null}
+      {links.length > 0 ? (
+        <ul class="profile-links">
+          {links.map((link) => <li><a href={link.url}>{link.label}</a></li>)}
+        </ul>
+      ) : null}
+    </article>
   ) : null}
 
   <article class="card" data-address={CHAIN_CONFIG.authorName} aria-label={`Address ${CHAIN_CONFIG.authorName}`}>
