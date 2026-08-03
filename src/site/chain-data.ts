@@ -282,6 +282,39 @@ function latestAmendment(txHash: Hex): (AmendedIn & { tx: RecordedTx }) | null {
 }
 
 /**
+ * §3.8/§3.9 — the declared research hours of a post, given the amendment (if
+ * any) that supersedes it.
+ *
+ * The rule §3.9 states outright: "a reader wanting a post's current effort
+ * figure reads `research` from the newest amendment, falling back to `value` on
+ * the original transaction". An amendment's own `value` is fixed at 0 so block
+ * aggregation cannot re-charge hours the original's block already counted, so
+ * reading `value` off the newest record yields the accounting zero rather than
+ * the figure, and reading it off the *original* yields a number the chain has
+ * moved on from.
+ *
+ * Split out with the resolved amendment as a parameter so `getPostContent`,
+ * which has already walked for it, and `currentValue`, which has not, state the
+ * rule once between them.
+ */
+function valueGiven(tx: RecordedTx, amendment: { tx: RecordedTx } | null): number {
+  return amendment === null ? tx.value : (amendment.tx.research ?? 0);
+}
+
+/**
+ * §3.8/§3.9 — the hours the chain's newest record for `tx` declares.
+ *
+ * The same resolution `getPostContent` performs, over the same
+ * `latestAmendment`, so a total built from this cannot drift from the figure
+ * the post's own page prints beside its text. Unlike `getPostContent` this
+ * touches no file on disk and throws nothing: it answers from the ledger and
+ * the recorded open block alone, which is all an aggregate needs.
+ */
+export function currentValue(tx: RecordedTx): number {
+  return valueGiven(tx, latestAmendment(tx.hash));
+}
+
+/**
  * §3.1 — the ledger commits a `contentHash` and stores no body, so nothing
  * structurally prevents the site rendering different text beside a hash that
  * vouches for other text. This re-derives the hash from disk and refuses a
@@ -387,8 +420,10 @@ export async function getPostContent(
     // count is as verifiable as the hash beside it.
     gasUsed: wordCount(body),
     // §3.9 — an amendment's declared hours live in `research`; its `value` is
-    // 0 so block aggregation cannot re-charge them.
-    value: governing.type === 'amendment' ? (governing.research ?? 0) : governing.value,
+    // 0 so block aggregation cannot re-charge them. Shared with `currentValue`,
+    // which the address pages total, so the figure under a post's text and the
+    // figure its tag's address page adds up cannot disagree.
+    value: valueGiven(tx, amendment),
     amendedIn: amendment === null ? null : { height: amendment.height, sealed: amendment.sealed },
   };
 }
@@ -577,18 +612,48 @@ export interface NetworkStats {
 
 export function getStats(): NetworkStats {
   const chain = getChain();
-  const addresses = new Set<string>();
+
+  // §14 — every displayed field must be a committed one, and the homepage
+  // renders this under an "Addresses" tile.
+  //
+  // Counted from `from`, `tags` and `series`, and deliberately **not** from
+  // `to`. `to` appears in neither the `post/1` nor the `amendment/1` canonical
+  // form (src/chain/canonical.ts): it is derived from the tags, so it was never
+  // put in the form the transaction hash covers. Nothing therefore checks it —
+  // `verifyChain` reports a lock whose `to` has been rewritten as perfectly
+  // clean — and this tile was reading it, so a tampered ledger could have named
+  // any number of addresses that do not exist and none of the ones that do.
+  // The three fields used instead are all in the canonical form, so this count
+  // is as verifiable as the hashes beside it.
+  //
+  // It is also the same derivation `src/site/addresses.ts` uses to decide which
+  // address pages exist, so the tile cannot claim a number the pages contradict.
+  //
+  // Slugs rather than derived hex: §3.7 puts tags and series in a single `tag`
+  // domain, so distinct slugs are distinct addresses and a tag and a series
+  // that share a slug are one address (intended — see the note in
+  // `src/site/addresses.ts`). Deriving the digests would make this async and
+  // change no count. The two sets never overlap: an identity is `0x` + 40 hex,
+  // a topic is a slug.
+  const identities = new Set<string>();
+  const topics = new Set<string>();
   for (const block of chain.blocks) {
     for (const tx of block.transactions) {
-      addresses.add(tx.from);
-      for (const to of tx.to) addresses.add(to);
+      identities.add(tx.from);
+      // §3.9 — "an amendment's `to` stays empty even when tags change, so the
+      // tag address graph reflects original publication". An amendment that
+      // renamed a tag must not mint an address no post ever sent to.
+      if (tx.type !== 'post') continue;
+      for (const tag of tx.tags) topics.add(tag);
+      if (tx.series !== null) topics.add(tx.series);
     }
   }
+
   const tipHeight = chain.blocks.reduce((max, b) => Math.max(max, b.height), 0);
   return {
     height: tipHeight,
     transactions: chain.blocks.reduce((n, b) => n + b.txCount, 0),
-    addresses: addresses.size,
+    addresses: identities.size + topics.size,
     difficulty: chain.difficulty,
     assets: chain.assets.length,
   };

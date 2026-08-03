@@ -1,7 +1,7 @@
 import { tagAddress, tagName } from '../chain/address';
 import type { Hex } from '../chain/types';
 import type { RecordedTx } from './chain-data';
-import { getPendingPosts, getPosts } from './chain-data';
+import { currentValue, getPendingPosts, getPosts } from './chain-data';
 
 /**
  * §3.7/§3.8 — the tag and series addresses posts send to, and what each one
@@ -52,7 +52,14 @@ function derive(slug: string): Promise<Hex> {
   return tagAddress(slug);
 }
 
-/** §3.7 — a series' name; `tagName` covers the other half. */
+/**
+ * §3.7 — a series' name; `tagName` covers the other half.
+ *
+ * A tag and a series that share a slug therefore share one address under two
+ * names, and get two pages showing the same `0x…` with different transaction
+ * lists. That is what §3.7 specifies — one `tag` domain for both — and is
+ * intended, not a collision to be fixed.
+ */
 function seriesName(slug: string): string {
   return `${slug}.series`;
 }
@@ -133,9 +140,16 @@ export async function getAddresses(): Promise<AddressView[]> {
         txCount: group.transactions.length,
         // §3.8 — this address's own value, summed over what it received. The
         // chain's total is a different number and means a different thing.
-        // Each `value` is the declared hours in the post's own canonical form,
-        // so every term here is hash-covered.
-        valueReceived: group.transactions.reduce((sum, t) => sum + t.value, 0),
+        //
+        // `currentValue`, not `t.value`: §3.9 puts a post's current declared
+        // hours in its newest amendment's `research` and fixes the amendment's
+        // own `value` at 0, so a sum over `value` reports the figure the author
+        // first published and the chain has since corrected. Both terms are
+        // hash-covered — `value` is `research:` in the `post/1` form, and an
+        // amendment's `research` is in the `amendment/1` form — and the
+        // resolution is `getPostContent`'s own, so this total and the figure
+        // printed under the post's text are the same number by construction.
+        valueReceived: group.transactions.reduce((sum, t) => sum + currentValue(t), 0),
         // Min and max of the committed dates rather than the ends of the list,
         // so this stays true however the list is ordered.
         firstSeen: dates[0] ?? '',

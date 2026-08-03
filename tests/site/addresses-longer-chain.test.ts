@@ -5,7 +5,7 @@ import { readPending } from '../../src/chain/pending';
 import type { PendingLock } from '../../src/chain/pending';
 import type { Block, Chain, Hex, Transaction } from '../../src/chain/types';
 import { getAddress, getAddresses } from '../../src/site/addresses';
-import { getPosts } from '../../src/site/chain-data';
+import { getStats } from '../../src/site/chain-data';
 
 /**
  * The address views, posed against a chain long enough to tell them apart.
@@ -41,6 +41,19 @@ vi.mock('../../src/chain/pending', async (importOriginal) => {
 
 const AUTHOR = '0x' + 'c'.repeat(40);
 
+/**
+ * Two addresses that are on no post's `tags` or `series` and exist nowhere else
+ * on this chain. One transaction's `to` names them.
+ *
+ * `to` is NOT in the `post/1` canonical form (see src/chain/canonical.ts), so
+ * no transaction hash covers it: a hand-edited lock can put anything there and
+ * `verifyChain` still reports clean. Every view derived from `to` is therefore
+ * derived from an unverified field, and these two make that visible — a reader
+ * of `to` sees addresses the chain never sent to, and (because every other post
+ * here carries `to: []`) misses every address it did.
+ */
+const PHANTOM = ['0x' + 'f1'.repeat(20), '0x' + 'f2'.repeat(20)];
+
 function post(
   slug: string,
   date: string,
@@ -48,6 +61,7 @@ function post(
   tags: string[],
   series: string | null,
   value: number,
+  to: Hex[] = [],
 ): Transaction {
   return {
     hash,
@@ -58,11 +72,7 @@ function post(
     tags,
     series,
     from: AUTHOR,
-    // Deliberately empty. `to` is NOT in the `post/1` canonical form (see
-    // src/chain/canonical.ts), so no transaction hash covers it — an address
-    // view built from `to` would be built from an uncommitted field. Leaving it
-    // empty here means such an implementation finds no addresses at all.
-    to: [],
+    to,
     contentHash: '0x' + '11'.repeat(32),
     assets: [],
     gasUsed: 10,
@@ -75,14 +85,21 @@ function post(
 /** Chain order deliberately disagrees with date order, so sorting is visible. */
 const A = post('bai-a', '2026-06-15', '0x' + 'a1'.repeat(32), ['cp', 'meta'], null, 2);
 const B = post('bai-b', '2026-06-28', '0x' + 'b2'.repeat(32), ['meta'], 'ghi-chu', 3);
-const C = post('bai-c', '2026-07-02', '0x' + 'c3'.repeat(32), ['cp'], 'ghi-chu', 5);
+const C = post('bai-c', '2026-07-02', '0x' + 'c3'.repeat(32), ['cp'], 'ghi-chu', 5, PHANTOM);
 
 /**
- * §3.9 — "an amendment's `to` stays empty even when tags change, so the tag
- * address graph reflects original publication". Its tag is carried by no post,
- * so an implementation that walked every transaction instead of the posts would
- * mint an address for `dinh-chinh.tag`; its `research: 99` would land in some
- * address's value received.
+ * An amendment, per §3.9.
+ *
+ * Three things about it are load-bearing:
+ *
+ *  - its `to` is empty and its tag is carried by no post, so "the tag address
+ *    graph reflects original publication" — a walk over every transaction
+ *    rather than over the posts would mint `dinh-chinh.tag`;
+ *  - its `value` is 0 and its declared hours live in `research`, so a view
+ *    reading `value` sees the accounting zero, not the figure;
+ *  - `research: 20` differs from the 2 that `bai-a` originally declared, which
+ *    is what makes "the address total follows the newest record" a statement
+ *    with a truth value at all. Equal figures would prove nothing.
  */
 const AMENDMENT: Transaction = {
   hash: '0x' + 'ee'.repeat(32),
@@ -98,8 +115,33 @@ const AMENDMENT: Transaction = {
   assets: [],
   gasUsed: 0,
   value: 0,
-  research: 99,
+  research: 20,
   amends: A.hash,
+};
+
+/**
+ * An amendment still in the open block (§3.6), raising `bai-b` from 3 to 8.
+ *
+ * §3.9's resolution has to reach into the open block too: everything there is
+ * newer than everything sealed, and an amendment recorded this month is already
+ * the chain's latest word on the post it amends.
+ */
+const AMENDMENT_B: Transaction = {
+  hash: '0x' + 'bb'.repeat(32),
+  type: 'amendment',
+  slug: null,
+  title: 'bai-b (đã sửa)',
+  date: '2026-08-01',
+  tags: [],
+  series: null,
+  from: AUTHOR,
+  to: [],
+  contentHash: '0x' + '55'.repeat(32),
+  assets: [],
+  gasUsed: 0,
+  value: 0,
+  research: 8,
+  amends: B.hash,
 };
 
 /**
@@ -145,11 +187,29 @@ const PENDING: PendingLock = {
   period: '2026-08',
   height: 2,
   prevHash: TIP.hash,
-  transactions: [D],
+  transactions: [D, AMENDMENT_B],
 };
 
-/** Every sealed post's declared hours — what a chain-wide total would be. */
-const SEALED_VALUE = 2 + 3 + 5;
+/**
+ * What each post's declared hours currently are — the newest amendment's
+ * `research`, or the original's `value` where nothing amends it (§3.9).
+ *
+ * Every figure differs from the raw `value` on the transaction, so an
+ * implementation that read `value` straight off the post produces a different
+ * number for every address on this chain.
+ */
+const CURRENT = { A: 20, B: 8, C: 5, D: 7 };
+
+/** Every post's current hours summed — what a *chain-wide* total would be. */
+const CHAIN_WIDE = CURRENT.A + CURRENT.B + CURRENT.C + CURRENT.D;
+
+/** §3.8 — what each address actually received, from the posts that sent to it. */
+const RECEIVED: Record<string, number> = {
+  'cp.tag': CURRENT.A + CURRENT.C + CURRENT.D,
+  'meta.tag': CURRENT.A + CURRENT.B,
+  'ghi-chu.series': CURRENT.B + CURRENT.C,
+  'moi.tag': CURRENT.D,
+};
 
 beforeAll(() => {
   const chain: Chain = {
@@ -199,32 +259,77 @@ describe('the address graph, on a chain with more than one tag', () => {
 
 describe('value received is the address own, not the chain', () => {
   it('sums only the posts that sent to it', async () => {
-    const meta = (await getAddress('meta.tag'))!;
-    // bai-a (2) + bai-b (3). bai-c's 5 and bai-d's 7 went elsewhere.
-    expect(meta.valueReceived).toBeCloseTo(5, 5);
+    for (const view of await getAddresses()) {
+      expect(view.valueReceived, `${view.name} received the wrong total`).toBeCloseTo(
+        RECEIVED[view.name]!,
+        5,
+      );
+    }
+    // Anti-vacuity: the loop above says nothing if there is nothing to loop.
+    expect((await getAddresses()).length).toBe(Object.keys(RECEIVED).length);
   });
 
   it('is not the chain-wide total value', async () => {
     // §3.8 — the distinction the shipped one-post ledger cannot express. A
     // `valueReceived` that summed the whole chain would agree there and be
-    // wrong everywhere else.
-    const chainWide = getPosts().reduce((s, t) => s + t.value, 0);
-    expect(chainWide).toBeCloseTo(SEALED_VALUE, 5);
+    // wrong for every address here.
     const meta = (await getAddress('meta.tag'))!;
-    expect(meta.valueReceived).not.toBeCloseTo(chainWide, 5);
+    expect(meta.valueReceived).not.toBeCloseTo(CHAIN_WIDE, 5);
     for (const view of await getAddresses()) {
-      expect(view.valueReceived, `${view.name} received the whole chain's value`).toBeLessThan(
-        chainWide + 7,
+      expect(view.valueReceived, `${view.name} received the whole chain's value`).not.toBeCloseTo(
+        CHAIN_WIDE,
+        5,
       );
     }
   });
+});
 
-  it('counts an amendment declared hours for no address', async () => {
-    // §3.9 — an amendment's hours already belong to the post it amends;
-    // charging them again to an address would inflate the one figure §3.8
-    // calls a genuine measure of effort.
-    const total = (await getAddresses()).reduce((s, a) => s + a.valueReceived, 0);
-    expect(total).toBeLessThan(99);
+describe('value received follows the chain latest record', () => {
+  /**
+   * §3.9 — a post's current declared hours are the newest amendment's
+   * `research`, falling back to the original's `value`. An amendment's own
+   * `value` is fixed at 0 so block aggregation cannot re-charge the original's,
+   * so a view that read `value` straight off the post shows a figure the chain
+   * has moved on from — the same defect the transaction panel carried, at a
+   * different surface.
+   */
+  it('uses the figure a sealed amendment declares, not the one it superseded', async () => {
+    const meta = (await getAddress('meta.tag'))!;
+    // bai-a declared 2 and was amended to 20; bai-b declared 3 and was amended
+    // to 8. Reading `value` off the posts gives 5.
+    expect(meta.valueReceived).toBeCloseTo(28, 5);
+    expect(meta.valueReceived, 'the address total is still the superseded figure').not.toBeCloseTo(
+      A.value + B.value,
+      5,
+    );
+  });
+
+  it('uses the figure an amendment still in the open block declares', async () => {
+    // §3.6 — everything in the open block is newer than everything sealed.
+    // bai-b's amendment has not sealed; its 8 is still the chain's latest word.
+    const series = (await getAddress('ghi-chu.series'))!;
+    expect(series.valueReceived).toBeCloseTo(CURRENT.B + CURRENT.C, 5);
+    expect(series.valueReceived, "the open block's amendment was ignored").not.toBeCloseTo(
+      B.value + C.value,
+      5,
+    );
+  });
+
+  it('replaces the post figure rather than adding to it', async () => {
+    // §3.9's whole reason for the zeros: the hours already belong to the
+    // transaction the amendment amends. Charging both would inflate the one
+    // number §3.8 calls a genuine measure of effort.
+    const meta = (await getAddress('meta.tag'))!;
+    expect(meta.valueReceived, 'the original and its amendment were both counted').not.toBeCloseTo(
+      A.value + AMENDMENT.research! + B.value + AMENDMENT_B.research!,
+      5,
+    );
+  });
+
+  it('leaves an unamended post at its own declared value', async () => {
+    // The fallback half. `moi.tag` received only bai-d, which nothing amends.
+    const moi = (await getAddress('moi.tag'))!;
+    expect(moi.valueReceived).toBeCloseTo(D.value, 5);
   });
 });
 
@@ -241,8 +346,38 @@ describe('the open block counts', () => {
     const cp = (await getAddress('cp.tag'))!;
     expect(cp.transactions.map((t) => t.slug)).toContain('bai-d');
     expect(cp.txCount).toBe(3);
-    expect(cp.valueReceived).toBeCloseTo(2 + 5 + 7, 5);
+    expect(cp.valueReceived).toBeCloseTo(RECEIVED['cp.tag']!, 5);
     expect(cp.lastSeen).toBe('2026-08-01');
+  });
+});
+
+describe('the network address count', () => {
+  /**
+   * §14 — every displayed field must be a committed one, and the homepage
+   * renders this number under an "Addresses" tile.
+   *
+   * `to` is in no canonical form, so a tampered lock can rewrite it and
+   * `verifyChain` still reports clean. This fixture makes the two answers
+   * differ: `bai-c` names two addresses in `to` that nothing on this chain ever
+   * sent to, and every other post names none at all, so a count taken from `to`
+   * is {author} ∪ PHANTOM = 3 — two addresses that do not exist, and not one of
+   * the three that do.
+   *
+   * Derived from `tags` and `series`, which the transaction hash covers, the
+   * answer is {author} ∪ {cp, meta, ghi-chu} = 4. A tag and a series share the
+   * `tag` domain (§3.7), so slugs count once each.
+   */
+  it('counts the addresses the committed tags name, not the ones `to` claims', () => {
+    expect(getStats().addresses).toBe(4);
+    expect(getStats().addresses, 'the count came from the unverified `to` field').not.toBe(
+      1 + PHANTOM.length,
+    );
+  });
+
+  it('counts no address for a tag only an amendment carries', () => {
+    // §3.9 — the address graph reflects original publication. Counting the
+    // amendment's `dinh-chinh` would make it 5.
+    expect(getStats().addresses).toBeLessThan(5);
   });
 });
 

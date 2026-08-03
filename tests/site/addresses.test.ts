@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { tagAddress } from '../../src/chain/address';
 import { getAddress, getAddresses } from '../../src/site/addresses';
-import { getPosts } from '../../src/site/chain-data';
+import { getChain, getPosts } from '../../src/site/chain-data';
 
 /**
  * The address views, against the ledger this repository actually ships.
@@ -43,6 +43,18 @@ describe('getAddress, on the shipped ledger', () => {
     // An address receives from its own posts alone. On this one-post ledger
     // that happens to equal the chain's whole value; the inequality is proved
     // in addresses-longer-chain.test.ts, where the two genuinely differ.
+    //
+    // The comparison against raw `value` is valid here only because nothing on
+    // the shipped chain is amended — §3.9 puts an amended post's current hours
+    // in the newest amendment's `research`, and this expectation would then be
+    // the superseded figure. Stated as an assertion rather than assumed, so
+    // the day an amendment lands this fails pointing at its own premise instead
+    // of at the implementation.
+    const amendments = getChain().blocks.flatMap((b) =>
+      b.transactions.filter((t) => t.type === 'amendment'),
+    );
+    expect(amendments, 'the shipped ledger now holds an amendment — see the note above').toEqual([]);
+
     const view = (await getAddress('meta.tag'))!;
     const expected = getPosts()
       .filter((t) => t.tags.includes('meta'))
