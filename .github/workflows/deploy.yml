@@ -1,0 +1,125 @@
+# Build this site, check it, and publish it to GitHub Pages.
+#
+# The repository is `LLaammTTeerr/LLaammTTeerr.github.io` — a GitHub **user**
+# site, served from the domain root, which is why `astro.config.mjs` sets
+# `base: '/'`. Nothing about that lives here; the config is the source of truth
+# and `tests/site/deploy-config.test.ts` holds it to it.
+#
+# What this workflow runs is exactly what a developer runs locally, in the same
+# order, and then it uploads `dist/`. It adds one step they do not need — an
+# explicit check of the committed ledger — and it deliberately leaves out the
+# one step it must never take.
+#
+# ## What this must never do
+#
+# It must never re-mine the ledger. `chain.lock.json` is committed history, not
+# a build artifact: the site is derived *from* it. Re-running the miner here
+# would hash blocks against whatever time this workflow happened to start and
+# rewrite blocks the whole project treats as frozen.
+#
+# The temptation is specific and worth naming. If a published post is edited
+# and the amendment is not recorded, `npm run build` **fails**, names the file
+# and prints both hashes. Re-mining here would make that failure disappear —
+# and would silently mint an amendment nobody reviewed, into a block dated by a
+# CI runner's clock. **Letting that failure happen is this workflow's job.**
+# `tests/site/workflow.test.ts` refuses a miner step in this file, in any
+# spelling, which is why no comment here can name the script either.
+#
+# Structure: `build` runs on every branch, because the checks are most of the
+# value and they are worth having wherever work happens. `deploy` runs only on
+# `main`, holds the Pages token the build job is deliberately denied, and runs
+# nothing of this project's own code.
+name: Deploy
+
+on:
+  # No `branches:` filter. A push to any branch is checked; publishing is gated
+  # further down, on the `deploy` job, so the two decisions stay separate.
+  push:
+  # So the first deployment — and any re-deploy after a Pages settings change —
+  # can be started by hand without an empty commit.
+  workflow_dispatch:
+
+# Least privilege, as the default every job inherits unless it says otherwise.
+# Without this block GitHub falls back to the repository's default, which can be
+# read-and-write on every scope.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # No `permissions:` of its own, so it holds only `contents: read` above.
+    # This is the job that runs untrusted code — `npm ci` executes install
+    # scripts from the entire dependency tree — and it has no way to publish.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # `engines.node` in package.json is the source of truth, and this is
+          # its exact floor. Quoted, because unquoted `22.12` in YAML is the
+          # number 22.12 and would install 22.12.x instead. Pinning something
+          # newer "to be safe" would mean CI never runs the version the project
+          # tells contributors to use, which is a bug of its own.
+          # `tests/site/workflow.test.ts` derives both sides and compares them.
+          node-version: '22.12.0'
+          # Keys off package-lock.json on its own; no cache paths to maintain.
+          cache: npm
+
+      # `ci` and never `install`: `install` may resolve a dependency the
+      # lockfile does not record, so CI would be checking a tree that exists on
+      # no other machine — and it rewrites package-lock.json, which is committed.
+      - name: Install from the lockfile
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      # The project's central claim, stated by name. `npm test` proves it
+      # already, among hundreds of other things; this is the line a reader
+      # scanning the log for "was the chain checked?" can actually find. It
+      # reads the ledger and never writes it.
+      - name: Verify the committed ledger
+        run: npm run chain:verify
+
+      # Fails, on purpose, if a published post no longer hashes to what the
+      # chain records. Nothing above or below tries to make that pass.
+      - name: Build
+        run: npm run build
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    # Publishing is main's alone. Every other branch has already had the whole
+    # of the `build` job run against it by the time this is skipped.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    # The only place the Pages token exists. A job-level block replaces the
+    # workflow-level one entirely, so these three are exactly what this job
+    # holds: `pages: write` and `id-token: write` are what actions/deploy-pages
+    # requires, and `contents: read` is the inherited default restated.
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    # GitHub Pages refuses concurrent deployments. Scoped to this job rather
+    # than the whole workflow so that check runs on other branches never queue
+    # behind a deployment. `cancel-in-progress: false` because a half-finished
+    # deploy is worse than a slow one.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    # No checkout and no `run:` anywhere: this job holds the publish token, and
+    # the artifact is already built. There is nothing for it to execute.
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

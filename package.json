@@ -11,6 +11,7 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit && astro check",
     "chain:build": "tsx scripts/build-chain.ts",
+    "chain:verify": "tsx scripts/verify-chain.ts",
     "check:vietnamese": "tsx scripts/check-vietnamese.ts",
     "dev": "astro dev",
     "build": "astro build",
@@ -27,7 +28,8 @@
     "sax": "^1.6.1",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "yaml": "^2.9.0"
   },
   "dependencies": {
     "@shikijs/rehype": "^4.4.1",
