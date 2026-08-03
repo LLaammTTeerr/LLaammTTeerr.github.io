@@ -82,19 +82,54 @@ thuận hay từ tiền mã hoá.
 kỳ thứ gì cần lịch sử chống sửa đổi — kể cả một cái blog.
 `.trim();
 
-/** Two diagrams, referenced by posts so they mint as tokens (§3.2b). */
+/**
+ * Two diagrams, referenced by posts so they mint as tokens (§3.2b).
+ *
+ * They carry no baked page colour. An `<img>`-embedded SVG is an isolated
+ * document — it cannot inherit `currentColor` from the host page — so each one
+ * ships its own `prefers-color-scheme` rule and a transparent background. The
+ * first attempt filled the background with `#0d1117`, which is exactly the
+ * default palette's page colour: on that theme the image vanished into the page
+ * and on the two light themes it was a dark slab.
+ */
+const diagram = (w: number, h: number, body: string): string =>
+  `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">` +
+  '<style>' +
+  ':root{--ink:#57606a;--line:#d0d7de}' +
+  '@media (prefers-color-scheme:dark){:root{--ink:#8b949e;--line:#30363d}}' +
+  '.s{fill:none;stroke:var(--ink);stroke-width:2}' +
+  '.f{fill:none;stroke:var(--line);stroke-width:1}' +
+  '.t{fill:var(--ink);font-family:ui-monospace,monospace;font-size:11px}' +
+  '</style>' +
+  body +
+  '</svg>';
+
 export const DEMO_ASSETS: { file: string; svg: string }[] = [
   {
     file: 'so-do-sqrt.svg',
-    svg: `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="96" viewBox="0 0 320 96"><rect width="320" height="96" fill="#0d1117"/><g fill="none" stroke="#7ee787" stroke-width="2">${[
-      0, 1, 2, 3,
-    ]
-      .map((i) => `<rect x="${12 + i * 76}" y="24" width="64" height="48" rx="4"/>`)
-      .join('')}</g><text x="160" y="88" fill="#8b949e" font-family="monospace" font-size="11" text-anchor="middle">sqrt decomposition</text></svg>`,
+    svg: diagram(
+      320,
+      96,
+      `<rect class="f" x="1" y="1" width="318" height="94" rx="4"/>` +
+        [0, 1, 2, 3]
+          .map((i) => `<rect class="s" x="${16 + i * 74}" y="20" width="62" height="40" rx="3"/>`)
+          .join('') +
+        '<text class="t" x="160" y="82" text-anchor="middle">sqrt decomposition</text>',
+    ),
   },
   {
     file: 'so-do-merkle.svg',
-    svg: `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="140" viewBox="0 0 320 140"><rect width="320" height="140" fill="#0d1117"/><g stroke="#79c0ff" stroke-width="2" fill="none"><circle cx="160" cy="24" r="12"/><circle cx="96" cy="76" r="12"/><circle cx="224" cy="76" r="12"/><circle cx="64" cy="124" r="10"/><circle cx="128" cy="124" r="10"/><circle cx="192" cy="124" r="10"/><circle cx="256" cy="124" r="10"/><path d="M152 32 106 66M168 32 214 66M88 86 70 112M104 86 122 112M216 86 198 112M232 86 250 112"/></g></svg>`,
+    svg: diagram(
+      320,
+      148,
+      `<rect class="f" x="1" y="1" width="318" height="146" rx="4"/>` +
+        '<g class="s"><circle cx="160" cy="28" r="11"/><circle cx="96" cy="80" r="11"/>' +
+        '<circle cx="224" cy="80" r="11"/><circle cx="64" cy="124" r="9"/>' +
+        '<circle cx="128" cy="124" r="9"/><circle cx="192" cy="124" r="9"/>' +
+        '<circle cx="256" cy="124" r="9"/>' +
+        '<path d="M152 36 106 70M168 36 214 70M89 89 71 114M103 89 121 114M217 89 199 114M231 89 249 114"/></g>' +
+        '<text class="t" x="160" y="16" text-anchor="middle">merkle root</text>',
+    ),
   },
 ];
 
