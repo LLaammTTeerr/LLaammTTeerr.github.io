@@ -297,3 +297,44 @@ four homepage numbers at once, which is a homepage decision, not an address deci
 **What would make it fully honest:** label the tiles as describing the sealed chain, or count the
 open block in all four. That belongs to whoever next owns the homepage — flagging it so it is a
 choice rather than an oversight.
+
+---
+
+## D16 — every image in every post was broken
+
+**Found while reviewing Task 4.** Nothing copied `content/assets/` into `dist/`. A post body's
+`![Sơ đồ](/assets/so-do.svg)` rendered `<img src="/assets/so-do.svg">` and that path 404'd. The
+whole asset feature — which exists so posts can carry diagrams — produced broken images.
+
+No test saw it because the link-integrity checks read `href`, and images use `src`.
+
+**Decision:** copy into `dist` **only the files the chain commits to** — a file whose hash is in
+the sealed registry, or in a pending transaction's `assets`. An unreferenced file is not copied,
+and neither is one whose bytes no longer hash to a committed value.
+
+**Reasoning:** §3.2b says a file no post references "is not on the chain at all; it is just a
+file". Serving bytes the chain does not vouch for, under a path a post points at, is the same
+falsehood as displaying an unverified number. The `src` check now guards the guarantee; the copy
+is only the implementation.
+
+**Good catch by the implementer:** an asset named `index.html` would have silently replaced the
+gallery page. That now fails the build.
+
+---
+
+## D17 — an unrecorded image swap failed silently; an unrecorded text edit fails loudly
+
+**Found:** swap a referenced image without running `chain:build` and the build **succeeds** while
+the image 404s in a published post. Do the same to a post's *text* and the build fails, naming
+the file, both hashes, and the remedy.
+
+Both are the same fact — the bytes on disk disagree with what the chain committed — with two
+different outcomes.
+
+**Decision:** make the image swap fail the build too, with a message in the same shape as the
+text one.
+
+**Reasoning:** a silent 404 inside a published post is the worse failure. The build reports
+success, the page ships, and the reader finds a broken image where a diagram should be. A build
+failure is recoverable in one command. Deleting a referenced file gets its own message, since the
+remedy differs — restore it, or edit the post to stop referencing it.
