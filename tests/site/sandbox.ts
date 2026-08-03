@@ -186,12 +186,21 @@ export interface BuildResult {
   output: string;
 }
 
-/** Runs a real `astro build` inside the sandbox. Never throws on failure. */
-export function buildSandbox(dir: string): BuildResult {
+/**
+ * Runs a real `astro build` inside the sandbox. Never throws on failure.
+ *
+ * `env` is merged over the inherited environment, and exists for one property:
+ * a build must depend on the chain and on nothing else about the machine
+ * running it. Handing the same sandbox a different `LC_ALL` and requiring the
+ * same bytes back is how that is checked (see build-guarantees.test.ts) — the
+ * defect it catches is a sort reaching for `localeCompare`, whose collation
+ * comes from exactly that variable.
+ */
+export function buildSandbox(dir: string, env: NodeJS.ProcessEnv = {}): BuildResult {
   const result = spawnSync(
     process.execPath,
     [join(ROOT, 'node_modules/astro/bin/astro.mjs'), 'build'],
-    { cwd: dir, encoding: 'utf8' },
+    { cwd: dir, encoding: 'utf8', env: { ...process.env, ...env } },
   );
   return { status: result.status, output: (result.stdout ?? '') + (result.stderr ?? '') };
 }

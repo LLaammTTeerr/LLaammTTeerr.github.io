@@ -1,4 +1,5 @@
 import { CHAIN_CONFIG } from '../../chain.config';
+import { byCodepoint } from '../chain/seal';
 import { getPostContent, resolvedPosts, type ResolvedPost } from './chain-data';
 
 /**
@@ -236,11 +237,21 @@ function absolute(base: URL, path: string): string {
  * open block's in recorded order, so the two halves have to be merged rather
  * than concatenated: an open-block post is newer than everything sealed only
  * because that is how the chain has run so far, not because anything enforces
- * it. The slug is the tiebreak, so two posts sharing a date have a fixed order
- * and two builds cannot disagree about it.
+ * it. The slug is the tiebreak, so two posts sharing a date have a fixed order.
+ *
+ * `byCodepoint` and not `localeCompare`, which is what this comment used to
+ * claim was enough. `localeCompare` with no locale argument resolves against
+ * the host's ambient ICU collation, so the order depends on the machine:
+ * measured, `'…-ä'.localeCompare('…-z')` is -1 under `en_US.UTF-8` and
+ * `vi_VN.UTF-8` and **+1** under `sv_SE.UTF-8`. Two posts sharing a date whose
+ * slugs differ at such a character would swap places in `dist/rss.xml` when the
+ * site was built on someone else's machine — the same build, from the same
+ * chain, producing different bytes. The engine has always known this (see the
+ * note on `byCodepoint` in `src/chain/seal.ts`, where the same mistake would
+ * have changed a Merkle root); this is that rule reaching the feed.
  */
 function newestFirst(a: ResolvedPost, b: ResolvedPost): number {
-  return b.date.localeCompare(a.date) || b.slug.localeCompare(a.slug);
+  return byCodepoint(b.date, a.date) || byCodepoint(b.slug, a.slug);
 }
 
 async function itemFor(post: ResolvedPost, base: URL): Promise<string> {

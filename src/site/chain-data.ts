@@ -8,6 +8,7 @@ import { sha256HexSync } from '../chain/hash-node';
 import { readLock } from '../chain/lock';
 import { isStale, PENDING_PATH, readPending } from '../chain/pending';
 import { parsePost } from '../chain/post';
+import { byCodepoint } from '../chain/seal';
 import type { AssetRecord, Block, Chain, Hex, Transaction } from '../chain/types';
 
 /**
@@ -191,7 +192,7 @@ export function getPosts(): Transaction[] {
   return getChain()
     .blocks.flatMap((b) => b.transactions)
     .filter((t) => t.type === 'post')
-    .sort((a, b) => b.date.localeCompare(a.date));
+    .sort((a, b) => byCodepoint(b.date, a.date));
 }
 
 /**

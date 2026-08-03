@@ -1,5 +1,6 @@
 import { CHAIN_CONFIG } from '../../chain.config';
 import { identityAddress, tagAddress, tagName } from '../chain/address';
+import { byCodepoint } from '../chain/seal';
 import type { Hex } from '../chain/types';
 import type { ResolvedPost } from './chain-data';
 import { resolvedPosts } from './chain-data';
@@ -92,7 +93,7 @@ function seriesName(slug: string): string {
  */
 export function senders(): ResolvedPost[] {
   return [...resolvedPosts()].sort(
-    (a, b) => b.date.localeCompare(a.date) || a.originalHash.localeCompare(b.originalHash),
+    (a, b) => byCodepoint(b.date, a.date) || byCodepoint(a.originalHash, b.originalHash),
   );
 }
 
@@ -177,7 +178,12 @@ export async function getAddresses(): Promise<AddressView[]> {
     }),
   );
 
-  return views.sort((a, b) => b.txCount - a.txCount || a.name.localeCompare(b.name));
+  // Busiest first, ties by address name — in codepoint order, so the list is a
+  // function of the ledger and not of the building machine's `LC_ALL`
+  // (`byCodepoint`, `src/chain/seal.ts`). Two tag addresses with one
+  // transaction each is the ordinary state of this page, so the tiebreak is
+  // what orders most of it.
+  return views.sort((a, b) => b.txCount - a.txCount || byCodepoint(a.name, b.name));
 }
 
 /** One address by name, or `undefined` when no post ever sent to that name. */

@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parsePost } from '../chain/post';
+import { byCodepoint } from '../chain/seal';
 import { getPendingBlock, getPosts } from './chain-data';
 
 /**
@@ -86,8 +87,10 @@ export function getDrafts(draftsDir: string = DRAFTS_DIR, postsDir: string = POS
 
   // Newest first, the same order the chain reads in (§9). Ties broken on slug
   // so two drafts written on one day do not swap places between builds with
-  // the directory order.
-  return drafts.sort((a, b) => b.date.localeCompare(a.date) || a.slug.localeCompare(b.slug));
+  // the directory order — by codepoint, because `localeCompare` reads the
+  // machine's `LC_ALL` and two drafts whose slugs start `ch-` and `h-` swap
+  // under a Czech collation (see `byCodepoint` in `src/chain/seal.ts`).
+  return drafts.sort((a, b) => byCodepoint(b.date, a.date) || byCodepoint(a.slug, b.slug));
 }
 
 /**

@@ -81,8 +81,17 @@ export function txIdentity(tx: Transaction): string {
  * en-US locale `"Beta".localeCompare("alpha")` is +1. Two posts sharing a date
  * would then order differently on a different machine, changing the Merkle
  * root and the block hash. Ordering must depend on nothing but the input.
+ *
+ * Exported because the rule is not the sealer's: **every** ordering this
+ * project renders has to depend on nothing but its input, or two machines build
+ * different bytes from one chain. `src/site/` reached for `localeCompare` in
+ * four places, and the measurement is the same one this comment predicts —
+ * `'…-ä'.localeCompare('…-z')` is -1 under `en_US.UTF-8` and `vi_VN.UTF-8` and
+ * **+1** under `sv_SE.UTF-8`, while `<` is stable at -1 in all three. So the
+ * comparator lives here, once, rather than being re-derived per module with a
+ * comment claiming determinism it does not have.
  */
-const byCodepoint = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+export const byCodepoint = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 function orderWithinBlock(txs: Transaction[]): Transaction[] {
   const posts = txs.filter((t) => t.type !== 'amendment');

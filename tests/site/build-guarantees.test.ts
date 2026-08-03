@@ -1,6 +1,6 @@
-import { describe, it, expect } from 'vitest';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { beforeAll, describe, it, expect } from 'vitest';
+import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { join, relative } from 'node:path';
 import {
   sandboxRepo,
   buildSandbox,
@@ -471,4 +471,130 @@ describe('a post that declares no research hours', () => {
       'the block card printed a research figure the author never declared',
     ).not.toMatch(/\d+\.\d+ giờ/);
   }, 120_000);
+});
+
+/* ------------------------------------------------------------------ *
+ * One chain, two machines
+ * ------------------------------------------------------------------ */
+
+/**
+ * A collation that disagrees with codepoint order on Vietnamese slugs.
+ *
+ * Czech treats `ch` as one letter sorting *after* `h`, so `chuoi-khoi` collates
+ * after `ham-bam` there and before it everywhere else — and `ch` is an
+ * extremely ordinary way for a Vietnamese slug to start. It is one of several:
+ * `'…-ä'.localeCompare('…-z')` is -1 under `en_US.UTF-8` and `vi_VN.UTF-8` and
+ * +1 under `sv_SE.UTF-8`. `LC_ALL` is what selects between them, and
+ * `String.prototype.localeCompare` with no locale argument reads it.
+ */
+const OTHER_COLLATION = 'cs_CZ.UTF-8';
+
+/**
+ * Two posts sharing one date, whose slugs are exactly that disagreement, and
+ * two drafts and two tag addresses that repeat it on the other two surfaces
+ * that break ties by name.
+ */
+const TIED_DATE = '2026-07-20';
+const TIED = [
+  { slug: `${TIED_DATE}-chuoi-khoi`, title: 'Chuỗi khối', tag: 'chuoi' },
+  { slug: `${TIED_DATE}-ham-bam`, title: 'Hàm băm', tag: 'ham' },
+] as const;
+const TIED_DRAFTS = [
+  { slug: '2026-09-01-chua-viet', title: 'Chưa viết xong' },
+  { slug: '2026-09-01-hoan-thanh', title: 'Hoàn thành sau' },
+] as const;
+
+function postFile(title: string, date: string, tag: string): string {
+  return `---\ntitle: "${title}"\ndate: ${date}\ntags: [${tag}]\nresearch: 1.0\n---\n\nMột đoạn văn ngắn để có thân bài.\n`;
+}
+
+/** Every file under `dir`, as bytes, keyed by its path relative to `dir`. */
+function treeOf(dir: string): Map<string, Buffer> {
+  const out = new Map<string, Buffer>();
+  for (const entry of readdirSync(dir, { recursive: true, withFileTypes: true })) {
+    if (!entry.isFile()) continue;
+    const path = join(entry.parentPath, entry.name);
+    out.set(relative(dir, path), readFileSync(path));
+  }
+  return out;
+}
+
+/**
+ * §14 — the same chain builds the same bytes anywhere.
+ *
+ * The suite already asserts that two consecutive builds agree, and they did
+ * while four sorts under `src/site/` broke their ties with `localeCompare`:
+ * same machine, same `LC_ALL`, same answer. What that cannot see is the author
+ * building on one machine and a CI box or a second contributor building on
+ * another — the feed's item order, `/mempool`'s draft order and `/address`'s
+ * list order all flip, and `dist/` stops being a function of the ledger.
+ *
+ * So the second build here runs under a different collation and the **whole
+ * output tree** is compared, not one document: this is a property of the build,
+ * and naming the three pages known to be affected today would leave the fourth
+ * one to be found by whoever it happens to.
+ *
+ * Nothing else in the build may read the environment either, which this states
+ * in the same breath — a locale-formatted number or date anywhere would fail it
+ * just as loudly, and correctly so.
+ */
+describe('a build depends on the chain, not on the machine that runs it', () => {
+  let dir = '';
+  let first = new Map<string, Buffer>();
+  let second = new Map<string, Buffer>();
+
+  beforeAll(() => {
+    dir = sandboxRepo({ content: 'fixture' });
+    for (const { slug, title, tag } of TIED) {
+      writeFileSync(join(dir, 'content/posts', `${slug}.md`), postFile(title, TIED_DATE, tag));
+    }
+    for (const { slug, title } of TIED_DRAFTS) {
+      writeFileSync(join(dir, 'content/drafts', `${slug}.md`), postFile(title, '2026-09-01', 'nhap'));
+    }
+    const chain = chainBuildSandbox(dir, '2026-08-05');
+    if (chain.status !== 0) throw new Error(`the sandbox chain:build failed:\n${chain.output}`);
+
+    const one = buildSandbox(dir);
+    if (one.status !== 0) throw new Error(`the first build failed:\n${one.output}`);
+    first = treeOf(join(dir, 'dist'));
+
+    const two = buildSandbox(dir, { LC_ALL: OTHER_COLLATION, LANG: OTHER_COLLATION });
+    if (two.status !== 0) {
+      throw new Error(`the build under ${OTHER_COLLATION} failed:\n${two.output}`);
+    }
+    second = treeOf(join(dir, 'dist'));
+  }, 600_000);
+
+  it('holds a tie that a locale-sensitive comparison would order differently', () => {
+    // Anti-vacuity, and the only assertion here that is allowed to mention a
+    // locale by name: without a tie whose two spellings actually disagree
+    // across collations, the comparison below passes for a build that reads
+    // `LC_ALL` on every page.
+    const [a, b] = [TIED[0].slug, TIED[1].slug];
+    const codepoint = a < b ? -1 : 1;
+    // `Intl.Collator` with an explicit locale, so this measurement does not
+    // depend on the environment *this* process happens to have.
+    expect(Math.sign(new Intl.Collator('cs-CZ').compare(a, b))).not.toBe(codepoint);
+    expect(Math.sign(new Intl.Collator('en-US').compare(a, b))).toBe(codepoint);
+
+    // And the tie is really in the built output, on the surface whose ordering
+    // rule the finding was about.
+    const feed = first.get('rss.xml')?.toString('utf8') ?? '';
+    expect(feed, 'the sandbox feed does not carry the tied posts').toContain(a);
+    expect(feed).toContain(b);
+    // Descending, because the feed reads newest first and breaks a date tie the
+    // same way round (`newestFirst`): `ham-bam` before `chuoi-khoi`.
+    expect(feed.indexOf(b), 'the feed did not order the tie by codepoint').toBeLessThan(
+      feed.indexOf(a),
+    );
+  });
+
+  it('writes byte-identical output under a different collation', () => {
+    expect([...second.keys()].sort()).toEqual([...first.keys()].sort());
+    expect(first.size, 'the build wrote nothing to compare').toBeGreaterThan(1);
+    const differing = [...first.keys()].filter(
+      (name) => !first.get(name)!.equals(second.get(name) ?? Buffer.alloc(0)),
+    );
+    expect(differing, `${differing.length} file(s) differ under ${OTHER_COLLATION}`).toEqual([]);
+  });
 });
