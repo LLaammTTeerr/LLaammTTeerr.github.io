@@ -40,6 +40,57 @@ export function getChain(): Chain {
   return cached;
 }
 
+/**
+ * §7 — the committed ledger's **bytes**, exactly as they sit in the repository.
+ *
+ * `/chain.json` publishes these unchanged, and byte identity is the property
+ * that makes publishing them worth anything: a reader who fetches the route and
+ * diffs it against the committed `chain.lock.json` must get nothing back.
+ * Anything that went through `JSON.parse` and back out through `JSON.stringify`
+ * would serve a document that is *equivalent* and not *identical* — key order,
+ * indentation and number formatting are all free to differ — and a reader who
+ * saw that diff would reasonably conclude the published ledger was not the
+ * committed one.
+ *
+ * So: no parse, no re-serialisation, and `Uint8Array` rather than a decoded
+ * string, so not even a UTF-8 round trip sits between the committed file and
+ * the reader.
+ */
+export function ledgerBytes(): Uint8Array<ArrayBuffer> {
+  return fileBytes(LOCK_PATH);
+}
+
+/**
+ * §3.6 — the open block's bytes, or `null` when this build has no open block to
+ * publish.
+ *
+ * Gated on `getPendingBlock()` and not merely on the file existing, so the
+ * published document and the rendered site agree about whether there *is* an
+ * open block. A record left over from a different history (`isStale`) or one
+ * whose transaction hashes do not recompute is shown nowhere on the site, and
+ * publishing it at a route would hand a verifier an open block the pages beside
+ * it say nothing about.
+ */
+export function openBlockBytes(): Uint8Array<ArrayBuffer> | null {
+  if (getPendingBlock() === null) return null;
+  return fileBytes(PENDING_PATH);
+}
+
+/**
+ * A file's bytes, copied into a plain `ArrayBuffer`.
+ *
+ * The copy is the price of the type, not a choice about the data: `readFileSync`
+ * hands back a `Buffer` over Node's shared pool (`ArrayBufferLike`), and a
+ * `Response` body must be an `ArrayBufferView<ArrayBuffer>`. Nothing is decoded
+ * on the way through — that is the point of the two functions above.
+ */
+function fileBytes(path: string): Uint8Array<ArrayBuffer> {
+  const file = readFileSync(path);
+  const bytes = new Uint8Array(file.byteLength);
+  bytes.set(file);
+  return bytes;
+}
+
 /** §3.4 — the expected number of attempts to find a nonce at this difficulty. */
 export function expectedAttempts(difficulty: number): number {
   return 16 ** difficulty;
