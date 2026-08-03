@@ -68,10 +68,14 @@ describe('nav entries for routes that do not exist yet', () => {
     });
   }
 
-  it('keeps all six entries in their original order and wording', () => {
+  it('keeps every entry in its original order and wording', () => {
     // The fix's own constraint: the entries describe the site's shape and
-    // are not to be removed, reordered or reworded — only relinked.
+    // are not to be removed, reordered or reworded — only relinked. `About`
+    // is a later addition (the author's own address page, src/pages/about.astro)
+    // and belongs first: it is about the author, not the chain, so it reads
+    // as the entry point ahead of the explorer sections proper.
     expect(navItems(readDist('index.html'))).toEqual([
+      'About',
       'Blocks',
       'Transactions',
       'Addresses',

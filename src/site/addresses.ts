@@ -76,8 +76,14 @@ function seriesName(slug: string): string {
  * two posts sharing a date cannot swap places between builds. `getPosts()`
  * breaks no tie, and appending the open block to it would put unsealed posts
  * after sealed ones whatever their dates say.
+ *
+ * Exported for `src/pages/about.astro`: every post is sent FROM the author's
+ * own identity address (§3.7), so this same list — nothing tag- or
+ * series-specific about it — is that address's whole transaction history too.
+ * Shared rather than re-implemented, so the author page's ordering cannot
+ * drift from a tag page's.
  */
-function senders(): RecordedTx[] {
+export function senders(): RecordedTx[] {
   return [...getPosts(), ...getPendingPosts()].sort(
     (a, b) => b.date.localeCompare(a.date) || a.hash.localeCompare(b.hash),
   );

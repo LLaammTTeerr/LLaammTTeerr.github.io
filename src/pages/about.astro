@@ -1,0 +1,113 @@
+---
+import Base from '../layouts/Base.astro';
+import { CHAIN_CONFIG } from '../../chain.config';
+import { identityAddress } from '../chain/address';
+import { senders } from '../site/addresses';
+import { currentValue, getPendingPosts, researchHours, shortHash, txMetaLine } from '../site/chain-data';
+import { renderMarkdown } from '../site/markdown';
+import { getProfile } from '../site/profile';
+// `.card`, `.meta`, `.hash`, `.addr`, `.num`, `.txs`, `.bio` and
+// `.profile-links` are all in chain.css — reused verbatim (see the note on
+// `src/pages/address/[name].astro`) so this reads as the same chrome as
+// every other address page rather than a one-off. `.page-head` comes from
+// base.css, which `Base.astro` already loads on every route.
+import '../styles/chain.css';
+
+/**
+ * §3.7/§6 — the author's own address: `sha256("addr/1|identity|" + handle)`,
+ * and the same page as `/about` per §6 ("bio, verified social links, ...,
+ * transaction history"). This route builds that page; `/address/lamter.eth`
+ * itself is out of this task's file list and is not built here — nothing on
+ * the site links to it (`TxPanel` never links a transaction's `from`), so no
+ * dead link results from leaving it unbuilt.
+ *
+ * The address always comes from `identityAddress`, never from anything
+ * `content/profile.md` might also carry — a second, un-hash-checked copy of
+ * the handle is exactly the kind of drift §3.7 exists to prevent. `getProfile`
+ * supplies only the bio and links, which are not chain data at all.
+ *
+ * No clock is read here or under `src/site/` (§14): `senders()` reads the
+ * ledger plus the recorded open block, and `getProfile()` reads a file on
+ * disk, so the same inputs build the same page on any day.
+ */
+const address = await identityAddress(CHAIN_CONFIG.authorHandle);
+const profile = getProfile();
+const bioHtml = profile.bio.trim() === '' ? '' : await renderMarkdown(profile.bio);
+// §6: "renders a link only for a profile entry that declares a url" — an
+// entry with a label and no url stays named in the source and silent here,
+// never a link to nowhere.
+const links = profile.links.filter((l) => l.url !== '');
+
+// Every post is sent FROM the author's address (§3.7), so its whole
+// transaction history is the whole chain — `senders()` is exactly that list,
+// shared with the tag/series address pages so the ordering cannot drift
+// between them.
+const transactions = senders();
+const dates = transactions.map((t) => t.date).sort();
+const firstSeen = dates[0] ?? '';
+const lastSeen = dates[dates.length - 1] ?? '';
+
+// §3.8/§3.9 — the total declared research hours across every post's *current*
+// state. `currentValue` is `chain-data.ts`'s own resolution (an amendment's
+// `research`, or the original's `value`), the same one the tag and series
+// address pages total (`src/site/addresses.ts`) — reused here rather than
+// re-walked, so this figure and theirs cannot disagree about what a post's
+// current declared hours are.
+const totalHours = researchHours(transactions.reduce((sum, t) => sum + currentValue(t), 0));
+
+// §3.6 — the open block's posts are on the chain and belong in this list, but
+// their hashes are not sealed yet; marked with the same `~` TxPanel and the
+// tag/series address pages use, never presented with a sealed hash's authority.
+const pendingHashes = new Set(getPendingPosts().map((t) => t.hash));
+---
+
+<Base
+  title={`${CHAIN_CONFIG.authorName} — Blogchain`}
+  description={`Địa chỉ định danh của ${CHAIN_CONFIG.authorName} · ${transactions.length} giao dịch trên toàn chuỗi.`}
+>
+  <div class="page-head">
+    <h1>{CHAIN_CONFIG.authorName}</h1>
+    <span class="sub">Identity address</span>
+  </div>
+
+  {bioHtml ? <div class="bio" set:html={bioHtml} /> : null}
+
+  {links.length > 0 ? (
+    <ul class="profile-links">
+      {links.map((link) => <li><a href={link.url}>{link.label}</a></li>)}
+    </ul>
+  ) : null}
+
+  <article class="card" data-address={CHAIN_CONFIG.authorName} aria-label={`Address ${CHAIN_CONFIG.authorName}`}>
+    <div class="card-top">
+      <span class="per">Address</span>
+    </div>
+    <dl class="meta">
+      <dt>Address</dt>
+      <dd><span class="addr">{address}</span></dd>
+      <dt>Handle</dt><dd>{CHAIN_CONFIG.authorHandle}</dd>
+      <dt>Type</dt><dd>Identity</dd>
+      <dt>Txns</dt><dd><span class="num">{transactions.length}</span></dd>
+      <dt>Research</dt>
+      <dd>{totalHours ? <Fragment><span class="num">{totalHours}</span> giờ nghiên cứu</Fragment> : '—'}</dd>
+      <dt>First seen</dt><dd>{firstSeen}</dd>
+      <dt>Last seen</dt><dd>{lastSeen}</dd>
+    </dl>
+    <ul class="txs">
+      {transactions.map((tx) => (
+        <li>
+          <h2 class="t">{tx.slug ? <a href={`/tx/${tx.slug}`}>{tx.title}</a> : (tx.title ?? 'Amendment')}</h2>
+          <span class="g">
+            {pendingHashes.has(tx.hash) ? (
+              <span class="a-hash"><span class="tilde">~</span>{shortHash(tx.hash)}</span>
+            ) : (
+              <span class="hash">{shortHash(tx.hash)}</span>
+            )}
+            {' · '}{tx.date}{' · '}
+            {txMetaLine(tx)}
+          </span>
+        </li>
+      ))}
+    </ul>
+  </article>
+</Base>

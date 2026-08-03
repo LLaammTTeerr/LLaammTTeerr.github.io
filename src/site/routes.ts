@@ -21,6 +21,7 @@ export interface RouteEntry {
 }
 
 export const ROUTES: RouteEntry[] = [
+  { id: 'about', href: '/about', label: 'About', built: true },
   { id: 'blocks', href: '/blocks', label: 'Blocks', built: true },
   { id: 'tx', href: '/tx', label: 'Transactions', built: false },
   { id: 'address', href: '/address', label: 'Addresses', built: true },

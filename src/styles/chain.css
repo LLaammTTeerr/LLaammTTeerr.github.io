@@ -105,6 +105,24 @@ a.hash:hover { text-decoration-color: currentColor; }
   .meta { grid-template-columns: 1fr; }
 }
 
+/* §6 — the author's bio on /about, rendered through the same markdown
+   pipeline as a post body (src/site/markdown.ts), so it gets the same
+   HTML-stripping and URL guard. Deliberately not `article.post`: that class
+   centers itself with its own margin, which reads fine on a standalone post
+   page but would misalign with the full-width `.page-head`/`.card` either
+   side of it here. */
+.bio { max-width: 42rem; margin: 0 0 1.4rem; font-size: 1rem; line-height: 1.75; }
+.bio p { margin: 0 0 1rem; }
+.bio p:last-child { margin-bottom: 0; }
+.bio a { color: var(--acc); text-underline-offset: 3px; }
+
+/* §6 — the author's declared links on /about. Only entries `getProfile`
+   resolved a non-empty `url` for ever reach the template (see about.astro),
+   so this rule never has to distinguish a live link from a placeholder one. */
+.profile-links { list-style: none; display: flex; flex-wrap: wrap; gap: 0.5rem 0.9rem;
+  margin: 0 0 1.4rem; padding: 0; font-family: var(--mono); font-size: 0.8rem; }
+.profile-links a { color: var(--acc); text-underline-offset: 3px; }
+
 .a-hash { color: var(--dim); }
 .a-hash .tilde { color: var(--warn); font-weight: 700; }
 .stamp.open { color: var(--warn); border-color: var(--warn); border-style: dashed; }
