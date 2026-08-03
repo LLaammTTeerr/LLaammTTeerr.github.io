@@ -1004,9 +1004,29 @@ export interface NetworkStats {
 export function getStats(): NetworkStats {
   const chain = getChain();
   const tipHeight = chain.blocks.reduce((max, b) => Math.max(max, b.height), 0);
+  const open = getPendingBlock();
+
+  // One rule for the whole bar: a tile counts everything the chain records,
+  // including the open block, **except** where the value does not exist until a
+  // block is sealed.
+  //
+  // `height` is that exception. A height is assigned by mining; the open block's
+  // is a prediction that a size-split could still change, so the tile reports
+  // the sealed tip and `/blocks` shows the open block separately.
+  //
+  // `assets` is the other. A token id is minted at seal (§3.2b), so a pending
+  // post's image has a committed hash but no token yet, and this tile is the
+  // count `/assets` lists.
+  //
+  // Everything else counts the open block, because the rest of the site already
+  // treats a pending transaction as real: it has a true hash, a page, a URL and
+  // an address. The bar previously mixed the two — `Transactions` sealed-only
+  // beside an `Addresses` tile that included the open block — so two numbers
+  // describing one chain disagreed with nothing on the page explaining why.
   return {
     height: tipHeight,
-    transactions: chain.blocks.reduce((n, b) => n + b.txCount, 0),
+    transactions:
+      chain.blocks.reduce((n, b) => n + b.txCount, 0) + (open?.transactions.length ?? 0),
     difficulty: chain.difficulty,
     assets: chain.assets.length,
   };
