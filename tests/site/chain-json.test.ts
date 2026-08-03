@@ -195,74 +195,88 @@ describe('a build with an open block', () => {
     }
   }, 60_000);
 
-  /**
-   * The case that separates the rule from the file: an open block whose
-   * `prevHash` is not the tip's. `isStale` rejects it, `getPendingBlock()`
-   * returns `null`, and every page on the site says there is no open block —
-   * so the published document must say so too.
-   *
-   * Before the dev middleware, this is precisely where the two pipelines
-   * disagreed: `astro build` wrote no `dist/chain.pending.json` while
-   * `astro dev` answered 200 with the forged document. Asserting both surfaces
-   * against **one** forged file, in one place, is what keeps them from drifting
-   * again — neither half can be satisfied by a route that stopped working,
-   * because the honest document has to come back at the end without the server
-   * being restarted.
-   */
-  describe('an open block recorded against a history this chain does not have', () => {
-    const FORGED = `0x${'de'.repeat(32)}`;
-    let honest = '';
+});
 
-    beforeAll(() => {
-      honest = readFileSync(join(dir, PENDING), 'utf8');
-      writeFileSync(
-        join(dir, PENDING),
-        honest.replace(/"prevHash": "0x[0-9a-f]{64}"/, `"prevHash": "${FORGED}"`),
-        'utf8',
-      );
-      const built = buildSandbox(dir);
-      if (built.status !== 0) throw new Error(`the forged-block build failed:\n${built.output}`);
-    }, 600_000);
+/**
+ * The case that separates the rule from the file: an open block whose
+ * `prevHash` is not the tip's. `isStale` rejects it, `getPendingBlock()` returns
+ * `null`, and every page on the site says there is no open block — so the
+ * published document must say so too.
+ *
+ * This is precisely where the two pipelines disagreed before the dev
+ * middleware: `astro build` wrote no `dist/chain.pending.json` while
+ * `astro dev` answered 200 with the forged document, because Vite's static
+ * layer was serving the project-root file and the route never ran. Asserting
+ * both surfaces against **one** forged file, in one place, is what keeps them
+ * from drifting again — and neither half can be satisfied by a route that
+ * simply stopped working, because the honest document has to come back at the
+ * end without the server being restarted.
+ *
+ * Its own sandbox rather than the one above, even though that one already has a
+ * mined open block and a running server: an `astro build` inside a directory a
+ * dev server is watching clears `dist/` under it and can take the server's
+ * connection with it (`UND_ERR_SOCKET`, seen once in a full-suite run). A build
+ * and a dev server that must not disturb each other get one directory each.
+ */
+describe('an open block recorded against a history this chain does not have', () => {
+  const FORGED = `0x${'de'.repeat(32)}`;
+  let dir = '';
+  let honest = '';
+  let server: DevServer;
 
-    afterAll(() => {
-      // Whatever happened above, the sandbox goes back to the honest record and
-      // a build made from it, so nothing downstream inherits the forgery.
-      writeFileSync(join(dir, PENDING), honest, 'utf8');
-      buildSandbox(dir);
-    }, 600_000);
+  beforeAll(async () => {
+    dir = sandboxRepo({ content: 'fixture', chainAt: '2026-07-10' });
+    honest = readFileSync(join(dir, PENDING), 'utf8');
+    writeFileSync(
+      join(dir, PENDING),
+      honest.replace(/"prevHash": "0x[0-9a-f]{64}"/, `"prevHash": "${FORGED}"`),
+      'utf8',
+    );
+    const built = buildSandbox(dir);
+    if (built.status !== 0) throw new Error(`the forged-block build failed:\n${built.output}`);
+    server = await startDevSandbox(dir);
+  }, 600_000);
 
-    it('really is forged, and really is what the sandbox now holds', () => {
-      // Without this the two assertions below would both pass against a file
-      // the replace silently failed to touch.
-      expect(honest, 'the honest record already carried the forged hash').not.toContain(FORGED);
-      expect(readFileSync(join(dir, PENDING), 'utf8')).toContain(FORGED);
-    });
-
-    it('is left out of the build', () => {
-      expect(existsSync(join(dir, 'dist/chain.pending.json'))).toBe(false);
-    });
-
-    it('is refused in dev too, and comes back once the record is honest again', async () => {
-      const refused = await server.get('/chain.pending.json');
-      expect(
-        refused.status,
-        `dev published an open block the build refuses:\n${server.output()}`,
-      ).toBe(404);
-      expect(await refused.text(), 'dev served the forged document in the 404 body').not.toContain(
-        FORGED,
-      );
-
-      // Restored without restarting the server: otherwise a route that had
-      // simply stopped answering would satisfy the assertion above.
-      writeFileSync(join(dir, PENDING), honest, 'utf8');
-      const restored = await server.get('/chain.pending.json');
-      expect(
-        restored.status,
-        `the open block did not come back after being restored:\n${server.output()}`,
-      ).toBe(200);
-      expect(await restored.text()).toBe(honest);
-    }, 60_000);
+  afterAll(async () => {
+    await server?.stop();
   });
+
+  it('really is forged, and really is what the sandbox now holds', () => {
+    // Without this the two assertions below would both pass against a file the
+    // replace silently failed to touch — and against a sandbox that recorded no
+    // open block at all.
+    expect(honest, 'the sandbox mined no open block to forge').not.toBe('');
+    expect(honest, 'the honest record already carried the forged hash').not.toContain(FORGED);
+    expect(readFileSync(join(dir, PENDING), 'utf8')).toContain(FORGED);
+  });
+
+  it('is left out of the build', () => {
+    expect(existsSync(join(dir, 'dist/chain.pending.json'))).toBe(false);
+    // And the ledger beside it is unaffected: refusing the open block is not
+    // the same as refusing to publish.
+    expect(existsSync(join(dir, 'dist/chain.json'))).toBe(true);
+  });
+
+  it('is refused in dev too, and comes back once the record is honest again', async () => {
+    const refused = await server.get('/chain.pending.json');
+    expect(
+      refused.status,
+      `dev published an open block the build refuses:\n${server.output()}`,
+    ).toBe(404);
+    expect(await refused.text(), 'dev served the forged document in the 404 body').not.toContain(
+      FORGED,
+    );
+
+    // Restored without restarting the server: otherwise a route that had simply
+    // stopped answering would satisfy the assertion above.
+    writeFileSync(join(dir, PENDING), honest, 'utf8');
+    const restored = await server.get('/chain.pending.json');
+    expect(
+      restored.status,
+      `the open block did not come back after being restored:\n${server.output()}`,
+    ).toBe(200);
+    expect(await restored.text()).toBe(honest);
+  }, 60_000);
 });
 
 describe('a build with nothing open', () => {
