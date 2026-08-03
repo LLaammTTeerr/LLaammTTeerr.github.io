@@ -53,7 +53,9 @@ describe('stats bar consistency', () => {
     // invariant is that the pending post is counted by both: its tag has an
     // address page, and the Transactions tile counted the post itself above.
     expect(existsSync(join(dir, 'dist/address/tam-thoi.tag/index.html'))).toBe(true);
-  });
+    // Each of these drives `chain:build` and a full `astro build` in a sandbox
+    // copy; vitest's 5s default is not close to enough.
+  }, 60_000);
 
   it('keeps Chain height on the sealed tip, because a height is minted not predicted', () => {
     // The deliberate exception to the rule above: the open block's height is a
@@ -72,5 +74,5 @@ describe('stats bar consistency', () => {
     const built = buildSandbox(dir);
     expect(built.status, built.output).toBe(0);
     expect(tile(readFileSync(join(dir, 'dist/index.html'), 'utf8'), 'Chain height')).toBe(tip);
-  });
+  }, 60_000);
 });
