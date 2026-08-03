@@ -1,4 +1,5 @@
 ---
+import { FEED_TITLE } from '../site/feed';
 import { PREFS_INLINE_SCRIPT } from '../site/prefs-script';
 import { ROUTES } from '../site/routes';
 import Preferences from '../components/Preferences.astro';
@@ -27,6 +28,16 @@ const { title, description = 'Blog của lamter, hiển thị như một trình 
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title}</title>
     <meta name="description" content={description} />
+    {/*
+      Feed autodiscovery. `/rss.xml` gets no nav entry — `src/site/routes.ts`
+      lists the site's *sections*, and a feed is a file a reader subscribes to,
+      not a page they visit; a nav link labelled "RSS" opens raw XML in a
+      browser tab. This is how an aggregator is actually meant to find it, and
+      it is what makes the feed reachable from every page at once. Relative, so
+      it stays correct in dev and behind the placeholder `site`; the absolute
+      urls that RSS requires live inside the document, built from `site`.
+    */}
+    <link rel="alternate" type="application/rss+xml" title={FEED_TITLE} href="/rss.xml" />
     <script is:inline set:html={PREFS_INLINE_SCRIPT} />
   </head>
   <body>
