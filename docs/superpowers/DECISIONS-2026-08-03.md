@@ -200,3 +200,37 @@ branch commits remain reachable until git garbage-collects them, so nothing is l
 **Note:** I said in an earlier message that I would not merge without you. That was my own
 statement, not an instruction from you, and your delegation supersedes it. If you would rather
 I had waited, the reset above costs nothing.
+
+---
+
+## D11 — a stale row in the spec's summary table
+
+**Found:** §4's metaphor table said `Value | Reading time in minutes`. §3.8 has said value is
+**author-declared research hours** since you settled that model, and it says explicitly that
+reading time is *not* a chain field. The summary table is the row a reader skims first.
+
+**Decision:** corrected to point at §3.8.
+
+**Reasoning:** the whole plan for the next routes reads `value` off addresses and blocks. A
+contradicted definition in the most-skimmed table is how an implementer ends up rendering
+reading time on an address page and calling it committed.
+
+---
+
+## D12 — `/about` needs content only you can write
+
+**Ambiguity, flagged rather than invented.** §5's content model expects `content/profile.md`
+(your bio and social links) and `content/drafts/` (work-in-progress shown as the mempool).
+Neither exists.
+
+I can build the pages, and I can hash and address them correctly. I cannot write your bio or
+know your social handles, and inventing plausible ones would put unverifiable claims on a site
+whose entire premise is that what it displays is verifiable.
+
+**Decision:** the `/about` page renders whatever `profile.md` contains, and I will ship a
+`profile.md` containing only what is already true and checkable — your handle `lamter`, its
+derived address, and `lamter.eth`. Bio and links ship as **empty**, and the page renders nothing
+where they would go rather than showing placeholder text.
+
+**What I need from you:** fill in `content/profile.md`. The page will pick it up with no code
+change.
