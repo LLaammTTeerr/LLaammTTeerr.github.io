@@ -234,3 +234,42 @@ where they would go rather than showing placeholder text.
 
 **What I need from you:** fill in `content/profile.md`. The page will pick it up with no code
 change.
+
+---
+
+## D13 — the homepage's "Addresses" count was never hash-covered
+
+**Found:** the canonical form is `title, date, tags, series, research, from, assets, body`.
+**`to` is not in it**, so no hash covers it — yet `getStats().addresses` builds the homepage's
+address count from `tx.to`. A tampered lock could change `to` and `verifyChain` would still
+report the chain clean.
+
+**Decision:** derive the count from `tags`/`series`, which *are* in the canonical form. Same
+derivation the new address pages already use.
+
+**Reasoning:** this is the third time this project has displayed a number whose label claimed
+more than the field could support (two stats tiles were caught in an earlier review). §14 says
+every displayed field must be a committed one; `to` is convenient but unverified.
+
+**Note for later:** `to` is still useful as a lookup index — it just cannot be the source of a
+displayed count. Nothing else reads it today.
+
+---
+
+## D14 — an amended post's research did not move its address total
+
+**Found:** an address's "value received" sums `Transaction.value`, but `value` is `0` on an
+amendment by design (so block aggregation does not double-count) and the declared hours live in
+`research`. So raising a post's research figure in an amendment left the address total showing
+the original number.
+
+**Decision:** resolve each post's latest recorded state and sum that, reusing the resolution
+`getPostContent` already does rather than writing a second one that can drift.
+
+**Reasoning:** it is the same defect as D8 at a different surface — a page displaying a total
+that does not describe the current committed state. I explicitly ruled out "fixing" it by
+changing the zeros in `src/chain/`: those are deliberate and correct, and the bug is in the view.
+
+**Pattern worth noticing:** three of the last four defects have been the same shape — a page
+showing a *sealed original* where the chain's current state is an *amendment*. Any surface that
+reads a post's metadata needs checking against that.
