@@ -417,7 +417,7 @@ RSS, and the search index — they are ledger entries, not new writing.
 | Previous hash | Genuine chain link — tamper-evident history |
 | Address `0x…` | A tag or series; posts send to it |
 | Smart contract | One of the author's projects; "verified source" links to GitHub |
-| Author's address page | The about-me page |
+| Author's address page | The about-me page (prose off-chain — see §5.1) |
 | Mempool | Drafts and works in progress |
 | Gas used | Word count |
 | Value | Hours of research the author declares (§3.8) |
@@ -435,6 +435,26 @@ content/
   contracts/cf-mcp.md                  projects
   profile.md                           author address page
 ```
+
+### 5.1 What is on the chain, and what is not
+
+Only `content/posts/` becomes transactions. `profile.md`, `content/drafts/` and
+`content/contracts/` are read at build time and rendered; nothing hashes them.
+
+For drafts this is the definition — §3.6 puts the mempool outside the chain on
+purpose. For the profile it is a deliberate choice: a bio is identity metadata
+rather than a claim about the chain's contents, and a blog's about page does not
+need the tamper-evidence its published writing does.
+
+**Anything not on the chain must say so where it is displayed.** The risk is
+specific: `/about` is framed as an identity *address page* and surrounds its
+prose with a real address, a real transaction count and real research hours, so
+unlabelled prose inherits an authority nothing gave it. The same applies to
+`/contracts` when it is built.
+
+The existing vocabulary carries this — the em dash for a field that does not
+exist, and the mempool's `chưa lên chuỗi` for a record the chain never saw. Use
+it rather than inventing a third formulation.
 
 Post frontmatter, validated by an Astro Content Collections schema:
 
