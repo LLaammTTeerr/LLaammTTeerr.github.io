@@ -232,8 +232,14 @@ whose entire premise is that what it displays is verifiable.
 derived address, and `lamter.eth`. Bio and links ship as **empty**, and the page renders nothing
 where they would go rather than showing placeholder text.
 
-**What I need from you:** fill in `content/profile.md`. The page will pick it up with no code
-change.
+**RESOLVED by you mid-session:** *"the about and profile can be anything now, I'll add or edit it
+later on."* So the page ships with ordinary filler — a short Vietnamese bio describing what you
+said you would write about, and link entries with obvious placeholder URLs you swap. The page
+picks up your edits with no code change.
+
+One thing I still did not do: your email address is visible to me from the environment, and I did
+not put it on a public page you did not ask me to put it on. Add it yourself if you want it
+there.
 
 ---
 
@@ -273,3 +279,21 @@ changing the zeros in `src/chain/`: those are deliberate and correct, and the bu
 **Pattern worth noticing:** three of the last four defects have been the same shape — a page
 showing a *sealed original* where the chain's current state is an *amendment*. Any surface that
 reads a post's metadata needs checking against that.
+
+---
+
+## D15 — the homepage tiles count sealed history only
+
+**Found, left alone:** a tag introduced by a post in the open block gets an address page
+immediately, but the homepage's "Addresses" tile does not count it until the block seals — the
+tile read 2 against 3 live pages in a sandbox.
+
+**Decision:** left as is, recorded here.
+
+**Reasoning:** every other tile behaves the same way (`height`, `transactions` and `assets` are
+all sealed-only), so this is a coherent rule rather than a bug in one place. Widening it changes
+four homepage numbers at once, which is a homepage decision, not an address decision.
+
+**What would make it fully honest:** label the tiles as describing the sealed chain, or count the
+open block in all four. That belongs to whoever next owns the homepage — flagging it so it is a
+choice rather than an oversight.
