@@ -282,22 +282,13 @@ describe('getStats', () => {
     expect(getAssets()).toHaveLength(0);
   });
 
-  it('counts distinct addresses across from and to', () => {
-    const seen = new Set<string>();
-    for (const b of getChain().blocks) {
-      for (const t of b.transactions) {
-        seen.add(t.from);
-        for (const to of t.to) seen.add(to);
-      }
-    }
-    expect(getStats().addresses).toBe(seen.size);
-  });
-
-  // Pins a concrete number from the committed ledger rather than
-  // re-deriving it with the same walk as the implementation — a shared
-  // conceptual mistake in both would otherwise pass silently.
-  it('counts exactly the two addresses in the committed ledger', () => {
-    expect(getStats().addresses).toBe(2);
+  it('carries no address count of its own', () => {
+    // The count lives in `addressIndex()` (src/site/addresses.ts), which also
+    // builds the rows on `/address`. It was here, with its own walk over the
+    // sealed blocks, and the two pages disagreed — `tests/site/addresses.test.ts`
+    // and `tests/site/homepage.test.ts` hold the assertions now. A field
+    // restored here would be a second derivation again, and this says so.
+    expect(getStats()).not.toHaveProperty('addresses');
   });
 
   it('reports the chain difficulty', () => {

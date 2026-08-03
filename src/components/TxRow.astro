@@ -1,0 +1,65 @@
+---
+import type { ResolvedPost } from '../site/chain-data';
+import { postMetaLine, shortHash } from '../site/chain-data';
+// `.txs` and its `.t` / `.g` children are BlockCard's list classes
+// (src/styles/chain.css), reused verbatim so an address list reads as the same
+// chrome as a block's transaction list rather than drifting into a second style.
+import '../styles/chain.css';
+
+/**
+ * One post as a row in an address's transaction list — `/address/<name>` and
+ * `/about`.
+ *
+ * **The prop is a `ResolvedPost` and nothing else, and that is the point.**
+ * Both pages used to hold a `RecordedTx` and print its title, its hash and its
+ * ledger meta line off it, which after an amendment is the state the chain has
+ * superseded — while the header six lines above totalled the current state. One
+ * card, two answers. That was the fifth time on this project that a surface
+ * holding a raw ledger entry printed a field off it.
+ *
+ * A `Transaction` cannot be passed here: `ResolvedPost` carries a `resolved`
+ * brand no ledger type has, so `astro check` (part of `npm run typecheck`)
+ * rejects the call rather than the reader discovering it. A sixth surface that
+ * wants a post row imports this component and gets the resolution for free; a
+ * sixth surface that hand-rolls one has to defeat the type system first.
+ *
+ * `tests/site/tx-rendering.test.ts` holds the other half of the guard: the list
+ * of files allowed to render a ledger row at all.
+ */
+interface Props {
+  post: ResolvedPost;
+}
+const { post } = Astro.props;
+
+// §3.6 — a hash the chain has not sealed carries the same `~` marker TxPanel
+// uses, never a sealed hash's authority ("the single most misleading thing this
+// site could display"). `post.pending` describes the *governing* record: an
+// amendment waiting in the open block leaves a sealed post's row unsealed
+// again, because the hash on the row is the amendment's.
+const { pending, amendedIn } = post;
+---
+
+<li>
+  <h2 class="t"><a href={`/tx/${post.slug}`}>{post.title}</a></h2>
+  <span class="g">
+    {pending ? (
+      <span class="a-hash"><span class="tilde">~</span>{shortHash(post.hash)}</span>
+    ) : (
+      <span class="hash">{shortHash(post.hash)}</span>
+    )}
+    {' · '}{post.date}{' · '}
+    {/* §3.8/§3.9 — the word count and hours of the record whose hash is
+        printed to the left of them, so the row is internally consistent and
+        sums to the total this card's header states. */}
+    {postMetaLine(post)}
+    {amendedIn !== null ? (
+      /* §3.9 — the hash above is an amendment's, and `/blocks` and the sealed
+         block's own page still show the original's for this post. Say so, and
+         point at where the amendment sits, so the two are reconcilable rather
+         than simply different. A block number is named only once the amendment
+         has sealed: the open block's height is a prediction a size split can
+         still change. */
+      <Fragment>{' · '}<a class="amend" href={amendedIn.sealed ? `/block/${amendedIn.height}` : '/blocks'}>đã sửa</a></Fragment>
+    ) : null}
+  </span>
+</li>

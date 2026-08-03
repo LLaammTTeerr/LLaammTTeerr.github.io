@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { parseRules, selectorParts } from './css';
-import { DIST, distPages, internalHrefs, readDist, resolvesIn } from './dist';
+import { DIST, distPages, internalHrefs, readDist, resolvesIn, rowFor } from './dist';
 import { getAddresses } from '../../src/site/addresses';
-import { getPosts, researchHours, shortHash } from '../../src/site/chain-data';
+import { getPosts, postMetaLine, researchHours, shortHash } from '../../src/site/chain-data';
 
 /**
  * `/address` and `/address/[name]` as the build actually ships them.
@@ -103,6 +103,38 @@ describe('an address page', () => {
       expect(card).toContain(shortHash(tx.hash));
       expect(card, `${tx.slug}'s full hash appears untruncated in a list`).not.toContain(tx.hash);
     }
+  });
+
+  it("states each row's word count and research hours, from the chain's current record", async () => {
+    // The line that carried the Critical, and that nothing asserted: deleting
+    // `{txMetaLine(tx)}` from this page and from `/about` left 704/704 green.
+    // It is also where the card used to contradict its own header — the total
+    // above resolved amendments (§3.9) and these rows did not.
+    const meta = await view('meta.tag');
+    const card = cardOf(pageFor('meta.tag'));
+    expect(meta.transactions.length, 'meta.tag received nothing to list').toBeGreaterThan(0);
+    for (const post of meta.transactions) {
+      const row = rowFor(card, post.slug);
+      expect(row, `${post.slug} has no row on its address page`).not.toBeNull();
+      expect(row!, `${post.slug}'s row states no figures`).toContain(postMetaLine(post));
+      // Anchored to the real numbers too, so a `postMetaLine` that returned a
+      // constant would still have to return the right one.
+      expect(row!).toContain(`${post.gasUsed} từ`);
+      expect(row!).toContain(`${researchHours(post.value)} giờ`);
+    }
+  });
+
+  it('adds up: the rows sum to the total the card header states', async () => {
+    // §3.8. The card printed `Received 15.0` over rows summing to 6.5 after an
+    // amendment. Stated as arithmetic over what the page actually rendered, so
+    // it is the *card* that has to be consistent, not two functions.
+    const meta = await view('meta.tag');
+    const card = cardOf(pageFor('meta.tag'));
+    const hours = [...card.matchAll(/· ([\d.]+) giờ<\/span>/g)].map((m) => Number(m[1]!));
+    expect(hours.length, 'no row on the card states an hours figure').toBe(meta.transactions.length);
+    const stated = /<dt>Received<\/dt><dd><span class="num">([\d.]+)<\/span>/.exec(card);
+    expect(stated, 'the card states no Received total').not.toBeNull();
+    expect(hours.reduce((a, b) => a + b, 0)).toBeCloseTo(Number(stated![1]!), 5);
   });
 
   it('lists no transaction that sent somewhere else', async () => {

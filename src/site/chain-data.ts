@@ -239,6 +239,13 @@ export interface PostContent {
   value: number;
   /** §3.9 — null when nothing amends this post. */
   amendedIn: AmendedIn | null;
+  /**
+   * The same post as every other surface sees it (see `ResolvedPost`). This is
+   * what the page hands to `TxPanel`; the loose fields above are kept because
+   * this function has verified `body` against the chain and they name what it
+   * verified.
+   */
+  post: ResolvedPost;
 }
 
 /**
@@ -304,16 +311,175 @@ function valueGiven(tx: RecordedTx, amendment: { tx: RecordedTx } | null): numbe
 }
 
 /**
- * §3.8/§3.9 — the hours the chain's newest record for `tx` declares.
+ * §3.9 — a post, resolved to the state the chain currently asserts about it.
  *
- * The same resolution `getPostContent` performs, over the same
- * `latestAmendment`, so a total built from this cannot drift from the figure
- * the post's own page prints beside its text. Unlike `getPostContent` this
- * touches no file on disk and throws nothing: it answers from the ledger and
- * the recorded open block alone, which is all an aggregate needs.
+ * **This is the only shape a post-centric surface may render.** Five times on
+ * this project a page has printed a field off the sealed `post` transaction
+ * while the chain's newest word on that post was an amendment: the transaction
+ * panel, the address total, the gas figure, the research hours, and finally the
+ * transaction rows on `/address/<tag>` and `/about` — where the header total
+ * and the rows of one card contradicted each other. Every one of those was a
+ * surface holding a `Transaction` and reading a field off it.
+ *
+ * So the resolution is not something a surface remembers to call: it is a
+ * *type*. `resolved: true` is a brand no `Transaction` and no `RecordedTx`
+ * carries, so a component whose prop is a `ResolvedPost` cannot be handed a raw
+ * ledger entry — `astro check` (`npm run typecheck`) rejects it. `TxPanel` and
+ * `TxRow` both take exactly this and nothing else.
+ *
+ * The distinction that survives: a **block** view still renders `RecordedTx`,
+ * because a block card describes what that block sealed and an amendment
+ * appears in it as its own row. `/blocks` naming the original's title under
+ * block #N is a true statement about block #N. An address card's rows are not
+ * block-scoped — they are "the posts that sent here", under a header totalling
+ * those posts' current hours — so they resolve.
  */
-export function currentValue(tx: RecordedTx): number {
-  return valueGiven(tx, latestAmendment(tx.hash));
+export interface ResolvedPost {
+  /** The brand. Present on nothing the ledger reader returns. */
+  readonly resolved: true;
+  slug: string;
+  /**
+   * The hash of the record that governs this post now — the newest
+   * amendment's, or the original's. This is the hash `/tx/<slug>` prints, and
+   * the one that commits to the title, gas and value beside it.
+   */
+  hash: Hex;
+  /**
+   * The original `post` transaction's hash — equal to `hash` when nothing
+   * amends it. This is what `/blocks` and the sealed block's own page still
+   * show, and what an amendment's `Amends` row names, so a reader arriving from
+   * either can reconcile the two.
+   */
+  originalHash: Hex;
+  /** The governing record's title; never the superseded one. */
+  title: string;
+  /**
+   * The publication date. Taken from the original: `detectAmendments` copies
+   * the original's `date` onto every amendment (§3.9), so this is the same
+   * value either way, and reading it from the original keeps the address
+   * lists' ordering and `firstSeen`/`lastSeen` independent of later edits.
+   */
+  date: string;
+  from: Hex;
+  /**
+   * The tags the chain's newest record declares — an amendment's when one
+   * supersedes the post. Both are hash-covered (`tags:` is in the `post/1` and
+   * the `amendment/1` canonical form alike), so this is what the post *is*
+   * filed under now, and it is what `/tx/<slug>` displays.
+   *
+   * Not the same thing as `publishedTags` below, and the difference is a real
+   * dead link this branch shipped: a tag added by an amendment is displayed
+   * here but has no address page, because §3.9 keeps the address graph at
+   * original publication. Anything **linking** a tag must check that the
+   * address exists — see `TxPanel.astro`.
+   */
+  tags: readonly string[];
+  series: string | null;
+  /**
+   * §3.7/§3.9 — the tag and series slugs this post actually *sent to*: the
+   * original transaction's.
+   *
+   * "An amendment's `to` stays empty even when tags change, so the tag address
+   * graph reflects original publication" (§3.9). `getAddresses()` groups on
+   * exactly these, so an amendment that renames a tag cannot mint an address no
+   * post ever sent to, nor charge its `research` to one.
+   */
+  publishedTags: readonly string[];
+  publishedSeries: string | null;
+  /** §3.2b — the governing record's asset hashes. */
+  assets: readonly Hex[];
+  /** The governing record's `contentHash` — what the body on disk must match. */
+  contentHash: Hex;
+  /**
+   * §3.8 — the word count of the body the chain currently vouches for, or
+   * `null` when it could not be re-derived.
+   *
+   * Never an amendment's recorded `gasUsed`, which §3.9 fixes at 0 so block
+   * aggregation cannot re-charge the original's.
+   */
+  gasUsed: number | null;
+  /** §3.8/§3.9 — the newest amendment's `research`, or the original's `value`. */
+  value: number;
+  /** §3.6 — true while the *governing* record is still in the open block. */
+  pending: boolean;
+  /** §3.9 — where the amendment sits, or `null` when nothing amends this post. */
+  amendedIn: AmendedIn | null;
+}
+
+/**
+ * The one walk. Every resolved field is decided here and nowhere else, from a
+ * post transaction and the amendment (if any) that supersedes it —
+ * `getPostContent` passes the amendment it has already found, `resolvePost`
+ * finds one. Two entry points, one resolution; there is no third.
+ */
+function resolveWith(
+  tx: RecordedTx,
+  amendment: (AmendedIn & { tx: RecordedTx }) | null,
+  originalPending: boolean,
+): ResolvedPost {
+  const governing = amendment === null ? tx : amendment.tx;
+  const slug = tx.slug ?? '';
+  return {
+    resolved: true,
+    slug,
+    hash: governing.hash,
+    originalHash: tx.hash,
+    title: governing.title ?? tx.title ?? slug,
+    date: tx.date,
+    from: tx.from,
+    tags: governing.tags,
+    series: governing.series,
+    publishedTags: tx.tags,
+    publishedSeries: tx.series,
+    assets: governing.assets,
+    contentHash: governing.contentHash,
+    // An unamended transaction's own `gasUsed` is already the word count of
+    // its body: for a sealed one `verifyBlock` checks the block's committed
+    // sum, and for a pending one `getPendingBlock` has re-derived it. An
+    // amendment's is the accounting zero, so the count has to come from the
+    // body its `contentHash` commits to.
+    gasUsed: amendment === null ? tx.gasUsed : wordCountOf(slug, governing.contentHash),
+    value: valueGiven(tx, amendment),
+    // An unamended post is pending exactly when the chain has not sealed it;
+    // an amended one is pending exactly when its newest amendment has not
+    // sealed, whatever the original did — the record on screen is the
+    // amendment (§3.6).
+    pending: amendment === null ? originalPending : !amendment.sealed,
+    amendedIn: amendment === null ? null : { height: amendment.height, sealed: amendment.sealed },
+  };
+}
+
+/** §3.9 — one post as the chain currently describes it. */
+export function resolvePost(tx: RecordedTx, originalPending: boolean): ResolvedPost {
+  return resolveWith(tx, latestAmendment(tx.hash), originalPending);
+}
+
+let resolvedCache: ResolvedPost[] | null = null;
+
+/**
+ * Every post on the chain — sealed and unsealed — resolved to its current
+ * state, in `getPosts()` order followed by the open block's.
+ *
+ * Memoized for the same reason `getChain()` is: a static build renders many
+ * pages from one ledger, and every address page would otherwise re-walk every
+ * block for every transaction it lists and re-read `chain.pending.json` each
+ * time. Nothing under `src/site/` may mutate the chain, so one resolution per
+ * build is the whole truth there is.
+ */
+export function resolvedPosts(): ResolvedPost[] {
+  if (resolvedCache === null) {
+    const pending = getPendingPosts();
+    resolvedCache = [
+      ...getPosts().map((t) => resolvePost(t, false)),
+      ...pending.map((t) => resolvePost(t, true)),
+    ];
+  }
+  return resolvedCache;
+}
+
+/** One resolved post by slug, or `undefined` when the chain has no such post. */
+export function resolvedPost(slug: string): ResolvedPost | undefined {
+  return resolvedPosts().find((p) => p.slug === slug);
 }
 
 /**
@@ -512,6 +678,12 @@ export async function getPostContent(
     contentHash: expected,
     tx,
     governing,
+    // The same resolution every other post-centric surface renders, built from
+    // the amendment this function has already walked for — so `/tx/<slug>`,
+    // `/address/<tag>` and `/about` cannot state different titles, hashes,
+    // word counts or hours for one post. `sealed === undefined` is exactly
+    // "the original is in the open block".
+    post: resolveWith(tx, amendment, sealed === undefined),
     // An unamended post is pending exactly when the chain has not sealed it;
     // an amended one is pending exactly when its newest amendment has not
     // sealed, whatever the original did. The stamp describes the transaction
@@ -614,10 +786,52 @@ function sealsOn(period: string): string {
 function derivedGas(tx: Transaction): number | null {
   if (tx.type === 'amendment') return 0;
   if (tx.slug === null) return null;
-  const path = join(POSTS_DIR, `${tx.slug}.md`);
+  return wordCountOf(tx.slug, tx.contentHash);
+}
+
+/**
+ * The word count of `content/posts/<slug>.md`, but only when that file hashes
+ * to `contentHash` — otherwise `null`.
+ *
+ * The rule `derivedGas` was written for, extracted so the amendment case can
+ * use it too: after an amendment the count has to come from the body the
+ * *amendment's* `contentHash` commits to, and the amendment carries no slug of
+ * its own. Never falls back to a recorded number; a figure that could not be
+ * re-derived is not a figure this site may print.
+ */
+function wordCountOf(slug: string, contentHash: Hex): number | null {
+  if (slug === '') return null;
+  const path = join(POSTS_DIR, `${slug}.md`);
   if (!existsSync(path)) return null;
   const body = normalizeBody(parsePost(path, readFileSync(path, 'utf8')).body);
-  return sha256HexSync(body) === tx.contentHash ? wordCount(body) : null;
+  return sha256HexSync(body) === contentHash ? wordCount(body) : null;
+}
+
+/**
+ * §3.2b — every filename the bodies the chain *currently* vouches for
+ * reference, across every post on the chain.
+ *
+ * This is the set of `/assets/<file>` urls the site actually emits an
+ * `<img src>` for, so it is the only set of paths `dist` may serve
+ * (`src/site/asset-files.ts`). Read from each post's *governing* body: a file
+ * an amendment stopped referencing is no longer named by anything on the
+ * chain, and a file the chain never named is "not on the chain at all; it is
+ * just a file" (§3.2b).
+ *
+ * A body that does not hash to what the chain committed contributes nothing.
+ * That state fails the build at `getPostContent` with its own message; it must
+ * not be the thing that decides what gets published.
+ */
+export function referencedAssetNames(): Set<string> {
+  const names = new Set<string>();
+  for (const post of resolvedPosts()) {
+    const path = join(POSTS_DIR, `${post.slug}.md`);
+    if (!existsSync(path)) continue;
+    const body = normalizeBody(parsePost(path, readFileSync(path, 'utf8')).body);
+    if (sha256HexSync(body) !== post.contentHash) continue;
+    for (const file of referencedAssets(body)) names.add(file);
+  }
+  return names;
 }
 
 /**
@@ -639,8 +853,28 @@ function derivedGas(tx: Transaction): number | null {
  */
 export function txMetaLine(tx: RecordedTx): string {
   if (tx.type === 'amendment') return 'đính chính · gas và giờ đã tính ở bản gốc';
-  const hours = researchHours(tx.value);
-  return `${tx.gasUsed === null ? '—' : `${tx.gasUsed} từ`} · ${hours ? `${hours} giờ` : '—'}`;
+  return metaLine(tx.gasUsed, tx.value);
+}
+
+/**
+ * §3.8/§3.9 — the same line for a **post-centric** row, from the state the
+ * chain currently asserts (`ResolvedPost`) rather than from a ledger entry.
+ *
+ * Separate from `txMetaLine` on purpose, and the separation is the fix for
+ * defect shape 1. `txMetaLine` describes a transaction *inside a block*, where
+ * the sealed figures are the truth about that block. A row on `/address/<tag>`
+ * or `/about` describes a **post**, under a header that totals those posts'
+ * current hours — so it must resolve, or the card contradicts itself. Handing
+ * one function both jobs is what let `/address/[name].astro` print `4.0` under
+ * a `15.0` header for a post the chain says is 12.5.
+ */
+export function postMetaLine(post: ResolvedPost): string {
+  return metaLine(post.gasUsed, post.value);
+}
+
+function metaLine(gasUsed: number | null, value: number): string {
+  const hours = researchHours(value);
+  return `${gasUsed === null ? '—' : `${gasUsed} từ`} · ${hours ? `${hours} giờ` : '—'}`;
 }
 
 /**
@@ -707,55 +941,29 @@ export interface NetworkStats {
    * would disagree with the block pages the moment the first one lands.
    */
   transactions: number;
-  addresses: number;
   difficulty: number;
   assets: number;
 }
 
+/**
+ * The homepage tiles.
+ *
+ * There is no `addresses` field here, and its absence is the fix for a page
+ * disagreeing with a page. The tile used to count `from` + `tags` + `series`
+ * over the **sealed** blocks with its own walk, while `/address` — headed
+ * *Addresses* too, one click away — listed what `src/site/addresses.ts`
+ * derives, which includes the open block. In a driven sandbox they read 5 and
+ * 4. Both numbers now come from `addressIndex()` in `src/site/addresses.ts`,
+ * which is also what builds the rows on the page, so the tile cannot claim a
+ * number the list contradicts: there is one derivation, not two that happen to
+ * match.
+ */
 export function getStats(): NetworkStats {
   const chain = getChain();
-
-  // §14 — every displayed field must be a committed one, and the homepage
-  // renders this under an "Addresses" tile.
-  //
-  // Counted from `from`, `tags` and `series`, and deliberately **not** from
-  // `to`. `to` appears in neither the `post/1` nor the `amendment/1` canonical
-  // form (src/chain/canonical.ts): it is derived from the tags, so it was never
-  // put in the form the transaction hash covers. Nothing therefore checks it —
-  // `verifyChain` reports a lock whose `to` has been rewritten as perfectly
-  // clean — and this tile was reading it, so a tampered ledger could have named
-  // any number of addresses that do not exist and none of the ones that do.
-  // The three fields used instead are all in the canonical form, so this count
-  // is as verifiable as the hashes beside it.
-  //
-  // It is also the same derivation `src/site/addresses.ts` uses to decide which
-  // address pages exist, so the tile cannot claim a number the pages contradict.
-  //
-  // Slugs rather than derived hex: §3.7 puts tags and series in a single `tag`
-  // domain, so distinct slugs are distinct addresses and a tag and a series
-  // that share a slug are one address (intended — see the note in
-  // `src/site/addresses.ts`). Deriving the digests would make this async and
-  // change no count. The two sets never overlap: an identity is `0x` + 40 hex,
-  // a topic is a slug.
-  const identities = new Set<string>();
-  const topics = new Set<string>();
-  for (const block of chain.blocks) {
-    for (const tx of block.transactions) {
-      identities.add(tx.from);
-      // §3.9 — "an amendment's `to` stays empty even when tags change, so the
-      // tag address graph reflects original publication". An amendment that
-      // renamed a tag must not mint an address no post ever sent to.
-      if (tx.type !== 'post') continue;
-      for (const tag of tx.tags) topics.add(tag);
-      if (tx.series !== null) topics.add(tx.series);
-    }
-  }
-
   const tipHeight = chain.blocks.reduce((max, b) => Math.max(max, b.height), 0);
   return {
     height: tipHeight,
     transactions: chain.blocks.reduce((n, b) => n + b.txCount, 0),
-    addresses: identities.size + topics.size,
     difficulty: chain.difficulty,
     assets: chain.assets.length,
   };

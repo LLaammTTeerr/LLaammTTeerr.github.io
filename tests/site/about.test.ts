@@ -4,9 +4,9 @@ import { join } from 'node:path';
 import { CHAIN_CONFIG } from '../../chain.config';
 import { identityAddress } from '../../src/chain/address';
 import { senders } from '../../src/site/addresses';
-import { currentValue, getPosts, researchHours, shortHash } from '../../src/site/chain-data';
+import { getPosts, postMetaLine, researchHours, shortHash } from '../../src/site/chain-data';
 import { parseRules, selectorParts } from './css';
-import { DIST, distPages, internalHrefs, readDist, resolvesIn } from './dist';
+import { DIST, distPages, internalHrefs, readDist, resolvesIn, rowFor } from './dist';
 import { buildSandbox, chainBuildSandbox, sandboxRepo } from './sandbox';
 
 /**
@@ -89,12 +89,38 @@ describe('the author address card', () => {
     const card = cardOf(page());
     expect(card).toContain(`<dt>Txns</dt><dd><span class="num">${txs.length}</span></dd>`);
 
-    const hours = researchHours(txs.reduce((sum, t) => sum + currentValue(t), 0));
+    const hours = researchHours(txs.reduce((sum, p) => sum + p.value, 0));
     if (hours === null) {
       expect(card).toContain('<dt>Research</dt><dd>—</dd>');
     } else {
       expect(card).toContain(`<dt>Research</dt><dd><span class="num">${hours}</span> giờ nghiên cứu</dd>`);
     }
+  });
+
+  it("states each row's word count and research hours, from the chain's current record", () => {
+    // Covered by nothing: replacing `{txMetaLine(tx)}` here and on
+    // `/address/[name]` — deleting every per-transaction figure from both
+    // surfaces — left 704/704 green, and that same line is where the card
+    // contradicted its own Research total after an amendment.
+    const card = cardOf(page());
+    const posts = senders();
+    expect(posts.length, 'the shipped ledger has no posts to check').toBeGreaterThan(0);
+    for (const post of posts) {
+      const row = rowFor(card, post.slug);
+      expect(row, `${post.slug} has no row on /about`).not.toBeNull();
+      expect(row!, `${post.slug}'s row states no figures`).toContain(postMetaLine(post));
+      expect(row!).toContain(`${post.gasUsed} từ`);
+      expect(row!).toContain(`${researchHours(post.value)} giờ`);
+    }
+  });
+
+  it('adds up: the rows sum to the Research total the card header states', () => {
+    const card = cardOf(page());
+    const hours = [...card.matchAll(/· ([\d.]+) giờ<\/span>/g)].map((m) => Number(m[1]!));
+    expect(hours.length, 'no row on the card states an hours figure').toBe(senders().length);
+    const stated = /<dt>Research<\/dt><dd><span class="num">([\d.]+)<\/span>/.exec(card);
+    expect(stated, 'the card states no Research total').not.toBeNull();
+    expect(hours.reduce((a, b) => a + b, 0)).toBeCloseTo(Number(stated![1]!), 5);
   });
 
   it('states first seen and last seen from the committed dates', () => {

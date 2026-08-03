@@ -1,12 +1,13 @@
 ---
 import Base from '../../layouts/Base.astro';
-import { getAddresses } from '../../site/addresses';
+import { addressIndex } from '../../site/addresses';
 import { researchHours, shortHash } from '../../site/chain-data';
 // Same card and list chrome as /blocks — see the note in [name].astro.
 import '../../styles/chain.css';
 
 /**
- * §3.7 — every tag and series address on the chain.
+ * §3.7 — every address on the chain: the author's identity address, and every
+ * tag and series a post has sent to.
  *
  * This page exists because `src/site/routes.ts` carries one `built` flag per
  * route, and the nav renders `/address` from it. Flipping that flag so
@@ -14,19 +15,26 @@ import '../../styles/chain.css';
  * entry into a real link, so `/address` has to be a real page — the site
  * ships no dead links, and a nav entry pointing at a bare directory is one.
  *
+ * The rows come from `addressIndex()`, which is also where the homepage's
+ * "Addresses" tile gets its number. That is the whole point of the function:
+ * the two pages are one click apart and both headed *Addresses*, and they used
+ * to count different sets (5 and 4 in a driven sandbox) because each had its
+ * own walk. One derivation, so a divergence is not expressible.
+ *
  * A list, so every address is middle-truncated (§3.1): the full 40 hex digits
  * belong on the address's own page, where a reader verifies them.
  */
-const rows = (await getAddresses()).map((address) => ({
-  address,
-  short: shortHash(address.address),
+const rows = (await addressIndex()).map((entry) => ({
+  entry,
+  short: shortHash(entry.address),
   // §3.8 — null when this address received no declared hours at all, which
   // displays as an em dash and never as a bare `0.0 giờ`.
-  hours: researchHours(address.valueReceived),
+  hours: researchHours(entry.value),
+  kind: entry.kind === 'identity' ? 'Identity' : entry.kind === 'series' ? 'Series' : 'Tag',
 }));
 ---
 
-<Base title="Addresses — Blogchain" description="Mọi tag và series trên chuỗi, dưới dạng địa chỉ.">
+<Base title="Addresses — Blogchain" description="Mọi địa chỉ trên chuỗi: định danh tác giả, tag và series.">
   <div class="page-head">
     <h1>Addresses</h1>
     <span class="sub"><span class="num">{rows.length}</span> địa chỉ</span>
@@ -34,16 +42,17 @@ const rows = (await getAddresses()).map((address) => ({
 
   <article class="card" aria-label="Addresses">
     <div class="card-top">
-      <span class="per">Tags và series</span>
+      <span class="per">Định danh, tag và series</span>
     </div>
     {rows.length > 0 ? (
       <ul class="txs">
-        {rows.map(({ address, short, hours }) => (
+        {rows.map(({ entry, short, hours, kind }) => (
           <li>
-            <h2 class="t"><a href={`/address/${address.name}`}>{address.name}</a></h2>
+            <h2 class="t"><a href={entry.href}>{entry.name}</a></h2>
             <span class="g">
               <span class="addr">{short}</span>
-              {' · '}<span class="num">{address.txCount}</span> giao dịch{' · '}
+              {' · '}{kind}
+              {' · '}<span class="num">{entry.txCount}</span> giao dịch{' · '}
               {hours ? <Fragment><span class="num">{hours}</span> giờ</Fragment> : '—'}
             </span>
           </li>

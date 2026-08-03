@@ -53,21 +53,22 @@ beforeAll(() => {
     '---',
     "import BlockCard from '../components/BlockCard.astro';",
     "import TxPanel from '../components/TxPanel.astro';",
-    "import { getPendingBlock } from '../site/chain-data';",
+    "import { getPendingBlock, resolvedPost } from '../site/chain-data';",
     '',
     'const pending = getPendingBlock();',
     'if (pending === null) {',
     "  throw new Error('sandbox fixture produced no pending block');",
     '}',
-    'const firstTx = pending.transactions[0];',
-    'if (firstTx === undefined) {',
-    "  throw new Error('sandbox fixture pending block has no transactions');",
+    "const post = resolvedPost('2026-08-10-bai-dang-cho');",
+    'if (post === undefined) {',
+    "  throw new Error('sandbox fixture pending block has no such post');",
     '}',
     '---',
     '<BlockCard block={pending} isNewest={true} isOldest={true} />',
-    // gasUsed/value are the transaction's own here: this fixture's first
-    // transaction is a post, not an amendment (§3.9).
-    '<TxPanel tx={firstTx} pending={true} gasUsed={firstTx.gasUsed} value={firstTx.value} amendedIn={null} />',
+    // The panel takes the resolution and nothing else — a `Transaction` is a
+    // type error there, which is the point (see TxPanel's own doc). Nothing
+    // amends this fixture, so the resolution is the pending post itself.
+    '<TxPanel post={post} />',
     '',
   ].join('\n');
   writeFileSync(join(dir, 'src/pages/pending-fixture.astro'), page);

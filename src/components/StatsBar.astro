@@ -1,13 +1,19 @@
 ---
+import { addressIndex } from '../site/addresses';
 import { getStats } from '../site/chain-data';
 // The bar's styles travel with the bar — see the note in WorkMeter.astro.
 import '../styles/chain.css';
 
 const s = getStats();
+// §14 — the "Addresses" tile counts exactly the rows `/address` lists, from
+// `addressIndex()`, because that page is one click away and carries the same
+// heading. It used to have its own walk over the sealed blocks and the two read
+// 5 and 4 in a driven sandbox, with nothing on either page explaining why.
+const addresses = (await addressIndex()).length;
 const cells = [
   { k: 'Chain height', v: String(s.height), tone: 'acc' },
   { k: 'Transactions', v: String(s.transactions), tone: 'hash' },
-  { k: 'Addresses', v: String(s.addresses), tone: 'addr' },
+  { k: 'Addresses', v: String(addresses), tone: 'addr' },
   { k: 'Difficulty', v: '0'.repeat(s.difficulty), tone: 'num' },
 ];
 ---

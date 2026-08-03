@@ -38,25 +38,18 @@ const { slug } = Astro.props;
 const content = await getPostContent(slug);
 const html = await renderMarkdown(content.body);
 
-// The chain's current word on this post: the newest amendment's metadata, or
-// the original's when nothing amends it. Both record types carry a title
-// (§3.2, §3.9); `Transaction.title` is nullable only because one shape in the
-// union has none, and the original is the honest fallback if it ever were.
-const tx = content.governing;
-const title = tx.title ?? content.tx.title ?? slug;
+// The chain's current word on this post — title, hash, gas, hours, tags —
+// resolved once in `chain-data.ts` and handed to the panel whole. This is the
+// same object `/address/<tag>` and `/about` render their rows from, so the
+// three surfaces cannot state different things about one post.
+const post = content.post;
 ---
 
-<Base title={`${title} — Blogchain`} description={`${title} · ${content.gasUsed} từ`}>
-  <TxPanel
-    tx={tx}
-    pending={content.pending}
-    gasUsed={content.gasUsed}
-    value={content.value}
-    amendedIn={content.amendedIn}
-  />
+<Base title={`${post.title} — Blogchain`} description={`${post.title} · ${content.gasUsed} từ`}>
+  <TxPanel post={post} />
   <article class="post">
-    <h1>{title}</h1>
-    <p class="byline">{tx.date} · {tx.tags.map((t) => `#${t}`).join(' ')}</p>
+    <h1>{post.title}</h1>
+    <p class="byline">{post.date} · {post.tags.map((t) => `#${t}`).join(' ')}</p>
     <Fragment set:html={html} />
   </article>
 </Base>

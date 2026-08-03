@@ -176,3 +176,17 @@ export function withoutAnchorHrefs(html: string): string {
     tag.replace(/href="https?:\/\/[^"]*"/i, 'href=""'),
   );
 }
+
+/**
+ * The one `<li>` a post occupies in a transaction list, or `null`.
+ *
+ * Scoped to the row rather than to the card: "the page contains 44 từ
+ * somewhere" is satisfied by any other row, by a header figure, or by a number
+ * that belongs to a different post entirely.
+ */
+export function rowFor(html: string, slug: string): string | null {
+  for (const m of html.matchAll(/<li>[\s\S]*?<\/li>/g)) {
+    if (m[0].includes(`href="/tx/${slug}"`)) return m[0];
+  }
+  return null;
+}

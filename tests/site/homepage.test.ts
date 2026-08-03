@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readDist } from './dist';
+import { addressIndex } from '../../src/site/addresses';
 import { getBlocks, getPendingBlock, getStats } from '../../src/site/chain-data';
 import type { AnyBlockView } from '../../src/site/chain-data';
 import { meterGeometry } from '../../src/site/meter';
@@ -66,15 +67,31 @@ describe('stats bar', () => {
     );
   }
 
-  it('shows chain height, transactions, addresses and difficulty', () => {
+  it('shows chain height, transactions, addresses and difficulty', async () => {
     const s = getStats();
     const bar = cells();
     expect([...bar.keys()]).toEqual(['Chain height', 'Transactions', 'Addresses', 'Difficulty']);
     expect(bar.get('Chain height')).toBe(String(s.height));
     expect(bar.get('Transactions')).toBe(String(s.transactions));
-    expect(bar.get('Addresses')).toBe(String(s.addresses));
+    expect(bar.get('Addresses')).toBe(String((await addressIndex()).length));
     // §3.4 — difficulty is shown as the zeros a block had to find.
     expect(bar.get('Difficulty')).toBe('0'.repeat(s.difficulty));
+  });
+
+  it('counts the same addresses /address lists, on the page as shipped', () => {
+    // The two pages are one click apart and carry the same heading, and they
+    // used to count different sets: `getStats()` walked the sealed blocks for
+    // `from`/`tags`/`series`, `/address` listed what `getAddresses()` derived,
+    // and a driven sandbox read 5 and 4. Read from `dist/` rather than from the
+    // functions, because a shared derivation is only worth something if both
+    // routes still call it.
+    const tile = cells().get('Addresses');
+    const index = /<span class="sub"><span class="num">(\d+)<\/span> địa chỉ<\/span>/.exec(
+      readDist('address/index.html'),
+    );
+    expect(index, '/address does not state a count in the shape this reads').not.toBeNull();
+    expect(tile, 'the homepage states no address count at all').toBeDefined();
+    expect(tile).toBe(index![1]);
   });
 });
 

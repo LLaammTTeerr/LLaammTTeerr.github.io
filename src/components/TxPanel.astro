@@ -1,5 +1,6 @@
 ---
-import type { AmendedIn, RecordedTx } from '../site/chain-data';
+import type { ResolvedPost } from '../site/chain-data';
+import { getAddresses } from '../site/addresses';
 import { getBlocks, getPendingBlock, researchHours } from '../site/chain-data';
 import { routeById } from '../site/routes';
 import PendingState from './PendingState.astro';
@@ -10,37 +11,29 @@ import PendingState from './PendingState.astro';
 import '../styles/chain.css';
 import '../styles/post.css';
 
-// Every prop is required on purpose, with no default.
+// One prop, and it is the resolution.
 //
-// `pending`: a caller that forgot it used to render `Sealed` over an
-// unconfirmed transaction — the one falsehood §3.6 is most explicit about ("a
-// pending hash presented with the same authority as a sealed one would be the
-// single most misleading thing this site could display").
+// This panel used to take five: the transaction plus `pending`, `gasUsed`,
+// `value` and `amendedIn`, each of which the caller had to compute correctly
+// and consistently with the other four. A caller that forgot `pending`
+// rendered `Sealed` over an unconfirmed transaction — the one falsehood §3.6
+// is most explicit about — and a caller that let `gasUsed`/`value` default to
+// the transaction's own fields printed `0 từ · —` under an amended post,
+// because §3.9 fixes an amendment's at 0 so block aggregation cannot re-charge
+// the original's.
 //
-// `gasUsed` and `value`: a transaction cannot state either about itself once
-// it is an amendment. §3.9 fixes an amendment's `gasUsed` and `value` at 0 so
-// block aggregation cannot re-charge the original's, and puts the declared
-// hours in `research` instead. Defaulting to `tx.gasUsed` / `tx.value` would
-// therefore print `0 từ · —` under an amended post's text, so the caller — the
-// only party that knows which body is on screen — has to supply both.
+// `ResolvedPost` carries all five as one object that cannot be assembled
+// wrongly: `src/site/chain-data.ts` is the only thing that builds one, from a
+// single walk. A raw `Transaction` or `RecordedTx` is a type error here.
 interface Props {
-  /**
-   * The transaction being described: the one whose hash commits to the text.
-   *
-   * `RecordedTx`, so a transaction out of the open block is accepted — its own
-   * `gasUsed` may be unverifiable, which is exactly why this panel is told the
-   * figure separately and never reads it off `tx`.
-   */
-  tx: RecordedTx;
-  pending: boolean;
-  /** §3.8 — word count of the body shown beside this panel. */
-  gasUsed: number;
-  /** §3.8 — declared research hours from the record `tx` is. */
-  value: number;
-  /** §3.9 — set when `tx` is the amendment that supersedes an earlier record. */
-  amendedIn: AmendedIn | null;
+  post: ResolvedPost;
 }
-const { tx, pending, gasUsed, value, amendedIn } = Astro.props;
+const { post } = Astro.props;
+const { pending, value, amendedIn } = post;
+// §3.8 — the word count of the body the chain currently vouches for, or an em
+// dash. Never a recorded number, on the same rule as the open block's unmined
+// hash: a figure that could not be re-derived is not a figure this site prints.
+const gasUsed = post.gasUsed;
 
 // A pending transaction is in no sealed block, and `getBlocks()` reads sealed
 // history only — searching it for one found nothing and rendered `—` for the
@@ -49,8 +42,8 @@ const { tx, pending, gasUsed, value, amendedIn } = Astro.props;
 // reads; nothing here touches a field only a sealed block has.
 const block = pending
   ? getPendingBlock()
-  : getBlocks().find((b) => b.transactions.some((t) => t.hash === tx.hash));
-const readMinutes = Math.max(1, Math.round(gasUsed / 200));
+  : getBlocks().find((b) => b.transactions.some((t) => t.hash === post.hash));
+const readMinutes = gasUsed === null ? null : Math.max(1, Math.round(gasUsed / 200));
 // null when the author declared no `research` — §3.8 wants an em dash there,
 // not the `0.0` the chain (correctly) committed.
 const hours = researchHours(value);
@@ -63,6 +56,19 @@ const hours = researchHours(value);
 // unconditional, linking it is not, and a route removed later must degrade to
 // plain text rather than to the dead link the nav used to ship.
 const address = routeById('address');
+
+// …and only when the address itself has a page. §3.9 keeps the tag address
+// graph at *original* publication, so a tag an amendment added is displayed
+// here (it is the chain's newest declared state, and hash-covered in the
+// `amendment/1` form) while no post ever sent to it and `getStaticPaths`
+// produces no page for it. Linking it anyway shipped a real dead link: adding
+// `moi-them` to a published post rendered `<a href="/address/moi-them.tag">`
+// into a build that contains no such page.
+//
+// Same rule, same shape as `routes.ts`'s `built` flag one line above: name it
+// either way, link it only when the target exists.
+const built = new Set((await getAddresses()).map((a) => a.name));
+const linkable = (name: string): boolean => address.built && built.has(name);
 ---
 
 <div class="txpanel">
@@ -73,9 +79,9 @@ const address = routeById('address');
   <dl class="meta">
     <dt>Hash</dt>
     <dd>{pending ? (
-      <span class="a-hash"><span class="tilde">~</span>{tx.hash}</span>
+      <span class="a-hash"><span class="tilde">~</span>{post.hash}</span>
     ) : (
-      <span class="hash">{tx.hash}</span>
+      <span class="hash">{post.hash}</span>
     )}</dd>
     <dt>Block</dt>
     <dd>{block ? (
@@ -86,38 +92,43 @@ const address = routeById('address');
       // pending transaction points: an honest link rather than a dead one.
       <a href={pending ? '/blocks' : `/block/${block.height}`}>#{block.height}</a>
     ) : '—'} · {block?.period}{pending ? ' · đang mở' : ''}</dd>
-    <dt>Timestamp</dt><dd>{tx.date}</dd>
-    <dt>From</dt><dd><span class="addr">{tx.from}</span></dd>
+    <dt>Timestamp</dt><dd>{post.date}</dd>
+    <dt>From</dt><dd><span class="addr">{post.from}</span></dd>
     <dt>To</dt>
     <dd>
-      {tx.tags.map((t) => (address.built ? (
+      {/* The chain's newest declared tags (§3.9) — an amendment's when one
+          supersedes the post — each linked only if that address has a page. */}
+      {post.tags.map((t) => (linkable(`${t}.tag`) ? (
         <a class="tagname" href={`${address.href}/${t}.tag`}>{t}.tag</a>
       ) : (
         <span class="tagname">{t}.tag</span>
       )))}
-      {tx.series ? (address.built ? (
-        <a class="tagname" href={`${address.href}/${tx.series}.series`}>{tx.series}.series</a>
+      {post.series ? (linkable(`${post.series}.series`) ? (
+        <a class="tagname" href={`${address.href}/${post.series}.series`}>{post.series}.series</a>
       ) : (
-        <span class="tagname">{tx.series}.series</span>
+        <span class="tagname">{post.series}.series</span>
       )) : null}
     </dd>
-    <dt>Gas used</dt><dd><span class="num">{gasUsed}</span> từ · {readMinutes} phút đọc</dd>
+    <dt>Gas used</dt>
+    <dd>{gasUsed === null ? '—' : (
+      <Fragment><span class="num">{gasUsed}</span> từ · {readMinutes} phút đọc</Fragment>
+    )}</dd>
     <dt>Value</dt>
     <dd>{hours ? <><span class="num">{hours}</span> giờ nghiên cứu</> : '—'}</dd>
-    {tx.assets.length > 0 ? (
+    {post.assets.length > 0 ? (
       <>
         <dt>Assets</dt>
-        <dd><span class="num">{tx.assets.length}</span> token</dd>
+        <dd><span class="num">{post.assets.length}</span> token</dd>
       </>
     ) : null}
-    {amendedIn !== null && tx.amends !== null ? (
+    {amendedIn !== null ? (
       <>
         {/* The transaction this one supersedes. Without it the original hash
             — which is what /blocks and the sealed block's own page still show
             for this post — vanishes from the post page entirely, and a reader
             arriving from either has no way to reconcile the two. */}
         <dt>Amends</dt>
-        <dd><span class="hash">{tx.amends}</span></dd>
+        <dd><span class="hash">{post.originalHash}</span></dd>
       </>
     ) : null}
   </dl>

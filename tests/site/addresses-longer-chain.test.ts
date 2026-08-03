@@ -4,8 +4,7 @@ import { readLock } from '../../src/chain/lock';
 import { readPending } from '../../src/chain/pending';
 import type { PendingLock } from '../../src/chain/pending';
 import type { Block, Chain, Hex, Transaction } from '../../src/chain/types';
-import { getAddress, getAddresses } from '../../src/site/addresses';
-import { getStats } from '../../src/site/chain-data';
+import { addressIndex, getAddress, getAddresses, senders } from '../../src/site/addresses';
 
 /**
  * The address views, posed against a chain long enough to tell them apart.
@@ -354,30 +353,58 @@ describe('the open block counts', () => {
 describe('the network address count', () => {
   /**
    * §14 — every displayed field must be a committed one, and the homepage
-   * renders this number under an "Addresses" tile.
+   * renders this number under an "Addresses" tile while `/address` renders the
+   * same number one click away under the same heading. **One derivation:**
+   * `addressIndex()`, which is what both read.
    *
    * `to` is in no canonical form, so a tampered lock can rewrite it and
    * `verifyChain` still reports clean. This fixture makes the two answers
    * differ: `bai-c` names two addresses in `to` that nothing on this chain ever
    * sent to, and every other post names none at all, so a count taken from `to`
    * is {author} ∪ PHANTOM = 3 — two addresses that do not exist, and not one of
-   * the three that do.
+   * the four that do.
    *
    * Derived from `tags` and `series`, which the transaction hash covers, the
-   * answer is {author} ∪ {cp, meta, ghi-chu} = 4. A tag and a series share the
-   * `tag` domain (§3.7), so slugs count once each.
+   * answer is {author} ∪ {cp, meta, ghi-chu, moi} = 5. A tag and a series share
+   * the `tag` domain (§3.7), so slugs count once each.
+   *
+   * `moi` is why this fixture is the one that discriminates: it is carried by
+   * `bai-d`, which sits in the **open block**. The old count walked
+   * `chain.lock.json` only and returned 4 while `/address` listed 4 topics and
+   * the author's page existed as a fifth — the 5-vs-4 split the reviewer drove.
    */
-  it('counts the addresses the committed tags name, not the ones `to` claims', () => {
-    expect(getStats().addresses).toBe(4);
-    expect(getStats().addresses, 'the count came from the unverified `to` field').not.toBe(
+  it('counts the addresses the committed tags name, not the ones `to` claims', async () => {
+    expect((await addressIndex()).length).toBe(5);
+    expect((await addressIndex()).length, 'the count came from the unverified `to` field').not.toBe(
       1 + PHANTOM.length,
     );
   });
 
-  it('counts no address for a tag only an amendment carries', () => {
+  it('counts no address for a tag only an amendment carries', async () => {
     // §3.9 — the address graph reflects original publication. Counting the
-    // amendment's `dinh-chinh` would make it 5.
-    expect(getStats().addresses).toBeLessThan(5);
+    // amendment's `dinh-chinh` would make it 6.
+    expect((await addressIndex()).map((a) => a.name)).not.toContain('dinh-chinh.tag');
+    expect((await addressIndex()).length).toBeLessThan(6);
+  });
+
+  it('counts the open block, which is the whole 5-vs-4 divergence', async () => {
+    // `moi.tag` exists only because `bai-d` is pending. A count over the sealed
+    // ledger alone drops it and the tile disagrees with the page again.
+    expect((await addressIndex()).map((a) => a.name)).toContain('moi.tag');
+  });
+
+  it('is exactly the identity address plus every tag and series page', async () => {
+    // The invariant that makes a divergence inexpressible rather than merely
+    // absent: whatever the chain holds, the index is the author plus one entry
+    // per built address page, and every entry names a route the site produces.
+    const index = await addressIndex();
+    const topics = await getAddresses();
+    expect(index.length).toBe(topics.length + 1);
+    expect(index.filter((e) => e.kind === 'identity')).toHaveLength(1);
+    expect(index.map((e) => e.href)).toEqual([
+      '/about',
+      ...topics.map((t) => `/address/${t.name}`),
+    ]);
   });
 });
 
@@ -388,11 +415,15 @@ describe('what is not an address', () => {
   });
 
   it('puts no amendment in any address transaction list', async () => {
+    // Every row is a resolved *post* — a shape an amendment cannot take. An
+    // amendment is a ledger entry about a post (§3.9), and the only place it
+    // reaches the reader as a row of its own is a block's transaction list.
+    const slugs = new Set(senders().map((p) => p.slug));
     for (const view of await getAddresses()) {
-      expect(
-        view.transactions.every((t) => t.type === 'post'),
-        `${view.name} lists an amendment as a transaction it received`,
-      ).toBe(true);
+      for (const post of view.transactions) {
+        expect(post.resolved, `${view.name} lists something that is not a resolved post`).toBe(true);
+        expect(slugs.has(post.slug), `${view.name} lists a row with no post behind it`).toBe(true);
+      }
     }
   });
 

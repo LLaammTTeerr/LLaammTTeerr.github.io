@@ -1,7 +1,8 @@
 ---
 import Base from '../../layouts/Base.astro';
+import TxRow from '../../components/TxRow.astro';
 import { getAddresses } from '../../site/addresses';
-import { getPendingPosts, researchHours, shortHash, txMetaLine } from '../../site/chain-data';
+import { researchHours } from '../../site/chain-data';
 // `.card`, `.meta`, `.hash`, `.addr`, `.num` and `.txs` are BlockCard's
 // classes, used verbatim so an address page reads as the same chrome as the
 // block list rather than drifting into a second style.
@@ -39,14 +40,12 @@ const kind = address.kind === 'tag' ? 'Tag' : 'Series';
 
 // §3.8 — an address that received no declared hours shows an em dash, not the
 // `0.0` the chain (correctly) committed for every post that declared nothing.
+//
+// This total is the sum of `address.transactions`' own `value`s, and the rows
+// below render those same objects through `TxRow` — so the header and the body
+// of this card are one number and its parts, not two derivations that used to
+// disagree the moment a post was amended.
 const hours = researchHours(address.valueReceived);
-
-// §3.6 — the open block's posts are on the chain and belong in this list, but
-// their hashes are not sealed. A pending hash shown with the same authority as
-// a confirmed one is the single most misleading thing this site could display,
-// so they carry the same `~` marker TxPanel uses. Looked up by hash: the view
-// lists sealed and unsealed transactions together, by design.
-const pendingHashes = new Set(getPendingPosts().map((t) => t.hash));
 ---
 
 <Base
@@ -74,24 +73,7 @@ const pendingHashes = new Set(getPendingPosts().map((t) => t.hash));
       <dt>Last seen</dt><dd>{address.lastSeen}</dd>
     </dl>
     <ul class="txs">
-      {address.transactions.map((tx) => (
-        <li>
-          <h2 class="t">{tx.slug ? <a href={`/tx/${tx.slug}`}>{tx.title}</a> : (tx.title ?? 'Amendment')}</h2>
-          <span class="g">
-            {pendingHashes.has(tx.hash) ? (
-              <span class="a-hash"><span class="tilde">~</span>{shortHash(tx.hash)}</span>
-            ) : (
-              <span class="hash">{shortHash(tx.hash)}</span>
-            )}
-            {' · '}{tx.date}{' · '}
-            {/* Shared with BlockCard and the block detail page, so the three
-                lists cannot drift — and so a word count that could not be
-                re-derived from the body its own contentHash commits to shows
-                an em dash here too, never the recorded number. */}
-            {txMetaLine(tx)}
-          </span>
-        </li>
-      ))}
+      {address.transactions.map((post) => <TxRow post={post} />)}
     </ul>
   </article>
 </Base>
