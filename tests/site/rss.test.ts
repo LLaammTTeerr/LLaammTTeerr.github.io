@@ -161,11 +161,22 @@ function slugOf(item: XmlNode): string {
  * the day the author sets a real domain, this test follows it. The sandbox
  * block below proves the *coupling* by building against a different `site`
  * entirely; this half proves the shipped feed agrees with the shipped config.
+ *
+ * Normalized through `new URL`, because that is what the route is handed:
+ * `context.site` is a `URL`, and `src/site/feed.ts` joins against it. Hostnames
+ * are case-insensitive and `new URL` lowercases them, so a config spelled
+ * `https://LLaammTTeerr.github.io` — the readable form, matching the repository
+ * name — produces a feed spelled `https://llaammtteerr.github.io/`. Comparing
+ * the raw config text against those urls would fail on the case alone, which
+ * says nothing about whether the feed follows `site`. The trailing slash is
+ * still applied by hand, on `baseOf`'s rule in `src/site/feed.ts` — `href`
+ * supplies one only when the url carries no path of its own.
  */
 function configuredSite(path = 'astro.config.mjs'): string {
   const match = /\bsite:\s*'([^']+)'/.exec(readFileSync(path, 'utf8'));
   if (match === null) throw new Error(`${path} declares no site`);
-  return match[1]!.replace(/\/$/, '') + '/';
+  const href = new URL(match[1]!).href;
+  return href.endsWith('/') ? href : `${href}/`;
 }
 
 /** A sandbox's recorded open block, read straight off disk. */
@@ -453,8 +464,15 @@ describe('a chain with an amendment and a title carrying xml syntax', () => {
     for (const url of urls) {
       expect(url.startsWith(SANDBOX_SITE), `${url} does not come from site`).toBe(true);
     }
-    expect(xml, 'the shipped placeholder domain is hard-coded somewhere').not.toContain(
-      'lamter.example',
+    // And the host the *repository* ships appears nowhere in a feed built
+    // against a different one. Derived from the config rather than written out:
+    // this line named `lamter.example`, the placeholder that has since been
+    // replaced, so it was about to become an assertion that a string nothing
+    // could produce is absent — a check that cannot fail. The point was never
+    // that one host in particular is missing; it is that the route reads `site`
+    // instead of carrying a domain of its own.
+    expect(xml, "the repository's own host is hard-coded somewhere").not.toContain(
+      new URL(configuredSite()).hostname,
     );
   });
 

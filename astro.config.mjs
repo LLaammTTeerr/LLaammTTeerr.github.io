@@ -142,7 +142,43 @@ function chainDocuments() {
 // at build time.
 export default defineConfig({
   output: 'static',
-  site: 'https://lamter.example',
+  /**
+   * Where this site is published — and the one setting whose mistake ships to
+   * readers rather than showing up on screen. `/rss.xml` builds every url from
+   * this value (RSS urls must be absolute, see `src/pages/rss.xml.ts`), so a
+   * wrong host is a feed of well-formed links to nothing, subscribed to once
+   * and then never looked at again. It was `https://lamter.example` while the
+   * destination was undecided: on the reserved `.example` TLD precisely so it
+   * could never be mistaken for somewhere real.
+   *
+   * The spelling here is the readable one, matching the repository name. Astro
+   * hands the route a `URL`, and `new URL` lowercases the host — hostnames are
+   * case-insensitive — so the feed's bytes say `https://llaammtteerr.github.io/`.
+   * The two differ in case and only in case; `tests/site/deploy-config.test.ts`
+   * pins both so the difference is never mistaken for a bug.
+   */
+  site: 'https://LLaammTTeerr.github.io',
+  /**
+   * **A user site, served from the domain root** — which is why this is `/`.
+   *
+   * The repository is `LLaammTTeerr/LLaammTTeerr.github.io`, whose name *is*
+   * the domain. GitHub Pages serves it at `https://llaammtteerr.github.io/`,
+   * with no path prefix.
+   *
+   * Do not "fix" this to the repository name. That is what a **project** site
+   * needs — `user.github.io/some-repo`, published from a repository named
+   * something other than the domain — and this is not one. Putting a prefix
+   * here would move every url Astro generates (each hashed stylesheet, each
+   * vendored font) under a path that does not exist on the server, 404ing the
+   * entire deployed site. Nothing local would object: the urls stay consistent
+   * with each other, so the build still looks right to anything that only
+   * compares them. It is the most common way a GitHub Pages deploy breaks.
+   *
+   * Declared rather than left to default — the default is `/` as well, so a
+   * config that says nothing is right by accident and tells the next reader
+   * nothing about which of the two kinds of site this is.
+   */
+  base: '/',
   build: { format: 'directory' },
   devToolbar: { enabled: false },
   integrations: [assetFiles(), chainDocuments()],

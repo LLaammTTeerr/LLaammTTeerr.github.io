@@ -187,6 +187,43 @@ export function distPages(distRoot: string = DIST): string[] {
   return out.sort();
 }
 
+/**
+ * Every file in the build, as paths relative to `dist/` — pages, the feed, the
+ * chain documents, the stylesheets, the fonts.
+ *
+ * The sibling of `distPages`, and the reason this file grew one: the
+ * placeholder origin `lamter.example` reached exactly one output, `dist/rss.xml`,
+ * which is not HTML and which every `distPages()` loop in the suite therefore
+ * walked straight past. A guard over "the build" that only reads pages is a
+ * guard over a third of the bytes shipped.
+ */
+export function distFiles(distRoot: string = DIST): string[] {
+  const out: string[] = [];
+  const walk = (dir: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) walk(path);
+      else out.push(relative(distRoot, path).split(sep).join('/'));
+    }
+  };
+  walk(distRoot);
+  return out.sort();
+}
+
+/**
+ * One built file as bytes-as-characters, so a scan over the whole build can
+ * include the fonts and any other binary without decoding them.
+ *
+ * `latin1` maps every byte to exactly one character, so an ASCII needle like
+ * `lamter.example` is found wherever it sits. Reading a `.woff2` as `utf8`
+ * would replace invalid sequences with U+FFFD, and a needle straddling one
+ * would be silently lost — the failure mode a whole-build scan exists to rule
+ * out. Never use this to compare rendered text: use `readDist`.
+ */
+export function readDistBytes(relPath: string): string {
+  return readFileSync(join(DIST, relPath), 'latin1');
+}
+
 /** Every stylesheet reachable from any built page, keyed by the page. */
 export function cssPerPage(): Map<string, string> {
   return new Map(distPages().map((page) => [page, cssLoadedBy(page)]));
