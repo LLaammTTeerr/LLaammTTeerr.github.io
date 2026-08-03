@@ -112,12 +112,14 @@ a.hash:hover { text-decoration-color: currentColor; }
   .meta { grid-template-columns: 1fr; }
 }
 
-/* §6 — the author's bio on /about, rendered through the same markdown
-   pipeline as a post body (src/site/markdown.ts), so it gets the same
-   HTML-stripping and URL guard. Deliberately not `article.post`: that class
-   centers itself with its own margin, which reads fine on a standalone post
-   page but would misalign with the full-width `.page-head`/`.card` either
-   side of it here. */
+/* §6 — author prose rendered inside a card through the same markdown pipeline
+   as a post body (src/site/markdown.ts), so it gets the same HTML-stripping
+   and URL guard: the bio on /about, and a project's body on
+   /contract/[name]. One class for both, because they are the same thing —
+   off-chain prose the author wrote, sitting inside a `.card.offchain`.
+   Deliberately not `article.post`: that class centers itself with its own
+   margin, which reads fine on a standalone post page but would misalign with
+   the full-width `.page-head`/`.card` either side of it here. */
 .bio { max-width: 42rem; margin: 0 0 1.4rem; font-size: 1rem; line-height: 1.75; }
 .bio p { margin: 0 0 1rem; }
 .bio p:last-child { margin-bottom: 0; }
@@ -167,6 +169,23 @@ a.hash:hover { text-decoration-color: currentColor; }
 .mem .t { margin: 0; font-size: 1.02rem; font-weight: 600; color: var(--txt); }
 .mem .d { font-family: var(--mono); font-size: 0.7rem; color: var(--dim); margin-right: 0.7rem; }
 .mem .g { font-family: var(--mono); font-size: 0.7rem; color: var(--dim); }
+
+/* §6/§5.1 — the contracts list. The same dashed off-chain card as the mempool
+   (`.card.offchain`, `.stamp.off`, `.off-note`) holds it, because a project is
+   outside the chain in exactly the sense a draft is. The list itself is
+   deliberately not `.txs`: that one is transactions, and a project must not be
+   dressed as one. Same shape as `.mem`, with a summary line, and every colour
+   from a token — eleven reader-selectable palettes. */
+.cons { list-style: none; margin: 0.9rem 0 0; padding: 0.8rem 0 0;
+  border-top: 1px dashed var(--line2); }
+.cons li { padding: 0.55rem 0; }
+.cons li + li { border-top: 1px solid var(--line); }
+.cons .t { margin: 0; font-size: 1.02rem; font-weight: 600; color: var(--txt); }
+.cons .t a { color: inherit; text-underline-offset: 3px; }
+.cons .s { margin: 0.2rem 0 0.35rem; max-width: 42rem; font-size: 0.9rem; line-height: 1.6;
+  color: var(--dim); }
+.cons .g { font-family: var(--mono); font-size: 0.7rem; color: var(--dim); }
+.cons .g a { color: var(--acc); text-underline-offset: 3px; }
 
 /* §3.2b — the asset registry. Deliberately the same card, hash and address
    chrome as a block or an address: a token is a chain record like any other,

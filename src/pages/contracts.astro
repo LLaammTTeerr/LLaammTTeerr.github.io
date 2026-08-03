@@ -1,0 +1,85 @@
+---
+import Base from '../layouts/Base.astro';
+import { getContracts } from '../site/contracts';
+// `.card`, `.card-top`, `.per`, `.stamp`, `.off-note`, `.silent` and the
+// `.cons` rules are all in chain.css — imported here for the same reason every
+// other route imports the styles it renders (see the note in WorkMeter.astro),
+// so this page cannot ship unstyled. `.page-head` lives in base.css, which
+// `Base.astro` always loads.
+import '../styles/chain.css';
+
+/**
+ * §6 — the author's projects, presented as deployed contracts.
+ *
+ * §5.1 governs this page and says so by name: `content/contracts/` is read at
+ * build time and hashed nowhere, and "anything not on the chain must say so
+ * where it is displayed", using the vocabulary the site already has rather than
+ * a third formulation. So this is the mempool's card, verbatim — the dashed
+ * `.card.offchain`, the `.stamp.off` badge, an `.off-note` whose own words are
+ * `chưa lên chuỗi` — because a project is off the chain in exactly the sense a
+ * draft is, and the reader has already met that treatment on `/mempool` and on
+ * `/about`.
+ *
+ * The one thing this page must not do is call a contract **verified**. §6's
+ * phrase is "projects as verified contracts, source linked to GitHub", and on a
+ * real explorer that word is a check anyone can rerun: published source against
+ * deployed bytecode. Here the source is a url this build never fetches, to a
+ * repository that can change tomorrow. Nothing on this site verifies it, so the
+ * note says the opposite in as many words — see `src/site/contracts.ts` for the
+ * full reasoning and why `Contract` carries no such field to print.
+ *
+ * The empty list is the ordinary state, not an edge case: `content/contracts/`
+ * ships empty. It gets a sentence of its own rather than a blank card, so the
+ * page reads as "nothing has been published here yet" instead of as a page that
+ * failed to load.
+ *
+ * No clock (§14): `getContracts()` reads a directory.
+ */
+const contracts = getContracts();
+---
+
+<Base
+  title="Contracts — Blogchain"
+  description="Các dự án của tác giả — đọc lúc build, nằm ngoài chuỗi."
+>
+  <div class="page-head">
+    <h1>Contracts</h1>
+    <span class="sub"><span class="num">{contracts.length}</span> dự án</span>
+  </div>
+
+  <article class="card offchain" aria-label="Contracts">
+    <div class="card-top">
+      <span class="per">Dự án</span>
+      <span class="stamp off">Ngoài chuỗi</span>
+    </div>
+    <p class="off-note">
+      Đây là các dự án của tác giả, <strong>chưa lên chuỗi</strong>: không có hash, không có địa chỉ,
+      không có gas, không thuộc khối nào. Chuỗi không biết gì về chúng. Liên kết mã nguồn cũng chỉ
+      là một đường dẫn ra ngoài — trang này <strong>không kiểm chứng được</strong> thứ nằm ở đầu
+      kia, và kho mã ấy có thể đổi bất cứ lúc nào. Thứ trang này kiểm chứng được nằm ở <a href="/blocks">Blocks</a> và <a href="/tx">Transactions</a>.
+    </p>
+    {contracts.length > 0 ? (
+      <ul class="cons">
+        {contracts.map((contract) => (
+          <li>
+            <h2 class="t"><a href={`/contract/${contract.slug}`}>{contract.name}</a></h2>
+            {contract.summary === '' ? null : <p class="s">{contract.summary}</p>}
+            <span class="g">
+              {contract.language ?? '—'}
+              {' · '}
+              {/* No anchor at all when there is no url — never a placeholder
+                  href. The site links only to what exists, the same rule
+                  `/about` puts an unfilled profile link under, and the em dash
+                  the mempool already uses for a field that does not exist. */}
+              {contract.repo === null
+                ? '— chưa công bố mã nguồn'
+                : <a href={contract.repo}>Source</a>}
+            </span>
+          </li>
+        ))}
+      </ul>
+    ) : (
+      <p class="silent">Chưa có hợp đồng nào được công bố ở đây.</p>
+    )}
+  </article>
+</Base>

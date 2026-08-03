@@ -140,6 +140,66 @@ export const DEMO_DRAFTS: { slug: string; title: string; date: string }[] = [
   { slug: 'wip-doc-sach', title: 'Ghi chú đọc sách quý này', date: '2026-08-02' },
 ];
 
+/** A project, written to `content/contracts/<slug>.md`. */
+export interface DemoContract {
+  slug: string;
+  name: string;
+  summary: string;
+  /**
+   * Omitted on purpose for one of them (§6): a contract that declares no repo
+   * must render no link rather than a dead one, and the preview is where that
+   * is actually looked at.
+   */
+  repo?: string;
+  language: string;
+  body: string;
+}
+
+/**
+ * Projects — read at build time, hashed nowhere (§5.1), like the drafts above.
+ *
+ * The repo urls are on the reserved `.example` TLD, the same placeholder
+ * convention `astro.config.mjs` uses for `site`. `content/profile.md` makes the
+ * point in its own way: it ships three link labels and no url at all, because a
+ * url that looks real and is not points a reader at somebody else's repository.
+ * One of the two here therefore declares no repo, so both renderings — a linked
+ * source and an absent one — are visible in the preview.
+ */
+export const DEMO_CONTRACTS: DemoContract[] = [
+  {
+    slug: 'blogchain',
+    name: 'Blogchain',
+    summary: 'Chính trang này: một blog tĩnh dựng như trình duyệt blockchain.',
+    repo: 'https://github.example/lamter/blogchain',
+    language: 'TypeScript',
+    body: `
+Mỗi bài viết là một giao dịch, mỗi tháng là một khối, mỗi thẻ là một địa chỉ.
+Hash là SHA-256 thật, cây Merkle là cây Merkle thật, và proof of work được đào
+thật ở lúc build — không có gì mô phỏng.
+
+Phần khó nhất không phải là mật mã mà là kỷ luật: mỗi con số hiện trên trang
+phải hoặc nằm trong sổ, hoặc tính lại được từ thứ nằm trong sổ. Chỗ nào không
+thoả thì để dấu gạch ngang, chứ không đoán.
+
+Bản thân trang này thì **chưa lên chuỗi** — nó là mã nguồn, không phải bài viết.
+    `.trim(),
+  },
+  {
+    slug: 'cf-mcp',
+    name: 'Máy chủ MCP cho Codeforces',
+    summary: 'Công cụ đọc đề và nộp bài Codeforces, chưa công bố mã nguồn.',
+    language: 'Rust',
+    body: `
+Một máy chủ MCP nhỏ để lấy đề, xem bảng xếp hạng và nộp bài mà không rời khỏi
+trình soạn thảo. Phần thú vị là chuẩn hoá đề bài về một dạng duy nhất, vì mỗi
+kỳ thi lại đánh dấu phần giới hạn một kiểu khác nhau.
+
+Mục này cố tình chưa khai báo kho mã: khi chưa có địa chỉ thật thì trang không
+dựng liên kết nào cả, thay vì trỏ tới một nơi không tồn tại.
+    `.trim(),
+  },
+];
+
 export const DEMO_ROUNDS: DemoRound[] = [
   {
     now: '2026-03-28',
@@ -203,7 +263,24 @@ export function demoPaths(): string[] {
     ...DEMO_ROUNDS.flatMap((r) => r.posts.map((post) => `content/posts/${post.slug}.md`)),
     ...DEMO_ASSETS.map((a) => `content/assets/${a.file}`),
     ...DEMO_DRAFTS.map((d) => `content/drafts/${d.slug}.md`),
+    ...DEMO_CONTRACTS.map((c) => `content/contracts/${c.slug}.md`),
   ];
+}
+
+/** A demo contract as `content/contracts/<slug>.md` (§5.1 — never hashed). */
+export function contractFile(contract: DemoContract): string {
+  const lines = [
+    '---',
+    `name: ${JSON.stringify(contract.name)}`,
+    `summary: ${JSON.stringify(contract.summary)}`,
+    `language: ${JSON.stringify(contract.language)}`,
+  ];
+  // Absent, not empty: an unwritten `repo:` line is what an author's own
+  // half-filled file looks like, and it is the input the "no repo, no link"
+  // rule is under.
+  if (contract.repo !== undefined) lines.push(`repo: ${JSON.stringify(contract.repo)}`);
+  lines.push('---', '', contract.body, '');
+  return lines.join('\n');
 }
 
 export function postFile(post: DemoPost): string {

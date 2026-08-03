@@ -80,6 +80,11 @@ describe('nav entries for routes that do not exist yet', () => {
       'Transactions',
       'Addresses',
       'Assets',
+      // `Contracts` is a later addition (src/pages/contracts.astro) and sits
+      // with the other sections the explorer indexes rather than at the end;
+      // the entry is added, and no existing one is removed, reordered or
+      // reworded.
+      'Contracts',
       'Mempool',
       'Verify',
     ]);

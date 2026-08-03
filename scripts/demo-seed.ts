@@ -19,7 +19,15 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DEMO_ASSETS, DEMO_DRAFTS, DEMO_ROUNDS, demoPaths, postFile } from './demo-content';
+import {
+  DEMO_ASSETS,
+  DEMO_CONTRACTS,
+  DEMO_DRAFTS,
+  DEMO_ROUNDS,
+  contractFile,
+  demoPaths,
+  postFile,
+} from './demo-content';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const LOCK = join(ROOT, 'chain.lock.json');
@@ -61,11 +69,16 @@ if (mode === 'clear') {
     process.exit(1);
   }
 
-  // Assets and drafts exist for the whole run: an asset must be on disk before
-  // the post referencing it is hashed, and drafts never touch the chain at all.
+  // Assets, drafts and contracts exist for the whole run: an asset must be on
+  // disk before the post referencing it is hashed, and drafts and contracts
+  // never touch the chain at all (§5.1).
   mkdirSync(join(ROOT, 'content/assets'), { recursive: true });
   mkdirSync(join(ROOT, 'content/drafts'), { recursive: true });
+  mkdirSync(join(ROOT, 'content/contracts'), { recursive: true });
   for (const a of DEMO_ASSETS) writeFileSync(join(ROOT, 'content/assets', a.file), `${a.svg}\n`);
+  for (const c of DEMO_CONTRACTS) {
+    writeFileSync(join(ROOT, 'content/contracts', `${c.slug}.md`), contractFile(c));
+  }
   for (const d of DEMO_DRAFTS) {
     writeFileSync(
       join(ROOT, 'content/drafts', `${d.slug}.md`),
@@ -160,6 +173,7 @@ if (mode === 'clear') {
   }
   console.log(`    assets  ${chain.assets.length} token(s)`);
   console.log(`    drafts  ${DEMO_DRAFTS.length} (mempool — never on the chain)`);
+  console.log(`    contracts ${DEMO_CONTRACTS.length} (projects — never on the chain)`);
   console.log('\n  next    npm run build   (or npm run dev)');
   console.log('  undo    npm run demo:clear\n');
 }

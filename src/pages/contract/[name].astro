@@ -1,0 +1,99 @@
+---
+import Base from '../../layouts/Base.astro';
+import { getContracts } from '../../site/contracts';
+import { renderMarkdown } from '../../site/markdown';
+// `.card`, `.card-top`, `.per`, `.stamp`, `.off-note`, `.meta` and `.bio` are
+// all in chain.css — the same chrome the mempool and `/about` render, imported
+// here so this page cannot ship unstyled. `.page-head` is in base.css, which
+// `Base.astro` always loads.
+import '../../styles/chain.css';
+
+/**
+ * §6 — one project.
+ *
+ * §5.1 puts this page's whole content outside the chain, so the marker is not a
+ * footnote here: the body, the metadata and the `chưa lên chuỗi` note sit in
+ * one dashed `.card.offchain`, the same card `/mempool` gives a draft and
+ * `/about` gives the author's bio. Every field a chain record would carry —
+ * hash, address, block, gas, value — is absent rather than em-dashed, because
+ * an em dash on this site means "a committed field this build cannot fill in",
+ * and a project has no such field to begin with.
+ *
+ * **Nothing here says "verified".** §6's wording is "projects as verified
+ * contracts, source linked to GitHub", and on a real explorer that word names a
+ * check anyone can rerun. `repo` is a url this build never fetches, to a
+ * repository that can change tomorrow; the note says so where the reader meets
+ * the link. See `src/site/contracts.ts` for the full reasoning.
+ *
+ * The body goes through `renderMarkdown` like every other piece of prose on
+ * this site (§6.1's guard applies to author prose too): raw author HTML is
+ * dropped and only `http`/`https`/`mailto` survive on a link. That matters more
+ * here than almost anywhere — an author who could inject markup into this page
+ * could forge a hash or an address beside their own project.
+ *
+ * No clock (§14): the routes are a function of a directory of files.
+ */
+export async function getStaticPaths() {
+  const contracts = getContracts();
+  return Promise.all(
+    contracts.map(async (contract) => ({
+      params: { name: contract.slug },
+      props: { contract, bodyHtml: contract.body === '' ? '' : await renderMarkdown(contract.body) },
+    })),
+  );
+}
+
+const { contract, bodyHtml } = Astro.props;
+
+/**
+ * The destination, shown without its scheme — `github.example/lamter/x` for an
+ * `href` of `https://github.example/lamter/x`.
+ *
+ * A reader following an external link this site cannot vouch for should be able
+ * to see where it goes before they click, so the link text names the
+ * destination rather than saying "source". It drops the `https://` because §9's
+ * guard (tests/site/dist-output.test.ts) rejects *any* `https?://` substring in
+ * a built page, and its one exclusion — `withoutAnchorHrefs` — excuses the
+ * `href` attribute and nothing else, deliberately: an `<img src>`, a
+ * `<link rel=stylesheet>` and an `xlink:href` carrying the same url are all
+ * real third-party requests, and widening the exclusion to cover document text
+ * would be a hole rather than a fix. Printing the url in full as visible text
+ * shipped that failure once, and the honest half of it — the host and path a
+ * reader needs — survives the scheme being dropped. `https` is the only scheme
+ * `getContracts` accepts, so nothing is hidden by removing it.
+ */
+const repoLabel = contract.repo === null ? null : contract.repo.replace(/^https:\/\//i, '');
+---
+
+<Base
+  title={`${contract.name} — Blogchain`}
+  description={`${contract.name} · dự án của tác giả, nằm ngoài chuỗi.`}
+>
+  <div class="page-head">
+    <h1>{contract.name}</h1>
+    <span class="sub">Contract</span>
+  </div>
+
+  <article class="card offchain" data-contract={contract.slug} aria-label={`Contract ${contract.name}`}>
+    <div class="card-top">
+      <span class="per">Contract</span>
+      <span class="stamp off">Ngoài chuỗi</span>
+    </div>
+    <p class="off-note">
+      Dự án này <strong>chưa lên chuỗi</strong>: không có hash, không có địa chỉ, không có gas,
+      không thuộc khối nào. Chuỗi không biết gì về nó. Đường dẫn mã nguồn bên dưới chỉ là một liên
+      kết ra ngoài — trang này <strong>không kiểm chứng được</strong> thứ nằm ở đầu kia, và kho mã
+      ấy có thể đổi bất cứ lúc nào. Thứ trang này kiểm chứng được nằm ở <a href="/blocks">Blocks</a> và <a href="/tx">Transactions</a>.
+    </p>
+    <dl class="meta">
+      <dt>Name</dt><dd>{contract.name}</dd>
+      <dt>Summary</dt><dd>{contract.summary === '' ? '—' : contract.summary}</dd>
+      <dt>Language</dt><dd>{contract.language ?? '—'}</dd>
+      {/* An anchor if and only if the author declared a url (§6) — never a
+          placeholder href. The link text names the destination (see
+          `repoLabel`) rather than hiding it behind a word like "source". */}
+      <dt>Source</dt><dd>{contract.repo === null ? '—' : <a href={contract.repo}>{repoLabel}</a>}</dd>
+    </dl>
+    {bodyHtml === '' ? null : <div class="bio" set:html={bodyHtml} />}
+  </article>
+</Base>

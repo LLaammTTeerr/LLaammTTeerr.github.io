@@ -26,6 +26,12 @@ export const ROUTES: RouteEntry[] = [
   { id: 'tx', href: '/tx', label: 'Transactions', built: true },
   { id: 'address', href: '/address', label: 'Addresses', built: true },
   { id: 'assets', href: '/assets', label: 'Assets', built: true },
+  // §6 — the author's projects. It sits with the other things the chain has
+  // records *about* rather than at the end, even though `content/contracts/`
+  // is off the chain (§5.1): the page itself says that, in the same words the
+  // mempool does, and the nav describes the site's shape rather than its
+  // provenance.
+  { id: 'contracts', href: '/contracts', label: 'Contracts', built: true },
   { id: 'mempool', href: '/mempool', label: 'Mempool', built: true },
   { id: 'verify', href: '/verify', label: 'Verify', built: false },
 ];

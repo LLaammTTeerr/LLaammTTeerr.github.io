@@ -75,8 +75,9 @@ export interface SandboxOptions {
    * control build, a link check, the profile page.
    *
    * `'fixture'` replaces `content/posts/` with `tests/fixtures/posts`, empties
-   * `content/assets/` and `content/drafts/`, and drops `chain.lock.json` and
-   * `chain.pending.json`, so the copy's history is **only** what the test's own
+   * `content/assets/`, `content/drafts/` and `content/contracts/`, and drops
+   * `chain.lock.json` and `chain.pending.json`, so the copy's history is
+   * **only** what the test's own
    * `chainAt`/`chainBuildSandbox` calls mine. Use it whenever an assertion
    * needs a specific chain shape — "the registry holds exactly these two
    * tokens", "six sealed blocks", "this month's block is still open", "the
@@ -144,6 +145,7 @@ export function sandboxRepo(options: SandboxOptions = {}): string {
     emptyOut(join(dir, 'content/posts'));
     emptyOut(join(dir, 'content/assets'));
     emptyOut(join(dir, 'content/drafts'));
+    emptyOut(join(dir, 'content/contracts'));
     cpSync(FIXTURE_POSTS, join(dir, 'content/posts'), { recursive: true });
     rmSync(join(dir, 'chain.lock.json'), { force: true });
     rmSync(join(dir, 'chain.pending.json'), { force: true });
