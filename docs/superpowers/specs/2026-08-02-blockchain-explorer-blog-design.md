@@ -420,7 +420,7 @@ RSS, and the search index — they are ledger entries, not new writing.
 | Author's address page | The about-me page |
 | Mempool | Drafts and works in progress |
 | Gas used | Word count |
-| Value | Reading time in minutes |
+| Value | Hours of research the author declares (§3.8) |
 | Genesis block | The first post |
 | Network stats | Homepage dashboard |
 
