@@ -1,0 +1,88 @@
+---
+import Base from '../layouts/Base.astro';
+import { shortHash } from '../site/chain-data';
+import { assetMime, getAssetViews } from '../site/assets-view';
+// `.card`, `.card-top`, `.hash`, `.num`, `.silent` and the `.tokens` rules all
+// live in chain.css — imported here for the same reason every other route
+// imports the styles it renders, so this page cannot ship unstyled.
+// `.page-head` is in base.css, which `Base.astro` always loads.
+import '../styles/chain.css';
+
+/**
+ * §3.2b — every file a post references, minted as a token.
+ *
+ * This exists for **integrity, not theme**. Without it, verifying a post proves
+ * its words are untampered while its diagrams are unchecked: someone could swap
+ * a published figure and `/verify` would still report a clean chain. The
+ * registry closes that, because a post's canonical form carries the sorted
+ * hashes of the files it references.
+ *
+ * Real fields only (§3.2b): hash, token id, mint block, minter, byte size,
+ * media type, and the posts that reference it. Transfer history, price,
+ * rarity, editions and a marketplace are named in the spec as things this does
+ * **not** have — they have no referent on a personal blog, and inventing them
+ * is the gimmick creep §1 rules out. There is nothing on `AssetView` that could
+ * carry one.
+ *
+ * A list, so every hash is middle-truncated (§3.1): the full 64 digits belong
+ * on the token's own page, where a reader checks them.
+ *
+ * The empty registry is the ordinary state, not an edge case — `content/assets/`
+ * ships with nothing but a `.gitkeep`, and the live chain has minted no token
+ * at all. It gets a sentence of its own rather than a blank card, so the page
+ * reads as "nothing has been minted" instead of as a page that failed to load.
+ *
+ * No clock (§14): `getAssetViews()` reads the registry and the files on disk.
+ */
+const views = await getAssetViews();
+const rows = views.map((view) => ({
+  view,
+  short: shortHash(view.hash),
+  // §14 — re-derived from a file that hashes to the token, or absent. Never
+  // `view.bytes` or `view.mime`: the registry's copies of both are covered by
+  // no hash on the chain (see the module doc on `src/site/assets-view.ts`).
+  mime: assetMime(view),
+}));
+---
+
+<Base title="Assets — Blogchain" description="Mọi tệp một bài viết tham chiếu, đúc thành token.">
+  <div class="page-head">
+    <h1>Assets</h1>
+    <span class="sub"><span class="num">{views.length}</span> token</span>
+  </div>
+
+  <article class="card" aria-label="Assets">
+    <div class="card-top">
+      <span class="per">Tệp đã đúc token</span>
+    </div>
+    <p class="token-note">
+      Mỗi tệp mà một bài viết tham chiếu đều được <strong>băm theo byte thô</strong> và đúc thành
+      token khi khối chứa bài viết ấy được niêm phong. Nhờ vậy, kiểm chứng một bài viết là kiểm
+      chứng cả hình trong bài: đổi một tấm hình đã đăng sẽ làm hỏng hash của giao dịch chứa nó.
+    </p>
+    {rows.length > 0 ? (
+      <ul class="tokens">
+        {rows.map(({ view, short, mime }) => (
+          <li>
+            <span class="id">#{view.tokenId}</span>
+            <h2 class="f"><a href={`/asset/${view.tokenId}`}>{view.file}</a></h2>
+            <span class="g">
+              <span class="hash">{short}</span>
+              {' · khối '}<a href={`/block/${view.mintedIn}`}>#{view.mintedIn}</a>
+              {' · '}
+              {/* An em dash, never the recorded size — the same rule the open
+                  block's unverifiable gas figure is under. */}
+              {view.bytesOnDisk === null
+                ? '—'
+                : <Fragment><span class="num">{view.bytesOnDisk}</span> byte</Fragment>}
+              {' · '}{mime ?? '—'}
+              {view.current ? null : <Fragment>{' · '}<span class="stale">tệp không khớp</span></Fragment>}
+            </span>
+          </li>
+        ))}
+      </ul>
+    ) : (
+      <p class="silent">Chưa có token nào: chưa bài viết nào tham chiếu tệp trong content/assets/.</p>
+    )}
+  </article>
+</Base>

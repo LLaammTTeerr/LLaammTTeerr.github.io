@@ -1,0 +1,152 @@
+---
+import Base from '../../layouts/Base.astro';
+import { getPendingBlock, shortHash } from '../../site/chain-data';
+import {
+  assetEmbed,
+  assetMime,
+  getAssetViews,
+  minterOf,
+  supersedingToken,
+} from '../../site/assets-view';
+// `.card`, `.meta`, `.hash`, `.addr`, `.num` and `.txs` are BlockCard's
+// classes, used verbatim so a token page reads as the same chrome as the block
+// and address pages rather than drifting into a second style.
+import '../../styles/chain.css';
+
+/**
+ * §3.2b — one minted asset: what it is, which block minted it, who sent it, and
+ * which transactions reference it.
+ *
+ * The one thing this page must not do is trust the registry's `file` field to
+ * decide **which token the file on disk currently is**. After an image swap two
+ * records share one filename, and a page reading the field would render the new
+ * image beside the old token's hash under a page that calls it verified — the
+ * file displayed would not be the file the hash commits to. So the bytes are
+ * hashed (`assetEmbed`, via `committedBytes`) and only a match is shown; a
+ * superseded token says so, names the token that now holds its name, and shows
+ * no image at all, because the chain stores hashes and not bytes and those
+ * bytes are simply gone.
+ *
+ * Byte size and media type are re-derived the same way, or shown as an em dash.
+ * Neither is committed to any hash — `registryProblem` in src/chain/verify.ts
+ * says so outright — and §14 allows only a committed field or one re-derived
+ * from something committed. This is the rule `gasUsed` was put under on the
+ * previous plan, for the same reason.
+ *
+ * §3.2b names what this deliberately is not: no transfer history, no price, no
+ * rarity, no editions, no marketplace. They have no referent here.
+ *
+ * No clock (§14): the routes are a function of the registry plus the files on
+ * disk, so the same repository builds the same pages on any day.
+ */
+export async function getStaticPaths() {
+  const views = await getAssetViews();
+  return Promise.all(
+    views.map(async (view) => ({
+      params: { tokenId: String(view.tokenId) },
+      props: {
+        view,
+        // Resolved here, where the whole registry is in hand: a token's page
+        // cannot see its siblings otherwise, and "superseded" is a statement
+        // about which token the file now is.
+        supersededBy: supersedingToken(view, views),
+        embed: await assetEmbed(view),
+      },
+    })),
+  );
+}
+
+const { view, supersededBy, embed } = Astro.props;
+
+const mime = assetMime(view);
+const minter = minterOf(view);
+
+// §3.6 — a transaction in the open block is on the chain but not sealed, and a
+// pending hash shown with the authority of a confirmed one is the single most
+// misleading thing this site could display. Same `~` marker the address pages
+// and TxPanel use. A *minting* transaction is always sealed (the registry is
+// built from sealed blocks only), but a later post reusing the same file can
+// still be pending.
+const openBlock = getPendingBlock();
+const pendingHashes = new Set((openBlock?.transactions ?? []).map((t) => t.hash));
+---
+
+<Base
+  title={`Token #${view.tokenId} — Blogchain`}
+  description={`Asset token #${view.tokenId} · ${view.file} · đúc trong khối #${view.mintedIn}.`}
+>
+  <div class="page-head">
+    <h1>Token #{view.tokenId}</h1>
+    <span class="sub">Asset · {view.file}</span>
+  </div>
+
+  <article class="card" data-token={view.tokenId} aria-label={`Asset token ${view.tokenId}`}>
+    <div class="card-top">
+      <span class="per">Asset</span>
+      {view.current ? null : <span class="stamp stale">Tệp không khớp</span>}
+    </div>
+    <dl class="meta">
+      <dt>Token ID</dt><dd><span class="num">{view.tokenId}</span></dd>
+      {/* This record's own page, so the full 64 hex digits are rendered rather
+          than a middle-truncated one (§3.1): the page exists to be checked
+          from, and a reader must be able to select the value and hash the file
+          themselves. Truncation is for lists. */}
+      <dt>Hash</dt><dd><span class="hash">{view.hash}</span></dd>
+      <dt>File</dt><dd>{view.file}</dd>
+      <dt>Type</dt><dd>{mime ?? '—'}</dd>
+      <dt>Size</dt>
+      <dd>{view.bytesOnDisk === null
+        ? '—'
+        : <Fragment><span class="num">{view.bytesOnDisk}</span> byte</Fragment>}</dd>
+      {/* Verified against first appearance in the sealed transactions by
+          `registryProblem`, unlike `file`, `mime` and `bytes`. */}
+      <dt>Minted in</dt><dd><a href={`/block/${view.mintedIn}`}>#{view.mintedIn}</a></dd>
+      <dt>Minter</dt><dd>{minter ? <span class="addr">{minter}</span> : '—'}</dd>
+    </dl>
+
+    {embed !== null ? (
+      <figure class="token-art">
+        <img src={embed} alt={`Nội dung tệp ${view.file}`} />
+        <figcaption>
+          Nhúng thẳng từ những byte mà hash phía trên cam kết, chứ không phải từ đường dẫn tệp —
+          đường dẫn thì ghi trong sổ mà chẳng hash nào bảo chứng.
+        </figcaption>
+      </figure>
+    ) : view.current ? (
+      <p class="token-note">
+        Kiểu tệp này không hiển thị trực tiếp ở đây; hash phía trên mới là bằng chứng.
+      </p>
+    ) : (
+      <p class="token-note">
+        Tệp <code>/assets/{view.file}</code> trên đĩa <strong>không còn băm ra token này</strong>.
+        {supersededBy === null ? null : (
+          <Fragment>
+            {' '}Tên tệp ấy bây giờ là <a href={`/asset/${supersededBy}`}>token #{supersededBy}</a>.
+          </Fragment>
+        )}
+        {' '}Chuỗi lưu hash chứ không lưu byte, nên nội dung mà token này cam kết không dựng lại
+        được — và đặt tấm ảnh đang nằm ở đó cạnh hash này thì đúng là điều trang web này tồn tại
+        để đừng bao giờ làm.
+      </p>
+    )}
+
+    <ul class="txs">
+      {view.referencedBy.map((tx) => (
+        <li>
+          <h2 class="t">
+            {tx.slug ? <a href={`/tx/${tx.slug}`}>{tx.title}</a> : (tx.title ?? 'Amendment')}
+          </h2>
+          <span class="g">
+            {pendingHashes.has(tx.hash) ? (
+              <span class="a-hash"><span class="tilde">~</span>{shortHash(tx.hash)}</span>
+            ) : (
+              <span class="hash">{shortHash(tx.hash)}</span>
+            )}
+            {' · '}{tx.date}
+            {tx.type === 'amendment' ? ' · đính chính' : ''}
+          </span>
+        </li>
+      ))}
+    </ul>
+  </article>
+</Base>

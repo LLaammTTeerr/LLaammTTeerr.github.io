@@ -158,6 +158,37 @@ a.hash:hover { text-decoration-color: currentColor; }
 .mem .d { font-family: var(--mono); font-size: 0.7rem; color: var(--dim); margin-right: 0.7rem; }
 .mem .g { font-family: var(--mono); font-size: 0.7rem; color: var(--dim); }
 
+/* §3.2b — the asset registry. Deliberately the same card, hash and address
+   chrome as a block or an address: a token is a chain record like any other,
+   not a gallery item, and dressing it differently would be the first step
+   towards the marketplace vocabulary §3.2b rules out. */
+.tokens { list-style: none; margin: 0.9rem 0 0; padding: 0.8rem 0 0;
+  border-top: 1px solid var(--line); }
+.tokens li { display: flex; flex-wrap: wrap; gap: 0.4rem 0.9rem; align-items: baseline;
+  padding: 0.4rem 0; }
+.tokens li + li { border-top: 1px solid var(--line); }
+.tokens .id { font-family: var(--mono); font-size: 0.8rem; color: var(--acc); }
+.tokens .f { margin: 0; font-size: 1.02rem; font-weight: 600; }
+.tokens .g { font-family: var(--mono); font-size: 0.7rem; color: var(--dim);
+  margin-left: auto; }
+.tokens .g a { color: inherit; text-underline-offset: 3px; }
+/* A token whose recorded filename now holds different bytes. `--warn`, the
+   same token the open block's unsealed state uses: both mean "true, but not
+   what it looks like at a glance". */
+.tokens .stale { color: var(--warn); }
+.stamp.stale { color: var(--warn); border-color: var(--warn); border-style: dashed; }
+.token-note { margin: 0.8rem 0 0; font-size: 0.9rem; line-height: 1.65; color: var(--dim); }
+.token-note strong { color: var(--txt); font-weight: 600; }
+.token-note a { color: var(--acc); text-underline-offset: 3px; }
+.token-note code { font-family: var(--mono); font-size: 0.85em; }
+.token-art { margin: 0.9rem 0 0; padding-top: 0.8rem; border-top: 1px solid var(--line); }
+/* `background` so a transparent PNG or SVG is read against the page rather
+   than against whatever the browser defaults to under the reader's palette. */
+.token-art img { display: block; max-width: 100%; height: auto; border: 1px solid var(--line2);
+  border-radius: 4px; background: var(--bg); }
+.token-art figcaption { margin-top: 0.55rem; font-size: 0.82rem; line-height: 1.6;
+  color: var(--dim); }
+
 .seg { display: inline-flex; gap: 2px; margin-left: 0.4rem; vertical-align: -1px; }
 .seg s { width: 0.5rem; height: 0.5rem; background: var(--line2); border-radius: 1px; display: block; }
 .seg s.on { background: var(--acc); }
