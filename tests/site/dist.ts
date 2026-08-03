@@ -83,6 +83,32 @@ export function readDist(relPath: string): string {
 }
 
 /**
+ * A chain value as the built HTML actually carries it.
+ *
+ * Astro escapes every interpolated expression through `html-escaper`, which
+ * replaces `&`, `<`, `>`, `'` and `"` — so a post titled `Mo's algorithm` is in
+ * `dist` as `Mo&#39;s algorithm` and `toContain(tx.title)` fails on a page that
+ * rendered the title perfectly. Nothing about that failure points at the
+ * apostrophe, and the first title with punctuation in it turns several tests
+ * red at once.
+ *
+ * One definition, used by every assertion in the suite that compares a value
+ * read off the chain against rendered markup. Never applied to a string the
+ * test wrote as markup — only to the data interpolated into it.
+ */
+export function rendered(value: string): string {
+  return value.replace(/[&<>'"]/g, (c) => ESCAPES[c] ?? c);
+}
+
+const ESCAPES: Record<string, string> = {
+  '&': '&amp;',
+  '<': '&lt;',
+  '>': '&gt;',
+  "'": '&#39;',
+  '"': '&quot;',
+};
+
+/**
  * Every stylesheet the built homepage actually loads, concatenated: the
  * hashed `_astro/*.css` bundles it links plus any `<style>` Astro chose to
  * inline. Assertions about what reaches the browser must read this, not the

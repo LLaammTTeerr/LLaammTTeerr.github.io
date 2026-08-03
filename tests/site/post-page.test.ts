@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { readDist } from './dist';
-import { getBlocks, getPosts } from '../../src/site/chain-data';
+import { readDist, rendered } from './dist';
+import { getBlocks, getPosts, researchHours, resolvedPost } from '../../src/site/chain-data';
 import { PREFS_INLINE_SCRIPT } from '../../src/site/prefs-script';
 import { routeById } from '../../src/site/routes';
 import { buildSandbox, chainBuildSandbox, sandboxRepo } from './sandbox';
@@ -12,6 +12,14 @@ import { parsePost } from '../../src/chain/post';
 const slug = () => getPosts()[0]!.slug!;
 const page = () => readDist(`tx/${slug()}/index.html`);
 
+/**
+ * The post as the chain currently describes it — which is what `/tx/<slug>`
+ * renders (§3.9). Reading the sealed `Transaction` instead worked only while
+ * nothing on the chain was amended: the page prints the governing record's
+ * title, hash, word count and hours, and an amendment moves all four.
+ */
+const post = () => resolvedPost(slug())!;
+
 /** The `<article>` alone — the panel and `Base.astro`'s chrome excluded. */
 function articleOf(html: string): string {
   const m = /<article class="post">([\s\S]*?)<\/article>/.exec(html);
@@ -19,12 +27,14 @@ function articleOf(html: string): string {
   return m[1]!;
 }
 
-/** The post's own source, as the chain parses it. */
-function source(): { body: string; summary: string } {
-  const path = join('content/posts', `${slug()}.md`);
+/** One post's own source, as the chain parses it. */
+function sourceOf(postSlug: string): { body: string; summary: string } {
+  const path = join('content/posts', `${postSlug}.md`);
   const parsed = parsePost(path, readFileSync(path, 'utf8'));
   return { body: normalizeBody(parsed.body), summary: parsed.summary };
 }
+
+const source = (): { body: string; summary: string } => sourceOf(slug());
 
 describe('post page', () => {
   it('exists for every post on the chain', () => {
@@ -34,8 +44,7 @@ describe('post page', () => {
   });
 
   it('shows the transaction panel with the committed hash', () => {
-    const tx = getPosts()[0]!;
-    expect(page()).toContain(tx.hash);
+    expect(page()).toContain(post().hash);
     // Anchored to the panel's own head markup, not a bare substring: the
     // nav's "Transactions" link (present on every page via Base.astro)
     // would otherwise satisfy a bare toContain('Transaction') even if
@@ -48,14 +57,12 @@ describe('post page', () => {
     // link markup TxPanel renders — a bare /Block/ regex would (and did)
     // pass on any page, since Base.astro's nav renders a "Blocks" link
     // regardless of whether TxPanel names a block at all.
-    const tx = getPosts()[0]!;
-    const block = getBlocks().find((b) => b.transactions.some((t) => t.hash === tx.hash))!;
+    const block = getBlocks().find((b) => b.transactions.some((t) => t.hash === post().hash))!;
     expect(page()).toContain(`<a href="/block/${block.height}">#${block.height}</a>`);
   });
 
   it('renders the post title as the page h1', () => {
-    const tx = getPosts()[0]!;
-    expect(page()).toMatch(new RegExp(`<h1[^>]*>${tx.title}</h1>`));
+    expect(page()).toContain(`<h1>${rendered(post().title)}</h1>`);
   });
 
   it('renders the body as HTML, and only the body', () => {
@@ -65,11 +72,23 @@ describe('post page', () => {
     // What a raw read WOULD show is the frontmatter's own fields — `summary`
     // above all, which is never displayed anywhere and is not part of the
     // hashed body. That is the assertion with something to catch.
-    const article = articleOf(page());
-    expect(article).toContain('<p>');
-    expect(source().summary.length, 'the fixture post declares no summary to check').toBeGreaterThan(0);
-    expect(article, 'the frontmatter leaked into the rendered page').not.toContain(source().summary);
-    expect(article).not.toContain('---');
+    //
+    // Over every post that declares one rather than over `getPosts()[0]`, and
+    // with no anti-vacuity guard here: `summary` is optional (§3.8), so
+    // demanding that the newest post on the chain declare one is a demand on
+    // the author's frontmatter habits. The bite lives on the fixture post in
+    // the open-block suite below, which declares a summary this file wrote.
+    for (const tx of getPosts()) {
+      const article = articleOf(readDist(`tx/${tx.slug}/index.html`));
+      expect(article, `${tx.slug} rendered no paragraph at all`).toContain('<p>');
+      expect(article, `${tx.slug}'s frontmatter delimiter leaked into the page`).not.toContain('---');
+      const { summary } = sourceOf(tx.slug!);
+      if (summary.length > 0) {
+        expect(article, `${tx.slug}'s frontmatter summary leaked into the rendered page`).not.toContain(
+          summary,
+        );
+      }
+    }
   });
 
   it('shows gas and value from the committed transaction', () => {
@@ -78,9 +97,18 @@ describe('post page', () => {
     // spans deleted entirely: the same digits are echoed in the page's
     // <meta description> (built from tx.gasUsed independently) and can
     // also coincide with digits inside the tx hash printed just above.
-    const tx = getPosts()[0]!;
-    expect(page()).toContain(`<span class="num">${tx.gasUsed}</span>`);
-    expect(page()).toContain(`<span class="num">${tx.value.toFixed(1)}</span>`);
+    expect(page()).toContain(`<span class="num">${post().gasUsed}</span>`);
+    // §3.8 — an undeclared research figure is an em dash, never `0.0`. Both
+    // branches are the contract; `${value.toFixed(1)}` alone demanded the page
+    // print the misleading zero the em dash exists to replace.
+    const hours = researchHours(post().value);
+    if (hours === null) {
+      expect(page(), 'an undeclared research figure was printed as a number').toContain(
+        '<dt>Value</dt><dd>—</dd>',
+      );
+    } else {
+      expect(page()).toContain(`<span class="num">${hours}</span>`);
+    }
   });
 
   it('names each tag address the post sent to, and links it only once /address exists', () => {
@@ -90,10 +118,10 @@ describe('post page', () => {
     // link exactly when its route exists — read from the same ROUTES list
     // TxPanel itself reads, not hard-coded, so this flips the moment a later
     // plan lands `/address` and TxPanel starts linking it.
-    const tx = getPosts()[0]!;
-    expect(tx.tags.length, 'the fixture post declares no tags to check').toBeGreaterThan(0);
+    const tags = post().publishedTags;
+    expect(tags.length, 'the post on the chain declares no tags to check').toBeGreaterThan(0);
     const address = routeById('address');
-    for (const tag of tx.tags) {
+    for (const tag of tags) {
       expect(page(), `${tag}.tag is not named on the page at all`).toContain(`${tag}.tag`);
       if (address.built) {
         expect(page(), `${tag}.tag should be a real link now that /address exists`).toContain(
@@ -116,9 +144,9 @@ describe('post page', () => {
     // hashes — derived, never written down here.
     expect(page()).toContain('Gas used');
     const firstLine = source().body.split('\n').find((l) => l.trim().length > 0)!;
-    expect(firstLine, 'the first body line is the title, not prose').not.toBe(getPosts()[0]!.title);
+    expect(firstLine, 'the first body line is the title, not prose').not.toBe(post().title);
     expect(articleOf(page()), 'the rendered body is not the post the chain committed').toContain(
-      firstLine,
+      rendered(firstLine),
     );
   });
 
@@ -146,9 +174,10 @@ describe('post page', () => {
   it('sets a per-post title and description', () => {
     // The name promised both; only the title was checked, so the description
     // could have stayed `Base.astro`'s site-wide default on every post page.
-    const tx = getPosts()[0]!;
-    expect(page()).toContain(`<title>${tx.title}`);
-    expect(page()).toContain(`<meta name="description" content="${tx.title} · ${tx.gasUsed} từ">`);
+    expect(page()).toContain(`<title>${rendered(post().title)}`);
+    expect(page()).toContain(
+      `<meta name="description" content="${rendered(`${post().title} · ${post().gasUsed} từ`)}">`,
+    );
   });
 });
 
@@ -167,6 +196,13 @@ const PENDING_SLUG = '2026-08-10-bai-dang-chua-niem-phong';
 const PENDING_TITLE = 'Bài đăng chưa niêm phong';
 /** A sentence that appears nowhere else in the repository. */
 const PENDING_BODY = 'Một đoạn văn chỉ có trong bài đang chờ niêm phong.';
+/**
+ * A frontmatter field no page displays and no hash covers, declared here so
+ * "the frontmatter does not leak into the rendered body" has a subject this
+ * file controls — `summary` is optional, so no post on the live chain is
+ * obliged to provide one.
+ */
+const PENDING_SUMMARY = 'Tóm tắt không bao giờ được hiển thị.';
 const PENDING_PATH = join('content/posts', `${PENDING_SLUG}.md`);
 const PENDING_FILE = [
   '---',
@@ -174,6 +210,7 @@ const PENDING_FILE = [
   'date: 2026-08-10',
   'tags: [meta]',
   'research: 0.5',
+  `summary: "${PENDING_SUMMARY}"`,
   '---',
   '',
   PENDING_BODY,
@@ -258,6 +295,10 @@ describe('a post published into the open block', () => {
     const html = pendingPage();
     expect(html).toMatch(new RegExp(`<h1[^>]*>${PENDING_TITLE}</h1>`));
     expect(html).toContain(PENDING_BODY);
+    // …and only the body: the frontmatter this file declared is not on it.
+    expect(articleOf(html), 'the frontmatter leaked into the rendered page').not.toContain(
+      PENDING_SUMMARY,
+    );
   });
 
   it('stamps the transaction unsealed and marks its hash provisional', () => {
@@ -291,8 +332,7 @@ describe('a post published into the open block', () => {
     // The other half of the discrimination: a route that passed `pending`
     // unconditionally, or a panel that ignored it, would pass every test
     // above and fail here.
-    const tx = getPosts()[0]!;
-    const block = getBlocks().find((b) => b.transactions.some((t) => t.hash === tx.hash))!;
+    const block = getBlocks().find((b) => b.transactions.some((t) => t.hash === post().hash))!;
     expect(sealed).toContain('<span class="stamp">Sealed</span>');
     expect(sealed).toContain(`<dd><a href="/block/${block.height}">#${block.height}</a> · ${block.period}</dd>`);
     expect(sealed).not.toContain('Chưa niêm phong');

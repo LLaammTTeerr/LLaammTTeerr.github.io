@@ -134,8 +134,23 @@ describe('researchHours', () => {
     expect(researchHours(0)).toBeNull();
   });
 
-  it('reports the declared hours of the one post on the committed chain', () => {
-    expect(researchHours(getPosts()[0]!.value)).toBe('1.0');
+  it('formats every figure the committed chain actually declares', () => {
+    // Against the real ledger rather than a hand-built number, so the one
+    // decimal place §3.8 asks for is checked against values the engine wrote.
+    // Read over every post: naming "the one post on the chain" and its `1.0`
+    // was a fact about a ledger that stops being true the day the author
+    // publishes anything, and says nothing more than this does.
+    const posts = getPosts();
+    expect(posts.length, 'the committed ledger has no posts to check').toBeGreaterThan(0);
+    for (const post of posts) {
+      const hours = researchHours(post.value);
+      if (post.value > 0) {
+        expect(hours, `${post.slug}`).toMatch(/^\d+\.\d$/);
+        expect(Number(hours), `${post.slug}`).toBeCloseTo(post.value, 5);
+      } else {
+        expect(hours, `${post.slug} declared nothing and was formatted anyway`).toBeNull();
+      }
+    }
   });
 });
 
@@ -241,58 +256,69 @@ describe('getBlock', () => {
 });
 
 describe('getPosts', () => {
-  // The committed ledger holds one transaction and it is a post, so `every(...
-  // === 'post')` and "already in date order" are both vacuously true here —
-  // proved by mutation: deleting either the `.filter` or the `.sort` from
-  // `getPosts` left this file green. Both behaviours are discriminated in
-  // `tests/site/chain-data-longer-chain.test.ts`, against a mocked chain that
-  // holds an amendment and three posts out of date order. What stays here is
-  // the concrete fact about the shipped ledger.
+  // On a one-transaction ledger `every(… === 'post')` and "already in date
+  // order" were both vacuous — proved by mutation: deleting either the
+  // `.filter` or the `.sort` from `getPosts` left this file green. Both
+  // behaviours are discriminated on a mocked chain in
+  // `tests/site/chain-data-longer-chain.test.ts`; stated here against the
+  // ledger the site is actually built from, where a chain that has grown makes
+  // them bite for real.
   it('returns exactly the post transactions the committed ledger holds', () => {
     const posts = getPosts();
     const committed = getChain()
       .blocks.flatMap((b) => b.transactions)
       .filter((t) => t.type === 'post');
-    expect(committed).toHaveLength(1);
-    expect(posts.map((t) => t.hash)).toEqual(committed.map((t) => t.hash));
-    expect(posts[0]!.slug).toBe('2026-06-15-genesis');
+    expect(committed.length, 'the committed ledger holds no post to check').toBeGreaterThan(0);
+    // Every post and no amendment — as a set, since the order is asserted
+    // separately below and the ledger's own order is by block, not by date.
+    expect([...posts.map((t) => t.hash)].sort()).toEqual([...committed.map((t) => t.hash)].sort());
+    expect(posts.every((t) => t.type === 'post')).toBe(true);
+    // Newest first (§9).
+    expect(posts.map((t) => t.date)).toEqual([...posts.map((t) => t.date)].sort().reverse());
   });
 });
 
 describe('getStats', () => {
-  // These pin concrete numbers from the committed ledger. Re-deriving the
-  // expectation with the implementation's own expression cannot catch a
-  // conceptual error — it passed happily while `height` reported the block
-  // count (2) for a chain whose tip says #1, and while `transactions`
-  // reported the post count under a tile labelled Transactions.
+  // Each of these states the *distinction* the tile got wrong once, against
+  // the committed ledger: `height` reported the block count for a chain whose
+  // tip says one less, and `transactions` reported the post count under a tile
+  // labelled Transactions. Written as concrete numbers they described one
+  // ledger and went red the day it grew; written as the distinction they hold
+  // on any chain and still fail the mutation.
   it('reports the committed height of the tip, not the number of blocks', () => {
-    expect(getChain().blocks).toHaveLength(2);
-    expect(getStats().height).toBe(1);
+    const heights = getChain().blocks.map((b) => b.height);
+    expect(heights.length, 'the committed ledger has no block to check').toBeGreaterThan(0);
+    expect(getStats().height).toBe(Math.max(...heights));
     expect(getStats().height).toBe(getBlocks()[0]!.height);
+    // Heights start at 0, so the tip is always one below the count: a tile
+    // reporting `blocks.length` fails here on every chain that exists.
+    expect(
+      getStats().height,
+      'the tile reported how many blocks there are, not the height the tip committed to',
+    ).not.toBe(getChain().blocks.length);
   });
 
   // Amendments are transactions too (§3.9): committed to merkleRoot and
-  // counted in txCount. This ledger holds one transaction and one post, so a
-  // post count agrees by coincidence — which is the very mistake this test's
-  // comment warns against, and it stayed green under it. The discriminating
-  // version, on a chain holding an amendment, is in
-  // `tests/site/chain-data-longer-chain.test.ts`; this pins the shipped
-  // ledger's own number.
+  // counted in txCount. The discriminating version — a post count disagreeing
+  // with a transaction count — is on a mocked chain in
+  // `tests/site/chain-data-longer-chain.test.ts`. What is real here is that the
+  // tile's figure is the headers' own sum and that those headers agree with the
+  // transactions they seal.
   it("counts every transaction from the headers' committed txCount", () => {
     const committed = getChain().blocks.reduce((n, b) => n + b.txCount, 0);
-    expect(committed).toBe(1);
-    expect(getStats().transactions).toBe(1);
+    const listed = getChain().blocks.flatMap((b) => b.transactions).length;
+    expect(committed, 'the committed ledger holds no transaction to count').toBeGreaterThan(0);
+    expect(committed, 'a header commits to a txCount its own block contradicts').toBe(listed);
     expect(getStats().transactions).toBe(committed);
   });
 
-  // `assets` is `[]` on the committed ledger, so `0 === 0` holds for any
-  // implementation. A non-empty registry is counted in
-  // `tests/site/chain-data-longer-chain.test.ts`; what is real here is that
-  // nothing was minted and `getAssets` agrees with the count.
-  it('reports an empty registry for a chain that minted no token', () => {
-    expect(getChain().assets).toEqual([]);
-    expect(getStats().assets).toBe(0);
-    expect(getAssets()).toHaveLength(0);
+  // A non-empty registry is counted in
+  // `tests/site/chain-data-longer-chain.test.ts`; what is real here is that the
+  // tile, `getAssets()` and the ledger's own registry are one number, whatever
+  // the chain has minted.
+  it('counts exactly the tokens the committed registry holds', () => {
+    expect(getStats().assets).toBe(getChain().assets.length);
+    expect(getAssets()).toHaveLength(getChain().assets.length);
   });
 
   it('carries no address count of its own', () => {
@@ -330,8 +356,16 @@ describe('cache immutability', () => {
       (post as { hash: string }).hash = 'mutated';
     }).toThrow(TypeError);
     // Not just "it threw" — the cache a later page reads must be unchanged.
+    // Found by hash rather than by position: `getPosts()` is date-ordered and
+    // the ledger is block-ordered, so `[0]` is the same transaction only on a
+    // chain with one post.
     expect(getPosts()[0]!.hash).toBe(originalHash);
-    expect(getChain().blocks.flatMap((b) => b.transactions)[0]!.hash).toBe(originalHash);
+    expect(
+      getChain()
+        .blocks.flatMap((b) => b.transactions)
+        .some((t) => t.hash === originalHash),
+      'the mutation reached the cached ledger',
+    ).toBe(true);
   });
 
   it("throws rather than silently accepting a mutation on a returned block's transactions array", () => {

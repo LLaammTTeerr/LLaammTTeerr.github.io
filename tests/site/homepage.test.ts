@@ -1,12 +1,12 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { readDist } from './dist';
+import { readDist, rendered } from './dist';
 import { addressIndex } from '../../src/site/addresses';
 import { getBlocks, getPendingBlock, getStats } from '../../src/site/chain-data';
 import type { AnyBlockView } from '../../src/site/chain-data';
 import { meterGeometry } from '../../src/site/meter';
-import { buildSandbox, chainBuildSandbox, sandboxRepo } from './sandbox';
+import { buildSandbox, chainBuildSandbox, sandboxRepo, sealedHeightsIn } from './sandbox';
 
 // Read inside each test, never at module level — see tests/site/dist.ts.
 const html = () => readDist('index.html');
@@ -148,13 +148,24 @@ describe('block list', () => {
     // regardless: dropping the `· genesis` marker left it green. Anchored to
     // the marker's own markup, and read from the chain rather than written
     // down, so it also fails if the marker lands on the wrong card.
+    const marker = (b: { period: string }): string =>
+      `<span class="per">${b.period} · genesis</span>`;
     const genesis = getBlocks().find((b) => b.isGenesis)!;
-    expect(html()).toContain(`<span class="per">${genesis.period} · genesis</span>`);
+
+    // The positive half reads `/blocks`, which lists every block: once the
+    // chain outgrows the homepage's cut of five, block #0 is off the homepage
+    // entirely and asserting it there is asserting the truncation, not the
+    // marker. Same component either way.
+    expect(readDist('blocks/index.html')).toContain(marker(genesis));
+
+    // The negative half is the homepage's own: no card it *does* show may
+    // carry the marker unless it is genesis — which it must, when shown.
     for (const b of homepageBlocks()) {
-      if (b.sealed && b.isGenesis) continue;
-      expect(html(), `block #${b.height} is marked genesis`).not.toContain(
-        `<span class="per">${b.period} · genesis</span>`,
-      );
+      if (b.sealed && b.isGenesis) {
+        expect(html(), 'the genesis card on the homepage lost its marker').toContain(marker(b));
+        continue;
+      }
+      expect(html(), `block #${b.height} is marked genesis`).not.toContain(marker(b));
     }
   });
 
@@ -192,41 +203,57 @@ describe('block list', () => {
  */
 describe('the homepage cut, on a chain longer than it', () => {
   let dir: string;
+  /** Every sealed height the sandbox mined, newest first. */
+  let heights: number[];
 
   beforeAll(() => {
-    dir = sandboxRepo();
-    // Seals 2026-06 through 2026-11: six blocks (heights 0–5), one more than
-    // the homepage's cut of five. `now` is required — see chainBuildSandbox.
-    const chain = chainBuildSandbox(dir, '2026-12-05');
-    if (chain.status !== 0) throw new Error(`chain:build failed in the sandbox:\n${chain.output}`);
+    // A `'fixture'` sandbox: the cut needs a chain longer than five blocks, and
+    // "longer than five" is a property of this chain, not of whatever the author
+    // has published. Fixture posts dated 2026-06 and 2026-07 built at a
+    // December clock seal those two months and mint an empty block for each
+    // silent month between — six blocks, one more than the cut.
+    dir = sandboxRepo({ content: 'fixture', chainAt: '2026-12-05' });
+    heights = sealedHeightsIn(dir);
+    if (heights.length <= HOMEPAGE_BLOCK_COUNT) {
+      throw new Error(`the sandbox chain is ${heights.length} blocks — it does not reach the cut`);
+    }
     const build = buildSandbox(dir);
     if (build.status !== 0) throw new Error(`sandbox build failed:\n${build.output}`);
   }, 120_000);
 
   const sandboxHome = () => readFileSync(join(dir, 'dist/index.html'), 'utf8');
 
-  it('shows only the latest five of the six sealed blocks', () => {
+  it('shows only the latest five sealed blocks, and none past the cut', () => {
     const order = [...sandboxHome().matchAll(/data-block="(\d+)"/g)].map((m) => Number(m[1]));
-    expect(order).toEqual([5, 4, 3, 2, 1]);
-    expect(sandboxHome(), 'block #0 is past the cut but still rendered').not.toContain(
-      'data-block="0"',
-    );
+    expect(order).toEqual(heights.slice(0, HOMEPAGE_BLOCK_COUNT));
+    for (const height of heights.slice(HOMEPAGE_BLOCK_COUNT)) {
+      expect(
+        sandboxHome(),
+        `block #${height} is past the cut but still rendered`,
+      ).not.toContain(`data-block="${height}"`);
+    }
   });
 
-  it('flags the fifth visible block as the spine\'s end, not the chain\'s real oldest', () => {
-    // The spine must terminate at the last *visible* card (#1) so it does not
-    // run off the bottom — not at #0, which is off the page entirely.
+  it('flags the last visible block as the spine\'s end, not the chain\'s real oldest', () => {
+    // The spine must terminate at the last *visible* card so it does not run
+    // off the bottom — not at the chain's oldest, which is off the page.
+    const last = heights[HOMEPAGE_BLOCK_COUNT - 1]!;
+    const oldest = heights[heights.length - 1]!;
     expect(sandboxHome()).toMatch(
-      /data-block="1"><div class="gutter"><span class="spine" data-first="false" data-last="true">/,
+      new RegExp(
+        `data-block="${last}"><div class="gutter"><span class="spine" data-first="false" data-last="true">`,
+      ),
     );
-    expect(sandboxHome()).not.toMatch(/data-block="0"[\s\S]{0,80}data-last="true"/);
+    expect(sandboxHome()).not.toMatch(
+      new RegExp(`data-block="${oldest}"[\\s\\S]{0,80}data-last="true"`),
+    );
   });
 
-  it('links to /blocks, and /blocks lists all six', () => {
+  it('links to /blocks, and /blocks lists every block', () => {
     expect(sandboxHome()).toMatch(/<p class="more">\s*<a href="\/blocks">/);
     const list = readFileSync(join(dir, 'dist/blocks/index.html'), 'utf8');
     const order = [...list.matchAll(/data-block="(\d+)"/g)].map((m) => Number(m[1]));
-    expect(order).toEqual([5, 4, 3, 2, 1, 0]);
+    expect(order).toEqual(heights);
   });
 });
 
@@ -242,11 +269,15 @@ describe('the open block, counted as one of the five, on a chain past the cut', 
   const TITLE = 'Bài trong khối mới mở';
   let dir: string;
   let pendingHeight: number;
+  /** The sealed heights the sandbox mined, newest first. */
+  let heights: number[];
 
   beforeAll(() => {
-    dir = sandboxRepo();
-    const sealed = chainBuildSandbox(dir, '2026-12-05');
-    if (sealed.status !== 0) throw new Error(`chain:build failed in the sandbox:\n${sealed.output}`);
+    dir = sandboxRepo({ content: 'fixture', chainAt: '2026-12-05' });
+    heights = sealedHeightsIn(dir);
+    if (heights.length <= HOMEPAGE_BLOCK_COUNT) {
+      throw new Error(`the sandbox chain is ${heights.length} blocks — it does not reach the cut`);
+    }
 
     writeFileSync(
       join(dir, 'content/posts', `${SLUG}.md`),
@@ -272,12 +303,16 @@ describe('the open block, counted as one of the five, on a chain past the cut', 
   const sandboxHome = () => readFileSync(join(dir, 'dist/index.html'), 'utf8');
 
   it('puts the open block first and drops the fifth sealed block, not a fourth slot', () => {
-    // Six sealed (0–5) plus the open block at height 6 is seven; the cut
-    // still shows five, so #1 and #0 are the two dropped, not just #0.
+    // The open block counts as one of the five, so it displaces the *fifth*
+    // sealed block rather than being added on top of a full five.
     const order = [...sandboxHome().matchAll(/data-block="(\d+)"/g)].map((m) => Number(m[1]));
-    expect(order).toEqual([pendingHeight, 5, 4, 3, 2]);
+    expect(order).toEqual([pendingHeight, ...heights.slice(0, HOMEPAGE_BLOCK_COUNT - 1)]);
+    expect(
+      sandboxHome(),
+      'the fifth sealed block kept its slot — the open block was added, not counted',
+    ).not.toContain(`data-block="${heights[HOMEPAGE_BLOCK_COUNT - 1]!}"`);
     expect(sandboxHome()).toContain(`<span class="stamp open">Chưa niêm phong</span>`);
-    expect(sandboxHome()).toContain(`<a href="/tx/${SLUG}">${TITLE}</a>`);
+    expect(sandboxHome()).toContain(`<a href="/tx/${SLUG}">${rendered(TITLE)}</a>`);
   });
 
   it("flags the open block as the spine's start", () => {

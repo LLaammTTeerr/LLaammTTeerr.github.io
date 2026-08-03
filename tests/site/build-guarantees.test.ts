@@ -1,12 +1,18 @@
 import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { sandboxRepo, buildSandbox, chainBuildSandbox, pendingIdsIn } from './sandbox';
+import {
+  sandboxRepo,
+  buildSandbox,
+  chainBuildSandbox,
+  lockIn,
+  pendingIdsIn,
+} from './sandbox';
 import { canonicalRecordedTx, normalizeBody, wordCount } from '../../src/chain/canonical';
 import { sha256Hex } from '../../src/chain/hash';
 import { parsePost } from '../../src/chain/post';
 import type { Transaction } from '../../src/chain/types';
-import { getPosts } from '../../src/site/chain-data';
+import { rendered } from './dist';
 
 /**
  * Guarantees that belong to the *build*, not to a function.
@@ -21,14 +27,48 @@ import { getPosts } from '../../src/site/chain-data';
  *
  * These tests build a deliberately broken copy of the repository and assert on
  * what `astro build` did, so the wiring itself is what is under test.
+ *
+ * Every one of them edits a post: a title, a tag list, a declared research
+ * figure, one character of a body. That means every one of them needs a post
+ * whose frontmatter and prose it knows, so they run on a `'fixture'` sandbox —
+ * `tests/fixtures/posts`, this suite's own writing, sealed by its own
+ * `chain:build`. Reaching for `getPosts()[0]` instead made each edit a bet on
+ * what the author had published most recently: `research: 1.0` is not there to
+ * replace if that post declares no hours, and the phrase a drift edit targets
+ * is not there to alter if it belongs to a different post.
  */
 
-const SLUG = getPosts()[0]!.slug!;
+/** The fixture post every edit below targets, and what it declares. */
+const SLUG = '2026-06-15-first';
 const POST = join('content/posts', `${SLUG}.md`);
+/** A phrase from that post's body, and nowhere in its frontmatter. */
+const BODY_PHRASE = 'trên chuỗi';
+const ORIGINAL_TITLE = 'Bài viết đầu tiên';
+const ORIGINAL_HOURS = '2.0';
+const ORIGINAL_TAGS = 'essay';
+
+/**
+ * A sandbox whose chain seals the fixture posts into 2026-06 and 2026-07.
+ *
+ * The clock is August, so both months are past and both blocks are mined,
+ * leaving nothing open — the state an edit to a *sealed* post needs.
+ */
+function fixtureSandbox(): string {
+  return sandboxRepo({ content: 'fixture', chainAt: '2026-08-05' });
+}
+
+/** The sealed `post` transaction for `SLUG`, from the sandbox's own ledger. */
+function sealedPost(dir: string): Transaction {
+  const tx = lockIn(dir)
+    .blocks.flatMap((b) => b.transactions)
+    .find((t) => t.type === 'post' && t.slug === SLUG);
+  if (tx === undefined) throw new Error(`the sandbox chain sealed no post "${SLUG}"`);
+  return tx;
+}
 
 describe('the build refuses a post body that has drifted from the chain', () => {
   it('builds an untouched copy, then refuses the same copy with one character changed', () => {
-    const dir = sandboxRepo();
+    const dir = fixtureSandbox();
 
     // Control. Without it this test would pass for any reason the sandbox
     // fails to build — a missing directory in `COPIED`, a broken symlink —
@@ -41,13 +81,12 @@ describe('the build refuses a post body that has drifted from the chain', () => 
     ).toBe(true);
 
     // One character of the body, in the same shape as a typo fix to a sealed
-    // post. `chuỗi này` occurs only in the body — `chuỗi` alone also appears
-    // in the frontmatter `summary`, which is not hashed and would leave
-    // `contentHash` unchanged.
+    // post. The phrase is in the body and in no frontmatter field, so the edit
+    // reaches `contentHash` rather than something no hash covers.
     const path = join(dir, POST);
     const original = readFileSync(path, 'utf8');
-    const drifted = original.replace('chuỗi này', 'chuoi này');
-    expect(drifted, 'the drift edit changed nothing — the post body no longer contains the target text').not.toBe(original);
+    const drifted = original.replace(BODY_PHRASE, BODY_PHRASE.replace('ỗ', 'o'));
+    expect(drifted, `the fixture post's body no longer contains "${BODY_PHRASE}"`).not.toBe(original);
     writeFileSync(path, drifted);
 
     const build = buildSandbox(dir);
@@ -89,7 +128,8 @@ describe('the edit cycle a published post actually goes through', () => {
   }
 
   it('seals v1, amends to v2, amends to v3, then reverts to v2 and still builds', () => {
-    const dir = sandboxRepo();
+    const dir = fixtureSandbox();
+    const sealedHash = sealedPost(dir).hash;
     const path = join(dir, POST);
     const v1 = bodyOf(dir);
     const v2 = v1 + '\nPhiên bản hai.\n';
@@ -101,7 +141,7 @@ describe('the edit cycle a published post actually goes through', () => {
     expect(amendV2.status, `chain:build failed:\n${amendV2.output}`).toBe(0);
     // This post's own amendment, not a total — see pendingIdsIn. An amendment
     // is recorded under the hash it amends, which is the sealed post's.
-    expect(pendingIdsIn(dir)).toContain(getPosts()[0]!.hash);
+    expect(pendingIdsIn(dir)).toContain(sealedHash);
     expect(chainBuildSandbox(dir, '2026-09-05').status).toBe(0);
 
     // v3 — likewise, so both amendments are confirmed history.
@@ -143,7 +183,7 @@ describe('the edit cycle a published post actually goes through', () => {
     // carries a pending amendment. Accepting anything that had ever been
     // recorded, or anything at all, would pass every test above and be
     // worthless.
-    const dir = sandboxRepo();
+    const dir = fixtureSandbox();
     const path = join(dir, POST);
     writeFileSync(path, readFileSync(path, 'utf8') + '\nPhiên bản hai.\n');
     expect(chainBuildSandbox(dir, '2026-08-05').status).toBe(0);
@@ -180,7 +220,9 @@ describe("an amended post's page describes the amendment, not the original", () 
    * hash from the shown transaction's own fields and checks that its `body:`
    * line is the sha256 of the body on the page.
    */
-  const NEW_TITLE = 'Khối đầu tiên (đã sửa)';
+  const NEW_TITLE = `${ORIGINAL_TITLE} (đã sửa)`;
+  const NEW_TAG = 'chain';
+  const NEW_HOURS = '9.5';
   const NEW_SENTENCE = 'Một câu bổ sung hoàn toàn mới.';
 
   /** Applies the edit an author would make: title, tags, research, body. */
@@ -189,11 +231,16 @@ describe("an amended post's page describes the amendment, not the original", () 
     const original = readFileSync(path, 'utf8');
     const edited =
       original
-        .replace('title: "Khối đầu tiên"', `title: "${NEW_TITLE}"`)
-        .replace('tags: [meta]', 'tags: [meta, chain]')
-        .replace('research: 1.0', 'research: 9.5')
+        .replace(`title: "${ORIGINAL_TITLE}"`, `title: "${NEW_TITLE}"`)
+        .replace(`tags: [${ORIGINAL_TAGS}]`, `tags: [${ORIGINAL_TAGS}, ${NEW_TAG}]`)
+        .replace(`research: ${ORIGINAL_HOURS}`, `research: ${NEW_HOURS}`)
         .replace(/\n*$/, '\n') + `\n${NEW_SENTENCE}\n`;
     expect(edited, 'the fixture post no longer has the frontmatter this edit targets').not.toBe(original);
+    expect(edited, 'the title edit found nothing to replace').toContain(NEW_TITLE);
+    expect(edited, 'the tag edit found nothing to replace').toContain(
+      `tags: [${ORIGINAL_TAGS}, ${NEW_TAG}]`,
+    );
+    expect(edited, 'the research edit found nothing to replace').toContain(`research: ${NEW_HOURS}`);
     writeFileSync(path, edited);
   }
 
@@ -204,8 +251,9 @@ describe("an amended post's page describes the amendment, not the original", () 
   }
 
   it('prints a hash that commits to the text beside it, with the amended metadata', async () => {
-    const dir = sandboxRepo();
-    const sealedHash = getPosts()[0]!.hash;
+    const dir = fixtureSandbox();
+    const sealed = sealedPost(dir);
+    const sealedHash = sealed.hash;
     amend(dir);
 
     const record = chainBuildSandbox(dir, '2026-08-05');
@@ -240,22 +288,24 @@ describe("an amended post's page describes the amendment, not the original", () 
       .toBe(`body:${await sha256Hex(body)}`);
 
     // Every field the review found lying, checked against that same record.
-    expect(html).toContain(`>${NEW_TITLE}</h1>`);
-    expect(html).toContain(`<title>${NEW_TITLE}`);
+    expect(html).toContain(`>${rendered(NEW_TITLE)}</h1>`);
+    expect(html).toContain(`<title>${rendered(NEW_TITLE)}`);
     expect(html, 'the page is still headed by the superseded title').not.toMatch(
-      /<h1[^>]*>Khối đầu tiên<\/h1>/,
+      new RegExp(`<h1[^>]*>${rendered(ORIGINAL_TITLE)}</h1>`),
     );
-    expect(panel).toContain('chain.tag');
-    expect(html).toContain('#meta #chain');
+    expect(panel).toContain(`${NEW_TAG}.tag`);
+    expect(html).toContain(`#${ORIGINAL_TAGS} #${NEW_TAG}`);
     // §3.8 — gas is derived from the body, so it must be the count of the
     // words on this page, not the original transaction's stale figure.
     expect(panel).toContain(`<span class="num">${wordCount(body)}</span> từ`);
     expect(panel, 'gas is the superseded transaction\'s word count').not.toContain(
-      `<span class="num">${getPosts()[0]!.gasUsed}</span> từ`,
+      `<span class="num">${sealed.gasUsed}</span> từ`,
     );
     // §3.9 — the declared hours live in `research`; `value` is 0 on purpose.
-    expect(panel).toContain('<span class="num">9.5</span> giờ nghiên cứu');
-    expect(panel, 'value came from the superseded transaction').not.toContain('<span class="num">1.0</span> giờ');
+    expect(panel).toContain(`<span class="num">${NEW_HOURS}</span> giờ nghiên cứu`);
+    expect(panel, 'value came from the superseded transaction').not.toContain(
+      `<span class="num">${sealed.value.toFixed(1)}</span> giờ`,
+    );
     // §3.6 — the amendment is in the open block, so nothing here is `Sealed`.
     expect(panel).toContain('Chưa niêm phong');
     expect(panel, 'an unsealed amendment was stamped Sealed').not.toContain('>Sealed<');
@@ -267,7 +317,8 @@ describe("an amended post's page describes the amendment, not the original", () 
   }, 300_000);
 
   it('names the block once the amendment seals, and links it', () => {
-    const dir = sandboxRepo();
+    const dir = fixtureSandbox();
+    const sealedHash = sealedPost(dir).hash;
     amend(dir);
     expect(chainBuildSandbox(dir, '2026-08-05').status).toBe(0);
     const seal = chainBuildSandbox(dir, '2026-09-05');
@@ -292,7 +343,7 @@ describe("an amended post's page describes the amendment, not the original", () 
     expect(panel).toContain('<span class="stamp">Sealed</span>');
     // And the original is still reachable: it is what the block card for this
     // post shows, so the page must say which transaction it supersedes.
-    expect(panel).toContain(`<dt>Amends</dt><dd><span class="hash">${getPosts()[0]!.hash}</span></dd>`);
+    expect(panel).toContain(`<dt>Amends</dt><dd><span class="hash">${sealedHash}</span></dd>`);
   }, 300_000);
 });
 
@@ -328,7 +379,7 @@ describe('a hand-edited open block cannot publish a word count it made up', () =
   ].join('\n');
 
   it('re-derives the word count from the body, on every page that shows one', () => {
-    const dir = sandboxRepo();
+    const dir = fixtureSandbox();
     writeFileSync(join(dir, 'content/posts', `${SLUG}.md`), FILE);
     const chain = chainBuildSandbox(dir, '2026-08-05');
     expect(chain.status, `chain:build failed:\n${chain.output}`).toBe(0);
@@ -372,14 +423,14 @@ describe('a hand-edited open block cannot publish a word count it made up', () =
 describe('a post that declares no research hours', () => {
   /**
    * §3.8: `research` is optional and "defaults to `0.0`, which displays as `—`
-   * rather than a misleading `0`". The one post on the committed chain declares
-   * `1.0`, so the sealed ledger cannot exercise the default — and the sealed
-   * ledger must not be regenerated to make it. The sandbox's copy of
-   * `chain.lock.json` is set to `value: 0`, which is exactly what the engine
-   * commits for a post with no `research` key, and the real ledger is untouched.
+   * rather than a misleading `0`". The fixture posts declare `2.0` and `12.5`,
+   * so a chain built from them cannot exercise the default — and no committed
+   * ledger may be regenerated to make it. The sandbox's own `chain.lock.json`
+   * is set to `value: 0` throughout, which is exactly what the engine commits
+   * for a post with no `research` key.
    */
   it('renders an em dash on the post page and the block card, never 0.0', () => {
-    const dir = sandboxRepo();
+    const dir = fixtureSandbox();
     const lockPath = join(dir, 'chain.lock.json');
     const lock = JSON.parse(readFileSync(lockPath, 'utf8')) as {
       blocks: { transactions: { value: number }[] }[];

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { existsSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { sandboxRepo, buildSandbox, chainBuildSandbox } from './sandbox';
+import { sandboxRepo, buildSandbox, chainBuildSandbox, pendingIdsIn } from './sandbox';
 
 /**
  * The stats bar states one rule and every tile follows it.
@@ -39,13 +39,24 @@ describe('stats bar consistency', () => {
       return lock.blocks.reduce((n, b) => n + b.transactions.length, 0);
     })();
 
+    // Whatever else is unsealed here — the author may have published this month
+    // and committed `chain.pending.json`, which the sandbox copies — the
+    // fixture post is one of them. Counting "+1" instead measured how much of
+    // the author's own work was still in the open block.
+    const open = pendingIdsIn(dir);
+    expect(open, 'the fixture post did not land in the open block').toContain('2026-08-02-tam');
+
     const built = buildSandbox(dir);
     expect(built.status, built.output).toBe(0);
     const html = readFileSync(join(dir, 'dist/index.html'), 'utf8');
 
-    // The post is in the open block, not the lock — so a sealed-only count
-    // would report `sealedOnly` and this fails.
-    expect(tile(html, 'Transactions')).toBe(sealedOnly + 1);
+    // The open block's transactions are not in the lock — so a sealed-only
+    // count would report `sealedOnly`, which is strictly less.
+    expect(tile(html, 'Transactions')).toBe(sealedOnly + open.length);
+    expect(
+      tile(html, 'Transactions'),
+      'the tile counted the sealed blocks alone and ignored the open one',
+    ).toBeGreaterThan(sealedOnly);
 
     // And both tiles must describe the SAME chain state. Not a magnitude
     // comparison — one post sends to several tags and the identity is an

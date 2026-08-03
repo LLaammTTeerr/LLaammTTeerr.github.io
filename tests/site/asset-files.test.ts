@@ -10,7 +10,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { distPages, internalSrcs, resolvesIn } from './dist';
+import { DIST, distPages, internalSrcs, resolvesIn } from './dist';
 import { buildSandbox, chainBuildSandbox, sandboxRepo } from './sandbox';
 import { sha256Hex } from '../../src/chain/hash';
 import type { AssetRecord, Hex, Transaction } from '../../src/chain/types';
@@ -41,11 +41,12 @@ import {
  *    show. Serving either under a path the chain does not vouch for is the same
  *    falsehood at a different surface.
  *
- * The live repository has no assets and will have none until the author
- * publishes an image, so every populated assertion below runs against a fixture
- * directory or a *sandbox copy* driven through a real `chain:build` and a real
- * `astro build`. An assertion over `content/assets/` as it ships would pass
- * vacuously forever.
+ * Every populated assertion below runs against a fixture directory or a
+ * `'fixture'` *sandbox copy* — its own posts, its own empty registry — driven
+ * through a real `chain:build` and a real `astro build`. An assertion over
+ * `content/assets/` as it ships is vacuous on a chain with no images and, on
+ * one with images, is about the author's diagrams rather than about anything
+ * this file controls.
  */
 
 // Three files. V1 and V2 are the same name at two moments — the image swap.
@@ -282,12 +283,32 @@ describe('writeCommittedAssets', () => {
 });
 
 describe('emitSiteAssets, against the live chain', () => {
-  it('copies nothing, because the live registry is empty', async () => {
-    // Pins the state this ships in. Deliberately not the evidence that the
-    // copy works — it cannot fail while the chain has no assets, which is why
-    // everything above and below is fixture- or sandbox-driven.
+  it('copies exactly what the shipped build serves under /assets', async () => {
+    // The wiring, not the rule: this is the function `astro.config.mjs` calls
+    // from `astro:build:done`, so what it selects from the live chain now must
+    // be what the build in `tests/global-setup.ts` actually put in
+    // `dist/assets/` — the gallery page aside. Two independent surfaces, so it
+    // is a check and not a restatement.
+    //
+    // Stated as "it copies nothing" this was a fact about a chain with no
+    // images: it could not fail while that held, and it was simply false the
+    // moment the author published one. Everything above and below is fixture-
+    // or sandbox-driven for that reason.
+    //
+    // `emitSiteAssets` takes the *dist* directory and writes into its
+    // `assets/` subdirectory, exactly as the build hook hands it `dist`.
     const out = mkdtempSync(join(tmpdir(), 'asset-out-'));
-    expect(await emitSiteAssets(out)).toEqual([]);
+    const written = await emitSiteAssets(out);
+    const served = readdirSync(join(DIST, 'assets'))
+      .filter((f) => f !== 'index.html')
+      .sort();
+    expect([...written].sort()).toEqual(served);
+    for (const file of written) {
+      expect(
+        readFileSync(join(out, 'assets', file)).equals(readFileSync(join(DIST, 'assets', file))),
+        `${file} was emitted with different bytes from the ones the build shipped`,
+      ).toBe(true);
+    }
   });
 });
 
@@ -317,7 +338,10 @@ describe('a published image, end to end', () => {
   let sealedDist = '';
 
   beforeAll(() => {
-    dir = sandboxRepo();
+    // `'fixture'`: this suite asserts that the registry holds *this* file and
+    // then *these two* tokens, which is only true of a registry that starts
+    // empty (§3.2b assigns ids from 1 by first appearance).
+    dir = sandboxRepo({ content: 'fixture' });
     mkdirSync(join(dir, 'content/assets'), { recursive: true });
     writeFileSync(join(dir, 'content/assets', FILE), V1);
     writeFileSync(join(dir, 'content/posts', `${SLUG}.md`), POST);
@@ -479,7 +503,7 @@ describe('an asset that would overwrite a route', () => {
   ].join('\n');
 
   it('fails the build and leaves the gallery page intact', () => {
-    const dir = sandboxRepo();
+    const dir = sandboxRepo({ content: 'fixture' });
     mkdirSync(join(dir, 'content/assets'), { recursive: true });
     writeFileSync(join(dir, 'content/assets/index.html'), V1);
     writeFileSync(join(dir, 'content/posts', `${SLUG}.md`), POST);
@@ -519,7 +543,7 @@ describe('an image referenced only by a pending post', () => {
   ].join('\n');
 
   it('serves the image while the block is still open', async () => {
-    const dir = sandboxRepo();
+    const dir = sandboxRepo({ content: 'fixture' });
     mkdirSync(join(dir, 'content/assets'), { recursive: true });
     writeFileSync(join(dir, 'content/assets', FILE), V1);
     writeFileSync(join(dir, 'content/posts', `${SLUG}.md`), POST);

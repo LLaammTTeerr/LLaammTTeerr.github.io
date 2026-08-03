@@ -3,10 +3,11 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseRules, selectorParts } from './css';
-import { DIST, distPages, readDist, resolvesIn } from './dist';
+import { DIST, distPages, resolvesIn } from './dist';
 import { buildSandbox, chainBuildSandbox, sandboxRepo } from './sandbox';
 import { sha256Hex } from '../../src/chain/hash';
 import type { AssetRecord, Hex, Transaction } from '../../src/chain/types';
+import { getAssets } from '../../src/site/chain-data';
 import {
   assetEmbed,
   assetMime,
@@ -21,11 +22,13 @@ import { routeById } from '../../src/site/routes';
  * §3.2b — `/assets` and `/asset/<tokenId>`: the files posts reference, minted
  * as tokens so that verifying a post covers its diagrams and not only its text.
  *
- * **The live chain has zero assets**, and that is the state this ships in — so
- * every populated assertion here is driven either through a fabricated registry
- * handed straight to `assetViews`, or through a *sandbox copy* of the repository
- * with a real image, a real `chain:build` and a real `astro build`. An assertion
- * over the live registry would pass vacuously forever whatever the code did.
+ * Every populated assertion here is driven either through a fabricated registry
+ * handed straight to `assetViews`, or through a `'fixture'` *sandbox copy* — its
+ * own posts, its own empty registry — with a real image, a real `chain:build`
+ * and a real `astro build`. Never through the live registry: on a chain with no
+ * images those assertions pass vacuously whatever the code does, and on a chain
+ * with images they assert token ids and byte counts belonging to the author's
+ * diagrams rather than to anything this file controls.
  *
  * The one defect this file exists to keep out: after an image swap two tokens
  * share a `file`, and a page that trusts the registry's `file` field shows the
@@ -182,13 +185,21 @@ describe('assetViews', () => {
   });
 });
 
-describe('the live registry, which is empty', () => {
-  it('has no tokens and no token to look up', async () => {
-    // Pins the state the shipped build describes. Not a substitute for the
-    // fixtures above: this assertion cannot fail while the chain has no assets,
-    // which is exactly why nothing else in this file rests on it.
-    expect(await getAssetViews()).toEqual([]);
-    expect(await getAssetView(1)).toBeUndefined();
+describe('the live registry, as the ledger records it', () => {
+  it('views exactly the tokens the committed registry holds, and no other', async () => {
+    // Pins that the shipped build's gallery is reading the committed registry.
+    // Stated as "the live registry is empty" it was a fact about a chain with
+    // no images: vacuous while that held, and false the moment the author
+    // published a diagram. The token ids come from the ledger either way.
+    const registry = getAssets();
+    expect((await getAssetViews()).map((v) => v.tokenId)).toEqual(registry.map((a) => a.tokenId));
+    for (const record of registry) {
+      expect((await getAssetView(record.tokenId))?.hash).toBe(record.hash);
+    }
+    // §3.2b — ids are assigned from 1 by first appearance, so neither end of
+    // the range has a page beyond what was minted.
+    expect(await getAssetView(0)).toBeUndefined();
+    expect(await getAssetView(registry.length + 1)).toBeUndefined();
   });
 });
 
@@ -206,7 +217,28 @@ describe('the assets route', () => {
 });
 
 describe('an empty registry', () => {
-  const html = (): string => readDist('assets/index.html');
+  /**
+   * A `'fixture'` sandbox whose posts reference no file at all, so the gallery
+   * has nothing to list. Read from a sandbox rather than from the shipped
+   * `dist/`: the empty state is the repository's *today*, not its contract, and
+   * asserting it against the live build makes every sentence below a claim
+   * about whether the author has published a diagram yet.
+   */
+  let empty = '';
+  let emptyDir = '';
+
+  beforeAll(() => {
+    emptyDir = sandboxRepo({ content: 'fixture', chainAt: '2026-09-05' });
+    const build = buildSandbox(emptyDir);
+    if (build.status !== 0) throw new Error(`sandbox build with no assets failed:\n${build.output}`);
+    const lock = JSON.parse(readFileSync(join(emptyDir, 'chain.lock.json'), 'utf8')) as {
+      assets: AssetRecord[];
+    };
+    if (lock.assets.length > 0) throw new Error('the fixture minted a token — the registry is not empty');
+    empty = readFileSync(join(emptyDir, 'dist/assets/index.html'), 'utf8');
+  }, 600_000);
+
+  const html = (): string => empty;
 
   it('says there are no tokens rather than rendering a bare page', () => {
     expect(html(), 'the empty gallery rendered a token list').not.toMatch(/<ul class="tokens">/);
@@ -219,7 +251,7 @@ describe('an empty registry', () => {
 
   it('links no token page, because there is none', () => {
     expect(html()).not.toMatch(/href="\/asset\//);
-    expect(distPages().some((p) => p.startsWith('asset/'))).toBe(false);
+    expect(distPages(join(emptyDir, 'dist')).some((p) => p.startsWith('asset/'))).toBe(false);
   });
 
   it('says no token has been minted — not that no post references a file', () => {
@@ -259,7 +291,7 @@ describe('an open month, where files are served and no token exists yet', () => 
   ].join('\n');
 
   it('serves the image and says no token has been minted, without contradicting itself', () => {
-    const dir = sandboxRepo();
+    const dir = sandboxRepo({ content: 'fixture' });
     mkdirSync(join(dir, 'content/assets'), { recursive: true });
     writeFileSync(join(dir, 'content/assets', FILE), V1);
     writeFileSync(join(dir, 'content/posts', `${SLUG}.md`), POST);
@@ -314,7 +346,12 @@ describe('a registry with a token in it', () => {
   let goneToken = '';
 
   beforeAll(() => {
-    dir = sandboxRepo();
+    // `'fixture'`: token ids are assigned from 1 by first appearance on the
+    // chain (§3.2b), so "this file is token #1" and "the swap minted #2" are
+    // only true of a registry that starts empty. Copying the repository's own
+    // ledger made both of them assertions about how many diagrams the author
+    // had already published.
+    dir = sandboxRepo({ content: 'fixture' });
     mkdirSync(join(dir, 'content/assets'), { recursive: true });
     writeFileSync(join(dir, 'content/assets', FILE), V1);
     writeFileSync(join(dir, 'content/posts', `${SLUG}.md`), POST);

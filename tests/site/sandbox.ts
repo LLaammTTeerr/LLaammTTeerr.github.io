@@ -1,9 +1,19 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { cpSync, existsSync, mkdtempSync, readFileSync, symlinkSync } from 'node:fs';
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+} from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { Chain } from '../../src/chain/types';
 
 /**
  * A throwaway copy of the repository that a test may deliberately break, then
@@ -24,9 +34,10 @@ import { fileURLToPath } from 'node:url';
 const ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 
 /**
- * Everything `astro build` and `chain:build` read. `node_modules` is symlinked
- * rather than copied (500 MB); `dist/` and `.astro/` are deliberately absent so
- * the sandbox build cannot pass by finding a stale artefact.
+ * Everything `astro build` and `chain:build` read. `node_modules` is linked
+ * rather than copied (500 MB — see `linkNodeModules`); `dist/` and `.astro/`
+ * are deliberately absent so the sandbox build cannot pass by finding a stale
+ * artefact.
  *
  * If a future source directory is added and not listed here, the control
  * build in the drift test fails loudly rather than the sandbox silently
@@ -52,14 +63,118 @@ const COPIED = [
  */
 const COPIED_IF_PRESENT = ['chain.pending.json'];
 
-export function sandboxRepo(): string {
+/** The posts a `content: 'fixture'` sandbox writes instead of the author's. */
+const FIXTURE_POSTS = join(ROOT, 'tests/fixtures/posts');
+
+export interface SandboxOptions {
+  /**
+   * Whose writing the copy holds.
+   *
+   * `'repo'` (the default) copies `content/` and the committed ledger as they
+   * are. Use it when the test's subject is the repository as it ships — a
+   * control build, a link check, the profile page.
+   *
+   * `'fixture'` replaces `content/posts/` with `tests/fixtures/posts`, empties
+   * `content/assets/` and `content/drafts/`, and drops `chain.lock.json` and
+   * `chain.pending.json`, so the copy's history is **only** what the test's own
+   * `chainAt`/`chainBuildSandbox` calls mine. Use it whenever an assertion
+   * needs a specific chain shape — "the registry holds exactly these two
+   * tokens", "six sealed blocks", "this month's block is still open", "the
+   * mempool is empty". Against `'repo'` those are assertions about whatever the
+   * author happens to have published, and they go red the day they publish
+   * anything: seeding `npm run demo:seed` turned 59 of them red at once.
+   *
+   * The fixture posts are `tests/fixtures/posts`, shared with
+   * `tests/chain/build.test.ts` and pinned there by a snapshot, so they change
+   * only deliberately. They reference no images, which is what lets an asset
+   * test start from an empty registry and get token id 1.
+   */
+  content?: 'repo' | 'fixture';
+  /**
+   * Injected clock for one `chain:build` run before the sandbox is handed back,
+   * `YYYY-MM-DD`. Required for a `'fixture'` sandbox that will be handed
+   * straight to `buildSandbox`, since dropping the ledger leaves nothing for
+   * `astro build` to read until a chain is mined.
+   */
+  chainAt?: string;
+}
+
+/**
+ * A `node_modules` for the sandbox: a real directory of symlinks to the real
+ * one's entries, rather than one symlink to the directory itself.
+ *
+ * Copying 500 MB per sandbox is out of the question, but a single symlink makes
+ * every sandbox share one **writable** path — `node_modules/.vite`, where Vite
+ * caches its optimized dependencies. Vite builds that cache by writing
+ * `deps_temp_<hash>` and renaming it over `deps`, and two sandbox builds
+ * running at once (vitest runs test files in parallel) race on that rename:
+ * `ENOTEMPTY: rename '…/deps_temp_…' -> '…/deps'`, in whichever test happened
+ * to lose, with an error naming a line inside Vite and nothing to do with the
+ * code under test. Per-entry links keep every package resolvable and leave
+ * `.vite` inside the sandbox's own directory, where only that build writes it.
+ *
+ * `.vite` and `.cache` are skipped rather than linked, for the same reason.
+ */
+function linkNodeModules(dir: string): void {
+  const target = join(dir, 'node_modules');
+  mkdirSync(target);
+  for (const entry of readdirSync(join(ROOT, 'node_modules'))) {
+    if (entry === '.vite' || entry === '.cache') continue;
+    symlinkSync(join(ROOT, 'node_modules', entry), join(target, entry));
+  }
+}
+
+/** Empties a directory of everything but the `.gitkeep` that commits it. */
+function emptyOut(dir: string): void {
+  if (!existsSync(dir)) return;
+  for (const name of readdirSync(dir)) {
+    if (name !== '.gitkeep') rmSync(join(dir, name), { recursive: true, force: true });
+  }
+}
+
+export function sandboxRepo(options: SandboxOptions = {}): string {
   const dir = mkdtempSync(join(tmpdir(), 'blogchain-build-'));
   for (const entry of COPIED) cpSync(join(ROOT, entry), join(dir, entry), { recursive: true });
   for (const entry of COPIED_IF_PRESENT) {
     if (existsSync(join(ROOT, entry))) cpSync(join(ROOT, entry), join(dir, entry));
   }
-  symlinkSync(join(ROOT, 'node_modules'), join(dir, 'node_modules'));
+  linkNodeModules(dir);
+
+  if (options.content === 'fixture') {
+    emptyOut(join(dir, 'content/posts'));
+    emptyOut(join(dir, 'content/assets'));
+    emptyOut(join(dir, 'content/drafts'));
+    cpSync(FIXTURE_POSTS, join(dir, 'content/posts'), { recursive: true });
+    rmSync(join(dir, 'chain.lock.json'), { force: true });
+    rmSync(join(dir, 'chain.pending.json'), { force: true });
+  }
+
+  if (options.chainAt !== undefined) {
+    const built = chainBuildSandbox(dir, options.chainAt);
+    if (built.status !== 0) {
+      throw new Error(`chain:build at ${options.chainAt} failed in the sandbox:\n${built.output}`);
+    }
+  }
   return dir;
+}
+
+/**
+ * A sandbox's own `chain.lock.json`, as the build it ran wrote it.
+ *
+ * Every expectation about heights, token ids and sealed hashes comes from here
+ * rather than from a literal: the sandbox mines a real chain, and reading it
+ * back is what keeps the test's expected values tied to that chain instead of
+ * to the one the repository happens to ship.
+ */
+export function lockIn(dir: string): Chain {
+  return JSON.parse(readFileSync(join(dir, 'chain.lock.json'), 'utf8')) as Chain;
+}
+
+/** A sandbox's sealed block heights, newest first. */
+export function sealedHeightsIn(dir: string): number[] {
+  return lockIn(dir)
+    .blocks.map((b) => b.height)
+    .sort((a, b) => b - a);
 }
 
 export interface BuildResult {

@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { CHAIN_CONFIG } from '../../chain.config';
 import { identityAddress } from '../../src/chain/address';
 import { senders } from '../../src/site/addresses';
-import { getPosts, postMetaLine, researchHours, shortHash } from '../../src/site/chain-data';
+import { postMetaLine, researchHours, shortHash } from '../../src/site/chain-data';
 import { parseRules, selectorParts } from './css';
-import { DIST, distPages, internalHrefs, readDist, resolvesIn, rowFor } from './dist';
+import { DIST, distPages, internalHrefs, readDist, rendered, resolvesIn, rowFor } from './dist';
 import { buildSandbox, chainBuildSandbox, sandboxRepo } from './sandbox';
 
 /**
@@ -15,9 +15,10 @@ import { buildSandbox, chainBuildSandbox, sandboxRepo } from './sandbox';
  * `address-pages.test.ts` gives: a unit test can only prove a function is
  * right, never that the route still calls it.
  *
- * The shipped ledger holds one post from one author, so "lists every
- * transaction" and "shows no other address" are true of almost any
- * implementation over it. What the profile's *link* rendering does — no
+ * Every expectation about the card is derived from the chain the build read,
+ * never written down: the author publishes, and a literal count, title or total
+ * here would start failing on the day they do while saying nothing about this
+ * page. What the profile's *link* rendering does — no
  * section when there is nothing to show, a link for an entry that declares a
  * url and plain text for one that does not — cannot be exercised against the
  * real `content/profile.md`, which declares three labels and no url at all, so
@@ -26,6 +27,18 @@ import { buildSandbox, chainBuildSandbox, sandboxRepo } from './sandbox';
  */
 
 const page = () => readDist('about/index.html');
+
+/**
+ * Every per-row hours figure a card states, in document order.
+ *
+ * The lookahead matters: an amended row continues past its hours with
+ * `· <a class="amend">đã sửa</a>` (§3.9), so a pattern anchored on the closing
+ * `</span>` silently skips exactly the rows an amendment touched — and those
+ * are the rows whose figure the total is most likely to get wrong.
+ */
+function rowHours(card: string): number[] {
+  return [...card.matchAll(/· ([\d.]+) giờ(?=[ <])/g)].map((m) => Number(m[1]!));
+}
 
 /** The address card, without the nav/layout/bio/links around it. */
 function cardOf(html: string): string {
@@ -69,18 +82,23 @@ describe('the author address card', () => {
 
   it("lists the author's transactions", () => {
     // Every post is sent FROM this address, so its history is the whole chain.
-    const posts = getPosts();
+    //
+    // `senders()`, not `getPosts()`: the card lists the open block's posts too
+    // (§3.6), and an amended post is listed under the title its newest
+    // amendment declares (§3.9). Reading the sealed originals would demand the
+    // superseded title — which is exactly the falsehood the page must not print.
+    const posts = senders();
     expect(posts.length, 'the shipped ledger has no posts to check').toBeGreaterThan(0);
-    for (const tx of posts) expect(page()).toContain(tx.title!);
+    for (const post of posts) expect(page()).toContain(rendered(post.title));
   });
 
   it('links every listed post to its own transaction page, and every link resolves', () => {
     const card = cardOf(page());
-    for (const tx of getPosts()) {
-      expect(card, `${tx.slug} is not linked from /about`).toContain(
-        `<a href="/tx/${tx.slug}">${tx.title}</a>`,
+    for (const post of senders()) {
+      expect(card, `${post.slug} is not linked from /about`).toContain(
+        `<a href="/tx/${post.slug}">${rendered(post.title)}</a>`,
       );
-      expect(resolvesIn(DIST, `/tx/${tx.slug}`)).toBe(true);
+      expect(resolvesIn(DIST, `/tx/${post.slug}`)).toBe(true);
     }
   });
 
@@ -109,15 +127,27 @@ describe('the author address card', () => {
       const row = rowFor(card, post.slug);
       expect(row, `${post.slug} has no row on /about`).not.toBeNull();
       expect(row!, `${post.slug}'s row states no figures`).toContain(postMetaLine(post));
-      expect(row!).toContain(`${post.gasUsed} từ`);
-      expect(row!).toContain(`${researchHours(post.value)} giờ`);
+      // Anchored to the real figures too, so a `postMetaLine` that returned a
+      // constant would still have to match the chain. §3.8 puts an em dash
+      // where a figure is absent — an undeclared research value, or a word
+      // count that could not be re-derived — so the absent case is asserted as
+      // the em dash and never as the word `null`.
+      expect(row!).toContain(post.gasUsed === null ? '— ·' : `${post.gasUsed} từ`);
+      const hours = researchHours(post.value);
+      expect(row!).toContain(hours === null ? '· —' : `${hours} giờ`);
     }
   });
 
   it('adds up: the rows sum to the Research total the card header states', () => {
     const card = cardOf(page());
-    const hours = [...card.matchAll(/· ([\d.]+) giờ<\/span>/g)].map((m) => Number(m[1]!));
-    expect(hours.length, 'no row on the card states an hours figure').toBe(senders().length);
+    const hours = rowHours(card);
+    // One figure per row that has one. A post declaring nothing renders `—`
+    // (§3.8) and contributes 0 to the total, so it is absent from both sides.
+    const declared = senders().filter((p) => researchHours(p.value) !== null);
+    expect(declared.length, 'no post on the chain declares any hours to sum').toBeGreaterThan(0);
+    expect(hours.length, 'the rows and the chain disagree on who declared hours').toBe(
+      declared.length,
+    );
     const stated = /<dt>Research<\/dt><dd><span class="num">([\d.]+)<\/span>/.exec(card);
     expect(stated, 'the card states no Research total').not.toBeNull();
     expect(hours.reduce((a, b) => a + b, 0)).toBeCloseTo(Number(stated![1]!), 5);
@@ -131,44 +161,65 @@ describe('the author address card', () => {
   });
 });
 
-describe('the Research total, on a chain the committed ledger cannot discriminate', () => {
+describe('the Research total, over an amendment the shipped ledger may not hold', () => {
   /**
-   * The shipped ledger holds one post, never amended — `currentValue(tx)` and
-   * `tx.value` agree on it by coincidence, so the assertion above
-   * ("states the same transaction count and total research hours as
-   * senders() derives") would still pass with `/about` summing `tx.value`
-   * directly, which is wrong the moment anything is amended (§3.9:
-   * `Transaction.value` is fixed at 0 on an amendment). This drives a real
-   * `chain:build` over a real edit, the same proof Task 1 used for the tag
-   * address pages' own total (progress.md: 4.0 sealed then amended to 12.5
-   * moved the tag page's figure from 4.0 to 12.5).
+   * `/about` summing `Transaction.value` directly is wrong the moment anything
+   * is amended (§3.9: `Transaction.value` is fixed at 0 on an amendment, and
+   * the current figure lives in the newest amendment's `research`), and the
+   * assertion above ("states the same transaction count and total research
+   * hours as senders() derives") cannot see it — both sides would be wrong
+   * together.
+   *
+   * So this constructs the chain it needs rather than hoping the committed one
+   * has that shape: a `'fixture'` sandbox, whose posts and whose ledger are
+   * this test's own, driven through a real `chain:build` over a real edit and
+   * a real `astro build`.
    */
+  const AMENDED = '2026-06-15-first';
+  const ORIGINAL_HOURS = '2.0';
+  const AMENDED_HOURS = '9.5';
+
   it("reflects the post's amended research hours, not its original value", () => {
-    const dir = sandboxRepo();
-    const slug = getPosts()[0]!.slug!;
-    const path = join(dir, 'content/posts', `${slug}.md`);
+    const dir = sandboxRepo({ content: 'fixture', chainAt: '2026-08-05' });
+    const path = join(dir, 'content/posts', `${AMENDED}.md`);
     const original = readFileSync(path, 'utf8');
-    const amended = original.replace('research: 1.0', 'research: 9.5');
-    expect(amended, 'the fixture post has no "research: 1.0" for this edit to target').not.toBe(original);
+    const amended = original.replace(`research: ${ORIGINAL_HOURS}`, `research: ${AMENDED_HOURS}`);
+    expect(
+      amended,
+      `the fixture post has no "research: ${ORIGINAL_HOURS}" for this edit to target`,
+    ).not.toBe(original);
     writeFileSync(path, amended);
 
-    // Recorded but not sealed: `currentValue` must resolve it from the open
-    // block, the same as `getPostContent` and the tag/series address pages do.
+    // Recorded but not sealed: the resolution must find it in the open block,
+    // the same as `getPostContent` and the tag/series address pages do.
     const record = chainBuildSandbox(dir, '2026-08-05');
     expect(record.status, `chain:build failed:\n${record.output}`).toBe(0);
 
     const build = buildSandbox(dir);
     expect(build.status, `sandbox build failed:\n${build.output}`).toBe(0);
-    const html = readFileSync(join(dir, 'dist/about/index.html'), 'utf8');
+    const card = cardOf(readFileSync(join(dir, 'dist/about/index.html'), 'utf8'));
 
-    expect(html).toContain('<dt>Research</dt><dd><span class="num">9.5</span> giờ nghiên cứu</dd>');
-    expect(
-      html,
-      'the total is still the pre-amendment figure — it summed Transaction.value, not currentValue',
-    ).not.toContain('<span class="num">1.0</span> giờ nghiên cứu');
-    // The transaction count is untouched: the edit amends the one post
-    // already there, it does not add another.
-    expect(html).toContain('<dt>Txns</dt><dd><span class="num">1</span></dd>');
+    // The amended post's own row carries the new figure and not the old one.
+    const row = rowFor(card, AMENDED);
+    expect(row, `${AMENDED} has no row on /about`).not.toBeNull();
+    expect(row!).toContain(`${AMENDED_HOURS} giờ`);
+    expect(row!, 'the row still states the superseded figure').not.toContain(
+      `${ORIGINAL_HOURS} giờ`,
+    );
+
+    // And the header total is the sum of those rows. A total summing
+    // `Transaction.value` would read 2.0 here while the row reads 9.5, so the
+    // card would contradict itself — which is the defect this pins.
+    const hours = rowHours(card);
+    const stated = /<dt>Research<\/dt><dd><span class="num">([\d.]+)<\/span>/.exec(card);
+    expect(stated, 'the card states no Research total').not.toBeNull();
+    expect(hours).toContain(Number(AMENDED_HOURS));
+    expect(hours.reduce((a, b) => a + b, 0)).toBeCloseTo(Number(stated![1]!), 5);
+
+    // The transaction count is untouched: the edit amends a post already
+    // there, it does not add another. Counted from the sandbox's own posts.
+    const posts = readdirSync(join(dir, 'content/posts')).filter((f) => f.endsWith('.md')).length;
+    expect(card).toContain(`<dt>Txns</dt><dd><span class="num">${posts}</span></dd>`);
   }, 300_000);
 });
 

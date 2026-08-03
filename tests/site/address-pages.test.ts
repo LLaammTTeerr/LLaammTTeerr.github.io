@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { parseRules, selectorParts } from './css';
-import { DIST, distPages, internalHrefs, readDist, resolvesIn, rowFor } from './dist';
+import { DIST, distPages, internalHrefs, readDist, rendered, resolvesIn, rowFor } from './dist';
 import { getAddresses } from '../../src/site/addresses';
 import { getPosts, postMetaLine, researchHours, shortHash } from '../../src/site/chain-data';
 
@@ -96,7 +96,7 @@ describe('an address page', () => {
     expect(meta.transactions.length, 'meta.tag received nothing to list').toBeGreaterThan(0);
     for (const tx of meta.transactions) {
       expect(card, `${tx.slug} is not linked from its address page`).toContain(
-        `<a href="/tx/${tx.slug}">${tx.title}</a>`,
+        `<a href="/tx/${tx.slug}">${rendered(tx.title)}</a>`,
       );
       // §3.1 — truncated here, because this is a list and the transaction has
       // a detail page of its own where the full hash lives.

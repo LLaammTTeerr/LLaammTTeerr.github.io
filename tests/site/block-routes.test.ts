@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DIST, internalHrefs, readDist, resolvesIn } from './dist';
-import { getBlocks, splitHashWork } from '../../src/site/chain-data';
+import { getBlocks, getPendingBlock, splitHashWork } from '../../src/site/chain-data';
 import { buildSandbox, chainBuildSandbox, sandboxRepo } from './sandbox';
 
 /**
@@ -83,7 +83,11 @@ describe('the block list at /blocks', () => {
 
   it('orders the blocks newest first', () => {
     const order = [...listHtml().matchAll(/data-block="(\d+)"/g)].map((m) => Number(m[1]));
-    expect(order).toHaveLength(getBlocks().length);
+    // Every sealed block, plus the open one when the repository has one —
+    // `/blocks` lists it (§3.6) and this page is where a reader goes to see
+    // it. Counting only the sealed blocks made this a check that the author
+    // had published nothing this month.
+    expect(order).toHaveLength(getBlocks().length + (getPendingBlock() === null ? 0 : 1));
     expect(order).toEqual([...order].sort((a, b) => b - a));
   });
 

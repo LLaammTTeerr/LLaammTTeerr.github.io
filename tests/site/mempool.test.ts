@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, writeFile
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseRules, selectorParts } from './css';
-import { DIST, distPages, readDist, resolvesIn } from './dist';
+import { DIST, distPages, readDist, rendered, resolvesIn } from './dist';
 import { buildSandbox, chainBuildSandbox, pendingIdsIn, sandboxRepo } from './sandbox';
 import { getDrafts } from '../../src/site/drafts';
 import { routeById } from '../../src/site/routes';
@@ -18,12 +18,16 @@ import { routeById } from '../../src/site/routes';
  * so an unscoped `not.toContain` would either pass trivially or fail on chrome
  * that has nothing to do with a draft.
  *
- * `content/drafts/` ships empty, which is the state this route lives in almost
- * always — so the populated cases are driven through a *sandbox copy* of the
- * repository with real draft files and a real `astro build`, never against the
- * live tree. The empty case is built in the same sandbox before the fixtures
- * are written, so both states come from a controlled input rather than from
- * whatever the repository happens to hold on the day.
+ * Both the empty state and the populated one are driven through a `'fixture'`
+ * *sandbox copy*: the repository's own `content/drafts/` is whatever the author
+ * has half-written today, so "the mempool lists exactly these two drafts" and
+ * "the mempool is empty" are assertions about their desk, not about this route.
+ * The empty case is built in the same sandbox before the fixtures are written,
+ * so a failure below is the page's behaviour and not a broken sandbox.
+ *
+ * What the live repository still owes is *agreement*: whatever `getDrafts()`
+ * finds there, the shipped `/mempool` must show. That is the last test in the
+ * empty-mempool block, and it holds whether the author has drafts or not.
  */
 
 const draftFile = (title: string, date: string, body: string): string =>
@@ -57,7 +61,7 @@ let homeWithDrafts = '';
 let blocksWithDrafts = '';
 
 beforeAll(() => {
-  const dir = sandboxRepo();
+  const dir = sandboxRepo({ content: 'fixture', chainAt: '2026-08-05' });
   const drafts = join(dir, 'content/drafts');
   mkdirSync(drafts, { recursive: true });
 
@@ -207,17 +211,32 @@ describe('an empty mempool', () => {
     expect(emptyHtml).toContain('chưa lên chuỗi');
   });
 
-  it('is the state the live repository ships', () => {
-    // Not a substitute for the sandbox: this pins that the shipped build is
-    // the empty one, so the assertions above describe what a reader sees today.
-    expect(getDrafts()).toEqual([]);
-    expect(cardOf(readDist('mempool/index.html'))).toMatch(/Chưa có bản nháp nào/);
+  it('is what the live repository ships, whatever it holds', () => {
+    // Not a substitute for the sandbox: this pins that the shipped build says
+    // the same thing about `content/drafts/` that `getDrafts()` does, so the
+    // assertions above describe what a reader actually sees today. Stating it
+    // as "the live mempool is empty" made it a fact about the author's desk —
+    // true until the moment they start a draft, and then red for a reason that
+    // has nothing to do with this route.
+    const drafts = getDrafts();
+    const card = cardOf(readDist('mempool/index.html'));
+    if (drafts.length === 0) {
+      expect(card).toMatch(/Chưa có bản nháp nào/);
+      expect(card, 'the empty mempool rendered a draft list').not.toMatch(/<ul class="mem">/);
+      return;
+    }
+    expect(card, 'the shipped mempool denies drafts that are on disk').not.toMatch(
+      /Chưa có bản nháp nào/,
+    );
+    expect(titlesIn(listOf(card))).toEqual(drafts.map((d) => rendered(d.title)));
   });
 });
 
 describe('publishing a draft', () => {
   it('takes it out of the mempool and puts it in the chain', () => {
-    const dir = sandboxRepo();
+    // `'fixture'`, so "the mempool is empty again afterwards" is a fact about
+    // this draft rather than about the author's other unfinished writing.
+    const dir = sandboxRepo({ content: 'fixture', chainAt: '2026-08-05' });
     const drafts = join(dir, 'content/drafts');
     mkdirSync(drafts, { recursive: true });
     const draft = join(drafts, `${NEWER.slug}.md`);

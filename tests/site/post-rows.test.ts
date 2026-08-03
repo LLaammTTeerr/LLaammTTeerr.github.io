@@ -62,15 +62,27 @@ const AMENDED = '2026-08-01-mo-algorithm';
 const FRESH = '2026-09-02-bai-moi';
 const OLD_TITLE = "Mo Algorithm";
 const NEW_TITLE = "Mo Algorithm và cách tối ưu";
+/**
+ * The tag whose address page the sum below is read off.
+ *
+ * Deliberately one no fixture post and no published post carries: "the card
+ * has two rows and they add up to its header" is a statement about the two
+ * posts this file writes, and any third post filed under the same tag makes it
+ * a statement about someone else's writing instead.
+ */
+const TAG = 'mo-thuat-toan';
+const TAG_PAGE = `address/${TAG}.tag/index.html`;
 
 let dir = '';
 
 beforeAll(() => {
-  dir = sandboxRepo();
+  // `'fixture'`: the sandbox's chain must hold exactly what this file put in
+  // it, plus fixture posts that carry neither `TAG` nor either slug.
+  dir = sandboxRepo({ content: 'fixture' });
   writePost(
     dir,
     AMENDED,
-    { title: `"${OLD_TITLE}"`, date: '2026-08-01', tags: '[cp, algorithm]', series: 'ghi-chu', research: '4.0' },
+    { title: `"${OLD_TITLE}"`, date: '2026-08-01', tags: `[${TAG}, algorithm]`, series: 'ghi-chu', research: '4.0' },
     'Ghi chú ngắn về thuật toán Mo và cách nó sắp xếp truy vấn theo khối.',
   );
 
@@ -87,14 +99,14 @@ beforeAll(() => {
   writePost(
     dir,
     AMENDED,
-    { title: `"${NEW_TITLE}"`, date: '2026-08-01', tags: '[cp, algorithm]', series: 'ghi-chu', research: '12.5' },
+    { title: `"${NEW_TITLE}"`, date: '2026-08-01', tags: `[${TAG}, algorithm]`, series: 'ghi-chu', research: '12.5' },
     'Ghi chú ngắn về thuật toán Mo và cách nó sắp xếp truy vấn theo khối.\n\n' +
       'Một đoạn bổ sung sau khi sửa bài, đủ dài để số từ của bản mới khác hẳn bản gốc.',
   );
   writePost(
     dir,
     FRESH,
-    { title: '"Bài chưa niêm phong"', date: '2026-09-02', tags: '[cp]', research: '2.5' },
+    { title: '"Bài chưa niêm phong"', date: '2026-09-02', tags: `[${TAG}]`, research: '2.5' },
     'Bài viết vẫn đang nằm trong khối mở.',
   );
   const record = chainBuildSandbox(dir, '2026-09-04');
@@ -113,7 +125,7 @@ beforeAll(() => {
 function surfaces(slug: string): Record<string, string> {
   return {
     '/about': rowFor(read(dir, 'about/index.html'), slug)!,
-    '/address/cp.tag': rowFor(read(dir, 'address/cp.tag/index.html'), slug)!,
+    [`/address/${TAG}.tag`]: rowFor(read(dir, TAG_PAGE), slug)!,
   };
 }
 
@@ -170,8 +182,9 @@ describe('an amended post, read off every surface that describes it', () => {
   });
 
   it('sums the rows to the total each card states', () => {
-    // `cp.tag` received the amended post (12.5) and the fresh one (2.5).
-    const card = read(dir, 'address/cp.tag/index.html');
+    // The tag received the amended post (12.5) and the fresh one (2.5), and
+    // nothing else — see `TAG`.
+    const card = read(dir, TAG_PAGE);
     const rows = [...card.matchAll(/· ([\d.]+) giờ/g)].map((m) => Number(m[1]!));
     const total = /<dt>Received<\/dt><dd><span class="num">([\d.]+)<\/span>/.exec(card);
     expect(total, 'the card states no Received total').not.toBeNull();
@@ -189,14 +202,14 @@ describe('the tilde on a hash the chain has not sealed (§3.6)', () => {
     // same authority as a sealed one would be the single most misleading thing
     // this site could display."
     //
-    // The chain here has both: `FRESH` is unsealed, and the shipped genesis
-    // post is sealed and unamended.
+    // The chain here has both: `FRESH` is unsealed, and a fixture post is
+    // sealed and unamended.
     const sealedSlug = readdirSync(join(dir, POSTS))
       .map((f) => f.replace(/\.md$/, ''))
       .find((slug) => slug !== AMENDED && slug !== FRESH);
     expect(sealedSlug, 'the sandbox has no sealed, unamended post to contrast with').toBeDefined();
 
-    for (const page of ['about/index.html', 'address/cp.tag/index.html']) {
+    for (const page of ['about/index.html', TAG_PAGE]) {
       const html = read(dir, page);
       const fresh = rowFor(html, FRESH);
       expect(fresh, `${FRESH} has no row on /${page}`).not.toBeNull();

@@ -60,7 +60,12 @@ describe('an image the chain has not recorded', () => {
   let dir = '';
 
   beforeAll(() => {
-    dir = sandboxRepo();
+    // `'fixture'`: the registry has to start empty for "the token this post
+    // minted" to be `registry()[0]` and for the recorded swap to bring the
+    // count to two. §3.2b assigns token ids from 1 by first appearance, so
+    // copying the repository's own registry makes both of those assertions
+    // about how many diagrams the author has already published.
+    dir = sandboxRepo({ content: 'fixture' });
     mkdirSync(join(dir, 'content/assets'), { recursive: true });
     writeFileSync(join(dir, 'content/assets', FILE), V1);
     writeFileSync(join(dir, 'content/posts', `${SLUG}.md`), post(FILE));
@@ -237,7 +242,7 @@ describe('an image on a post still in the open block', () => {
    * hard-coded "as an amendment" would go unnoticed.
    */
   it('says "record the edit", not "as an amendment"', () => {
-    const dir = sandboxRepo();
+    const dir = sandboxRepo({ content: 'fixture' });
     mkdirSync(join(dir, 'content/assets'), { recursive: true });
     writeFileSync(join(dir, 'content/assets', FILE), V1);
     writeFileSync(join(dir, 'content/posts', `${SLUG}.md`), post(FILE));
@@ -268,7 +273,7 @@ describe('a post referencing more than one image', () => {
   let dir = '';
 
   beforeAll(() => {
-    dir = sandboxRepo();
+    dir = sandboxRepo({ content: 'fixture' });
     mkdirSync(join(dir, 'content/assets'), { recursive: true });
     writeFileSync(join(dir, 'content/assets', FILE), V1);
     writeFileSync(join(dir, 'content/assets', SECOND), OTHER);
@@ -286,6 +291,7 @@ describe('a post referencing more than one image', () => {
       assets: AssetRecord[];
     };
     expect(lock.assets.map((a) => a.file).sort()).toEqual([SECOND, FILE].sort());
+    expect(lock.assets.map((a) => a.tokenId).sort(), 'ids are assigned from 1').toEqual([1, 2]);
   });
 
   it('names one file but no committed hash when several changed at once', () => {

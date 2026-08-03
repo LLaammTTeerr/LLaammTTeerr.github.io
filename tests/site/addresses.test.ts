@@ -1,16 +1,51 @@
 import { describe, expect, it } from 'vitest';
 import { tagAddress } from '../../src/chain/address';
 import { getAddress, getAddresses } from '../../src/site/addresses';
-import { getChain, getPosts } from '../../src/site/chain-data';
+import {
+  getChain,
+  getPendingBlock,
+  getPendingPosts,
+  getPosts,
+  type RecordedTx,
+} from '../../src/site/chain-data';
+
+/** Every amendment the chain carries, oldest first — the open block's last. */
+function amendmentsOldestFirst(): RecordedTx[] {
+  const sealed = [...getChain().blocks]
+    .sort((a, b) => a.height - b.height)
+    .flatMap((b) => b.transactions);
+  const open = getPendingBlock()?.transactions ?? [];
+  return [...sealed, ...open].filter((t) => t.type === 'amendment');
+}
+
+/**
+ * The hours the chain currently declares for one post, walked off the raw
+ * ledger here rather than taken from `resolvedPosts()`.
+ *
+ * That is the point: `valueReceived` is summed over the very `ResolvedPost`
+ * objects the page renders, so restating it in the site's own terms would
+ * compare a number with itself. §3.9's rule — the newest amendment's
+ * `research`, falling back to the post's own `value` — is short enough to say
+ * twice, and saying it twice is what makes this a check rather than an echo.
+ */
+function declaredHours(post: RecordedTx, amendments: readonly RecordedTx[]): number {
+  let hours = post.value;
+  for (const tx of amendments) if (tx.amends === post.hash) hours = tx.research ?? 0;
+  return hours;
+}
+
+/** Every post on the chain, sealed and unsealed — what an address may receive from. */
+function allPosts(): RecordedTx[] {
+  return [...getPosts(), ...getPendingPosts()];
+}
 
 /**
  * The address views, against the ledger this repository actually ships.
  *
- * The committed chain holds **one** post carrying **one** tag, so several of
- * these are true here by coincidence rather than by behaviour — "newest first"
- * over a single transaction holds for any implementation, and an address that
- * received from the only post on the chain necessarily received the whole
- * chain's value. What discriminates lives in
+ * On a short chain several of these are true by coincidence rather than by
+ * behaviour — "newest first" over a single transaction holds for any
+ * implementation, and an address that received from the only post on the chain
+ * necessarily received the whole chain's value. What discriminates lives in
  * `tests/site/addresses-longer-chain.test.ts`, on a mocked ledger long enough
  * to tell a correct implementation from an accidental one. These pin the real
  * numbers, which is worth keeping and is what the built pages render.
@@ -40,32 +75,27 @@ describe('getAddress, on the shipped ledger', () => {
   });
 
   it('sums only value actually received', async () => {
-    // An address receives from its own posts alone. On this one-post ledger
-    // that happens to equal the chain's whole value; the inequality is proved
-    // in addresses-longer-chain.test.ts, where the two genuinely differ.
+    // An address receives from its own posts alone. On a one-post ledger that
+    // happens to equal the chain's whole value; the inequality is proved in
+    // addresses-longer-chain.test.ts, where the two genuinely differ.
     //
-    // The comparison against raw `value` is valid here only because nothing on
-    // the shipped chain is amended — §3.9 puts an amended post's current hours
-    // in the newest amendment's `research`, and this expectation would then be
-    // the superseded figure. Stated as an assertion rather than assumed, so
-    // the day an amendment lands this fails pointing at its own premise instead
-    // of at the implementation.
-    const amendments = getChain().blocks.flatMap((b) =>
-      b.transactions.filter((t) => t.type === 'amendment'),
-    );
-    expect(amendments, 'the shipped ledger now holds an amendment — see the note above').toEqual([]);
-
+    // The per-post figure is the one §3.9 defines — the newest amendment's
+    // `research`, or the post's own `value` — walked here off the raw ledger
+    // (see `declaredHours`). The previous version compared against raw `value`
+    // and pinned "the shipped ledger holds no amendment" as its premise, which
+    // is a fact about what happens to be committed rather than about this code.
+    const amendments = amendmentsOldestFirst();
     const view = (await getAddress('meta.tag'))!;
-    const expected = getPosts()
+    const expected = allPosts()
       .filter((t) => t.tags.includes('meta'))
-      .reduce((s, t) => s + t.value, 0);
+      .reduce((s, t) => s + declaredHours(t, amendments), 0);
     expect(expected, 'the shipped ledger declares no value to sum').toBeGreaterThan(0);
     expect(view.valueReceived).toBeCloseTo(expected, 5);
   });
 
   it('reports first and last seen from the committed dates', async () => {
     const view = (await getAddress('meta.tag'))!;
-    const dates = getPosts()
+    const dates = allPosts()
       .filter((t) => t.tags.includes('meta'))
       .map((t) => t.date)
       .sort();
@@ -83,8 +113,10 @@ describe('getAddress, on the shipped ledger', () => {
 
 describe('getAddresses, on the shipped ledger', () => {
   it('names an address for every tag and series any post sent to, and nothing else', async () => {
+    // Sealed and unsealed alike: a tag first used by a post in the open block
+    // has an address the moment that post is on the chain (§3.6).
     const expected = new Set<string>();
-    for (const tx of getPosts()) {
+    for (const tx of allPosts()) {
       for (const tag of tx.tags) expected.add(`${tag}.tag`);
       if (tx.series !== null) expected.add(`${tx.series}.series`);
     }
