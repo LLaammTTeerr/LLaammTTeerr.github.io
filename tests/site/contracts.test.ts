@@ -108,6 +108,30 @@ const UNLINKED = {
 };
 
 /**
+ * A contract whose filename is ordinary Vietnamese prose — a space, an `&` and
+ * two diacritics.
+ *
+ * Contracts are the first content type on this site whose slug is freeform:
+ * `content/posts/` carries the `YYYY-MM-DD-` habit and never produced one, so
+ * nothing had ever put a slug that needs escaping into a url. `content/contracts/
+ * máy chủ mcp.md` is not an exotic filename for this author, and unencoded it
+ * renders `href="/contract/máy chủ & mcp"` — a link the browser mangles and this
+ * file's own dead-link sweep reports as never built, with a message about a link
+ * that looks perfectly fine in the page source.
+ */
+const FREEFORM = {
+  slug: 'máy chủ & mcp',
+  name: 'Máy chủ MCP',
+  summary: 'Một máy chủ MCP nhỏ, viết cho việc riêng.',
+  /**
+   * What `/contracts` must link. Written out rather than computed with
+   * `encodeURIComponent`, which is the function under test: an expectation
+   * derived from the implementation would agree with it however it changed.
+   */
+  href: '/contract/m%C3%A1y%20ch%E1%BB%A7%20%26%20mcp',
+};
+
+/**
  * A body that exercises the markdown pipeline's guarantees at once: raw author
  * HTML is dropped, an unsafe URL scheme is unwrapped to its own text, and an
  * `https` link survives (`src/site/markdown.ts`).
@@ -127,6 +151,7 @@ let emptyBuiltDetailPages = true;
 let listHtml = '';
 let linkedHtml = '';
 let unlinkedHtml = '';
+let freeformHtml = '';
 let sandboxDist = '';
 
 beforeAll(() => {
@@ -158,12 +183,17 @@ beforeAll(() => {
     // has not published is in.
     contractFile({ name: UNLINKED.name, summary: UNLINKED.summary }, 'Chưa có gì để nói thêm.'),
   );
+  writeFileSync(
+    join(contracts, `${FREEFORM.slug}.md`),
+    contractFile({ name: FREEFORM.name, summary: FREEFORM.summary }, 'Ghi chú ngắn.'),
+  );
 
   const built = buildSandbox(dir);
   if (built.status !== 0) throw new Error(`sandbox build with contracts failed:\n${built.output}`);
   listHtml = readFileSync(join(dir, 'dist/contracts/index.html'), 'utf8');
   linkedHtml = readFileSync(join(dir, 'dist/contract', LINKED.slug, 'index.html'), 'utf8');
   unlinkedHtml = readFileSync(join(dir, 'dist/contract', UNLINKED.slug, 'index.html'), 'utf8');
+  freeformHtml = readFileSync(join(dir, 'dist/contract', FREEFORM.slug, 'index.html'), 'utf8');
 }, 300_000);
 
 describe('getContracts', () => {
@@ -353,11 +383,30 @@ describe('an empty contracts page — the state this ships in', () => {
 describe('a contracts page holding contracts', () => {
   it('lists every contract, each linking to its own page', () => {
     const list = listOf(listHtml);
-    expect(namesIn(list)).toEqual([rendered(UNLINKED.name), rendered(LINKED.name)]);
+    expect(namesIn(list)).toEqual([
+      rendered(UNLINKED.name),
+      rendered(LINKED.name),
+      rendered(FREEFORM.name),
+    ]);
     for (const slug of [LINKED.slug, UNLINKED.slug]) {
       expect(rowFor(list, slug), `${slug} has no row on /contracts`).not.toBeNull();
       expect(resolvesIn(sandboxDist, `/contract/${slug}`)).toBe(true);
     }
+  });
+
+  it('percent-encodes a slug that is prose, and the encoded link lands on the page', () => {
+    // `getContracts` takes the slug from the filename and validates nothing —
+    // deliberately, since a contract is a file the author names, not a record
+    // with a canonical form. That makes the url the escaping boundary, and the
+    // page is what has to encode.
+    const list = listOf(listHtml);
+    expect(list, `the list does not link ${FREEFORM.href}`).toContain(`href="${FREEFORM.href}"`);
+    expect(list, 'an unencoded slug reached an href').not.toContain('href="/contract/máy');
+    // Encoded *and* correct: the encoded url has to name the page the build
+    // actually wrote, or the encoding merely moved the dead link.
+    expect(resolvesIn(sandboxDist, FREEFORM.href)).toBe(true);
+    expect(existsSync(join(sandboxDist, 'contract', FREEFORM.slug, 'index.html'))).toBe(true);
+    expect(freeformHtml).toContain(rendered(FREEFORM.name));
   });
 
   it('renders no hash, address, block or gas for a contract', () => {
@@ -499,6 +548,7 @@ describe("a contract's own page", () => {
       ['/contracts', listHtml],
       [`/contract/${LINKED.slug}`, linkedHtml],
       [`/contract/${UNLINKED.slug}`, unlinkedHtml],
+      [FREEFORM.href, freeformHtml],
     ] as const) {
       const refs = [...internalHrefs(html), ...internalSrcs(html)];
       checked += refs.length;

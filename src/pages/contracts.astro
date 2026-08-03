@@ -62,7 +62,18 @@ const contracts = getContracts();
       <ul class="cons">
         {contracts.map((contract) => (
           <li>
-            <h2 class="t"><a href={`/contract/${contract.slug}`}>{contract.name}</a></h2>
+            {/* `encodeURIComponent`, because a contract's slug is a filename
+                the author chose — `content/contracts/máy chủ mcp.md` is an
+                ordinary thing to write, and it is the first slug on this site
+                that is freeform prose rather than a `YYYY-MM-DD-` post name.
+                Unencoded it renders `href="/contract/máy chủ & mcp"`, which is
+                a url no browser resolves to the page the build wrote beside it,
+                and which this site's own dead-link check reports as never
+                built. One segment, so `encodeURIComponent` and not `encodeURI`:
+                a `/` or a `?` in a filename is part of the name, not structure.
+                The route param stays raw — `getStaticPaths` writes the
+                directory, and a static host decodes the request back to it. */}
+            <h2 class="t"><a href={`/contract/${encodeURIComponent(contract.slug)}`}>{contract.name}</a></h2>
             {contract.summary === '' ? null : <p class="s">{contract.summary}</p>}
             <span class="g">
               {contract.language ?? '—'}

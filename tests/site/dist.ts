@@ -4,6 +4,30 @@ import { join, relative, sep } from 'node:path';
 export const DIST = 'dist';
 
 /**
+ * A url path as the filesystem name it addresses.
+ *
+ * A browser percent-decodes before it asks for anything, and a static host
+ * decodes before it looks on disk, so a check that compares the *encoded* path
+ * against `dist/` is not modelling either of them: `/contract/m%C3%A1y%20ch…`
+ * would be reported dead while pointing squarely at
+ * `dist/contract/máy chủ & mcp/index.html`. Contracts are what made this
+ * reachable — the first slugs on this site that are freeform prose rather than
+ * ASCII — and a link check that cannot tell an encoding artefact from a real
+ * dead link is worse than no message at all.
+ *
+ * A malformed escape (`%zz`) is left exactly as written. It is not a path any
+ * browser can resolve either, so the check that follows should, and does, call
+ * it dead.
+ */
+function decodePath(path: string): string {
+  try {
+    return decodeURIComponent(path);
+  } catch {
+    return path;
+  }
+}
+
+/**
  * True when a site-internal href has something in `distRoot` to land on — a
  * page (`/blocks` → `blocks/index.html`) or a built asset
  * (`/_astro/Base.abc123.css`), which a whole-document scan also turns up.
@@ -21,7 +45,12 @@ export const DIST = 'dist';
  * bare directory href today.
  */
 export function resolvesIn(distRoot: string, href: string): boolean {
-  const clean = href.replace(/[?#].*$/, '').replace(/^\//, '').replace(/\/$/, '');
+  const clean = decodePath(href.replace(/[?#].*$/, '').replace(/^\//, '').replace(/\/$/, ''));
+  // `join` would normalize a `..` away and look outside `dist/` — so a page
+  // linking `/x/..%2F..%2Fpackage.json` would be reported as resolving, against
+  // a file that is not on the site at all. Decoding is what makes that spelling
+  // reachable here, so the rejection arrives with it.
+  if (clean.split('/').includes('..')) return false;
   if (clean === '') return existsSync(join(distRoot, 'index.html'));
   if (existsSync(join(distRoot, clean, 'index.html'))) return true;
   const path = join(distRoot, clean);
