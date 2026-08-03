@@ -18,6 +18,7 @@ import { buildSandbox, sandboxRepo } from './sandbox';
 import { getContracts } from '../../src/site/contracts';
 import { routeById } from '../../src/site/routes';
 import { DEMO_CONTRACTS, demoPaths } from '../../scripts/demo-content';
+import type { Chain } from '../../src/chain/types';
 
 /**
  * §6 — `/contracts` and `/contract/[name]`: the author's projects, presented as
@@ -483,8 +484,14 @@ describe("a contract's own page", () => {
       [`/contract/${UNLINKED.slug}`, unlinkedHtml],
     ] as const) {
       expect(html, `${name} calls a contract verified`).not.toMatch(/\bverified\b/i);
+      // Every spelling of the claim this site has a word for, not only the one
+      // spelling it happens not to use: `xác minh` was the whole list, and
+      // `đã kiểm chứng` and `đã xác thực` — both of which appear elsewhere on
+      // this site — would have walked straight past it. The negations the pages
+      // *do* carry (`không kiểm chứng được`) are unaffected: what is rejected is
+      // the affirmative `đã …`, which is the claim.
       expect(html, `${name} claims a contract has been verified`).not.toMatch(
-        /đã (được )?xác minh/i,
+        /đã (được )?(xác minh|xác thực|kiểm chứng)/i,
       );
     }
     // And it says the opposite, where a reader meets the link: this site cannot
@@ -600,12 +607,20 @@ describe('the demo corpus', () => {
     // §5.1 — `content/contracts/` is hashed nowhere. Asserted against the
     // committed ledger for the demo slugs whether or not the corpus is seeded
     // right now, so this cannot pass by there being nothing on disk.
-    const ledger = readFileSync('chain.lock.json', 'utf8');
-    for (const contract of DEMO_CONTRACTS) {
-      expect(ledger, `${contract.slug} reached the chain`).not.toContain(contract.slug);
-    }
-    for (const contract of getContracts()) {
-      expect(ledger, `${contract.slug} reached the chain`).not.toContain(contract.slug);
+    //
+    // Structurally, against what a transaction actually *is*, and not as a
+    // substring of the file. A contract can only reach the chain by becoming a
+    // transaction, and a transaction names a contract by carrying its slug —
+    // whereas `not.toContain('blogchain')` goes red the day the author writes a
+    // post titled "Blogchain", under a failure message saying a contract
+    // reached the chain. A test that cries wolf about the one guarantee this
+    // page rests on is worse than no test.
+    const ledger = JSON.parse(readFileSync('chain.lock.json', 'utf8')) as Chain;
+    const recorded = ledger.blocks.flatMap((b) => b.transactions);
+    expect(recorded.length, 'the committed ledger holds no transaction to check').toBeGreaterThan(0);
+    const slugs = new Set(recorded.map((t) => t.slug ?? ''));
+    for (const contract of [...DEMO_CONTRACTS, ...getContracts()]) {
+      expect(slugs.has(contract.slug), `${contract.slug} reached the chain`).toBe(false);
     }
   });
 });
