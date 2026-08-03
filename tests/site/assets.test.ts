@@ -281,15 +281,27 @@ describe('a registry with a token in it', () => {
     newToken = readFileSync(join(dir, 'dist/asset/2/index.html'), 'utf8');
 
     // And the third state a file can be in: gone. The registry is append-only
-    // (the transaction referencing it is sealed and immutable), so both tokens
-    // survive with nothing on disk to measure. No `chain:build` here — that
-    // refuses a post referencing a missing file, by design.
+    // (the transactions referencing it are sealed and immutable), so both
+    // tokens survive with nothing on disk to measure.
+    //
+    // The post has to stop referencing it first, and that edit has to be
+    // recorded. Deleting the file under a post that still embeds it is now a
+    // build failure — a post shipping `<img src="/assets/so-do.svg">` with
+    // nothing at that path is a broken diagram the author was never told
+    // about — and `tests/site/asset-drift.test.ts` is where that failure is
+    // pinned. What this fixture needs is the *other* state: the file gone and
+    // no current transaction referencing it, which is the only way tokens can
+    // legitimately outlive their bytes.
     rmSync(join(dir, 'content/assets', FILE));
+    writeFileSync(join(dir, 'content/posts', `${SLUG}.md`), POST.replace(`![Sơ đồ](/assets/${FILE})\n`, ''));
+    const dropped = chainBuildSandbox(dir, '2026-10-05');
+    if (dropped.status !== 0) throw new Error(`chain:build after dropping the reference failed:\n${dropped.output}`);
     const none = buildSandbox(dir);
     if (none.status !== 0) throw new Error(`sandbox build with the file deleted failed:\n${none.output}`);
     galleryGone = readFileSync(join(dir, 'dist/assets/index.html'), 'utf8');
     goneToken = readFileSync(join(dir, 'dist/asset/2/index.html'), 'utf8');
     writeFileSync(join(dir, 'content/assets', FILE), V2);
+    writeFileSync(join(dir, 'content/posts', `${SLUG}.md`), POST);
   }, 600_000);
 
   /** The registry the sandbox's own build wrote — never a literal in this file. */

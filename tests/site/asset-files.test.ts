@@ -365,28 +365,6 @@ describe('a published image, end to end', () => {
     }
   }, 300_000);
 
-  it('does not serve superseded bytes', async () => {
-    // The image is swapped and `chain:build` is NOT re-run, so the chain still
-    // vouches for V1 while the disk holds V2. Publishing V2 at
-    // `/assets/so-do.svg` would put an image under a path the chain does not
-    // vouch for — the falsehood `/asset/1` already refuses on the token page.
-    writeFileSync(join(dir, 'content/assets', FILE), V2);
-    try {
-      const build = buildSandbox(dir);
-      expect(build.status, `sandbox build failed:\n${build.output}`).toBe(0);
-      const path = join(sealedDist, 'assets', FILE);
-      if (existsSync(path)) {
-        const shipped = await sha256Hex(new Uint8Array(readFileSync(path)));
-        expect(shipped, 'the build served bytes the chain does not vouch for').not.toBe(
-          await sha256Hex(V2),
-        );
-      }
-      expect(existsSync(path), 'the stale file survived from the previous build').toBe(false);
-    } finally {
-      writeFileSync(join(dir, 'content/assets', FILE), V1);
-    }
-  }, 300_000);
-
   it('serves the new bytes once chain:build records the swap', async () => {
     // The other half: the refusal above is about an *unrecorded* swap, not
     // about the site being unable to publish a new image. Record it, and the

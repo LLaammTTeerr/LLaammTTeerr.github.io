@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { CHAIN_CONFIG } from '../../chain.config';
+import { referencedAssets } from '../chain/asset';
 import { normalizeBody, wordCount } from '../chain/canonical';
 import { sha256Hex } from '../chain/hash';
 import { sha256HexSync } from '../chain/hash-node';
@@ -184,6 +185,7 @@ export function getPendingPosts(): RecordedTx[] {
 }
 
 const POSTS_DIR = 'content/posts';
+const ASSETS_DIR = 'content/assets';
 
 /** §3.9 — where the amendment that records a post's current state now sits. */
 export interface AmendedIn {
@@ -315,6 +317,93 @@ export function currentValue(tx: RecordedTx): number {
 }
 
 /**
+ * §3.2b — the body check `getPostContent` performs, applied to the files that
+ * body embeds.
+ *
+ * These are the same fact: the bytes on disk disagree with what the chain
+ * committed. They were not the same failure. A drifted *body* failed the build
+ * with the file named and the remedy spelled out; a drifted *image* built
+ * cleanly and shipped a post containing `<img src="/assets/so-do.svg">` with
+ * nothing at that path, because `src/site/asset-files.ts` correctly refuses to
+ * publish bytes the chain does not vouch for. The reader met a broken diagram;
+ * the author was told nothing. A silent 404 inside a published post is the
+ * worse failure of the two, and it is recoverable in one command.
+ *
+ * The comparison is against `governing.assets` — the transaction that commits
+ * to the body being rendered, which is the newest amendment when there is one.
+ * Only a *current* transaction counts: a superseded token's bytes are gone
+ * from disk by definition, and a file no post references is not on the chain
+ * at all (§3.2b). Neither is drift, and neither may fail a build.
+ *
+ * `referencedAssets` is the same function `chain:build` reads references with,
+ * over a body already proved to hash to what `governing` commits to — so the
+ * filenames here are exactly the ones the engine hashed, and the only thing
+ * that can have changed is the bytes behind them.
+ *
+ * A file that is *gone* is reported as gone. The remedy differs: no rerun of
+ * `chain:build` can record bytes that no longer exist, so the author must put
+ * the file back or stop referencing it.
+ */
+async function refuseDriftedAssets(
+  slug: string,
+  body: string,
+  governing: RecordedTx,
+  assetsDir: string,
+  records: string,
+): Promise<void> {
+  const refs = referencedAssets(body);
+  if (refs.length === 0) return;
+
+  // A multiset, consumed as files claim their hashes: two referenced files may
+  // legitimately hold identical bytes, and `assets` records the hash twice
+  // (`toTransaction` sorts, it does not dedupe). A `Set` here would report the
+  // second file as drifted the moment the first claimed the value.
+  const unclaimed = [...governing.assets];
+  const drifted: Array<{ path: string; hash: Hex }> = [];
+
+  for (const file of refs) {
+    const path = join(assetsDir, file);
+    if (!existsSync(path)) {
+      throw new Error(
+        `${path} not found, but "${slug}" references /assets/${file} — restore the file, ` +
+          'or remove the reference from the post and re-run `npm run chain:build`',
+      );
+    }
+    // Raw bytes, no normalization — an asset is binary, not text (§3.2b).
+    const hash = await sha256Hex(new Uint8Array(readFileSync(path)));
+    const at = unclaimed.indexOf(hash);
+    if (at === -1) drifted.push({ path, hash });
+    else unclaimed.splice(at, 1);
+  }
+
+  const first = drifted[0];
+  if (first === undefined) return;
+
+  // With the body verified, one referenced file yields one committed hash, so
+  // a single drifted file leaves exactly one hash unaccounted for and the two
+  // can be named as a pair — the shape the body message uses. When several
+  // files changed at once the pairing is genuinely unrecoverable: `assets` is
+  // sorted (§3.2b, so declaration order cannot move the transaction hash) and
+  // the chain records no filename beside a hash that any hash covers. Saying
+  // which committed value *this* file used to be would be a guess, so it says
+  // what it does know instead.
+  const committed =
+    unclaimed.length === 1
+      ? `committed ${unclaimed[0]!.slice(0, 10)}…, `
+      : '';
+  const among =
+    unclaimed.length === 1
+      ? ''
+      : `, which is none of the ${governing.assets.length} asset hashes "${slug}" commits to`;
+
+  throw new Error(
+    `${first.path} does not match the chain: ${committed}` +
+      `on disk ${first.hash.slice(0, 10)}…${among} — ` +
+      `re-run \`npm run chain:build\` to ${records}`,
+  );
+}
+
+/**
  * §3.1 — the ledger commits a `contentHash` and stores no body, so nothing
  * structurally prevents the site rendering different text beside a hash that
  * vouches for other text. This re-derives the hash from disk and refuses a
@@ -335,12 +424,13 @@ export function currentValue(tx: RecordedTx): number {
  * `detectAmendments` records any divergence from the latest state — including
  * a revert to an earlier one.
  *
- * `postsDir` is a parameter only so tests can point at a fixture; production
- * callers use the default.
+ * `postsDir` and `assetsDir` are parameters only so tests can point at a
+ * fixture; production callers use the defaults.
  */
 export async function getPostContent(
   slug: string,
   postsDir: string = POSTS_DIR,
+  assetsDir: string = ASSETS_DIR,
 ): Promise<PostContent> {
   // Sealed first, then the open block. A slug cannot be in both: `buildChain`
   // drops a live post whose slug is already sealed, representing later edits
@@ -372,14 +462,19 @@ export async function getPostContent(
   // would send the author chasing text the chain has already moved on from.
   const expected = amendment === null ? tx.contentHash : amendment.tx.contentHash;
 
+  // The remedy is the same command either way, but not the same event: an
+  // edit to a *sealed* post is recorded as an amendment (§3.9), while an
+  // edit to one still in the open block simply re-hashes its transaction —
+  // nothing is committed yet for an amendment to be evidence against
+  // (§3.6). Naming an amendment there would tell the author to expect a
+  // ledger entry that will not appear.
+  //
+  // Hoisted out of the body-drift branch because the asset check below tells
+  // the author to run the same command about the same post, and the two
+  // messages must not disagree about what it will record.
+  const records = sealed === undefined ? 'record the edit' : 'record the edit as an amendment';
+
   if (actual !== expected) {
-    // The remedy is the same command either way, but not the same event: an
-    // edit to a *sealed* post is recorded as an amendment (§3.9), while an
-    // edit to one still in the open block simply re-hashes its transaction —
-    // nothing is committed yet for an amendment to be evidence against
-    // (§3.6). Naming an amendment there would tell the author to expect a
-    // ledger entry that will not appear.
-    const records = sealed === undefined ? 'record the edit' : 'record the edit as an amendment';
     // A rejected open block is the one cause this advice does not address, and
     // it is invisible from here otherwise: `readPending` collapses "no file"
     // and "a file this reader will not accept" into the same `null`, so the
@@ -404,6 +499,13 @@ export async function getPostContent(
   // repeated this walk would be free to disagree with the hash the body was
   // just accepted against.
   const governing = amendment === null ? tx : amendment.tx;
+
+  // §3.2b — and the same for the files that body embeds. After the body check,
+  // deliberately: `referencedAssets` reads the body, so it must be a body the
+  // chain has already vouched for, and an author who has edited both wants to
+  // be told about the text first.
+  await refuseDriftedAssets(slug, body, governing, assetsDir, records);
+
   return {
     slug,
     body,
