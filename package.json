@@ -14,7 +14,9 @@
     "check:vietnamese": "tsx scripts/check-vietnamese.ts",
     "dev": "astro dev",
     "build": "astro build",
-    "preview": "astro preview"
+    "preview": "astro preview",
+    "demo:seed": "tsx scripts/demo-seed.ts",
+    "demo:clear": "tsx scripts/demo-seed.ts --clear"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.10",
