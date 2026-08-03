@@ -11,7 +11,7 @@ import {
   startDevSandbox,
   type DevServer,
 } from './sandbox';
-import { getPendingPosts, resolvedPosts } from '../../src/site/chain-data';
+import { getPendingPosts, getPostContent, resolvedPosts } from '../../src/site/chain-data';
 import { excerptOf, FEED_TITLE, rfc822 } from '../../src/site/feed';
 import { ROUTES } from '../../src/site/routes';
 import type { Chain, Transaction } from '../../src/chain/types';
@@ -291,14 +291,31 @@ describe('/rss.xml as the site ships it', () => {
     expect(ROUTES.some((r) => r.href === '/rss.xml')).toBe(false);
   });
 
-  it('escapes every title and description it carries', () => {
+  it('escapes every title and description it carries', async () => {
     // The general guarantee; the fixture below pins the specific characters.
     // Read back through the parser, so what is compared is what an aggregator
     // would show, not the bytes.
+    //
+    // The description half is not decoration: this test named both and asserted
+    // only titles, so a change that mangled every description on the corpus —
+    // or an item that carried the wrong text in the element entirely — left it
+    // green under a name saying otherwise. What each item must carry is the
+    // excerpt of the body `governing.contentHash` commits to, read back through
+    // `getPostContent`, which re-derives that hash and refuses a mismatch.
     const bySlug = new Map(resolvedPosts().map((p) => [p.slug, p.title]));
+    let described = 0;
     for (const item of itemsIn(feed(readDist('rss.xml')))) {
-      expect(textOf(item, 'title')).toBe(bySlug.get(slugOf(item)));
+      const slug = slugOf(item);
+      expect(textOf(item, 'title')).toBe(bySlug.get(slug));
+      const { body } = await getPostContent(slug);
+      expect(textOf(item, 'description'), `${slug}'s description is not its excerpt`).toBe(
+        excerptOf(body),
+      );
+      if (textOf(item, 'description') !== '') described += 1;
     }
+    // Anti-vacuity: `''` equals `''` for a corpus of bodies with no prose in
+    // them, and the comparison above would then prove nothing at all.
+    expect(described, 'no item carried a description to compare').toBeGreaterThan(0);
   });
 });
 
@@ -513,6 +530,30 @@ describe('excerptOf', () => {
       'Đây mới là văn.',
     );
     expect(excerptOf('| a | b |\n| - | - |\n\nVăn xuôi.')).toBe('Văn xuôi.');
+  });
+
+  it('skips a heading in the other spelling markdown accepts', () => {
+    // `remark-parse` reads `Tiêu đề` over `=======` as a heading exactly as it
+    // reads `# Tiêu đề`, and the post page renders it as one. Only the excerpt
+    // rule knew about the `#` spelling, so a post opening this way announced
+    // itself to every subscriber as `Tiêu đề =======`.
+    expect(excerptOf('Tiêu đề\n=======\n\nVăn xuôi.')).toBe('Văn xuôi.');
+    expect(excerptOf('Tiêu đề phụ\n-----------\n\nVăn xuôi.')).toBe('Văn xuôi.');
+    // Both in one block, and a heading the prose follows without a blank line.
+    expect(excerptOf('Tiêu đề\n===\nVăn xuôi ngay sau.')).toBe('Văn xuôi ngay sau.');
+    // And a list is not a heading, however much its second line looks like one.
+    expect(excerptOf('- một\n- hai')).toBe('một hai');
+  });
+
+  it('skips a display-math block, rather than reading LaTeX out to a reader', () => {
+    // `remark-math` is in the pipeline and `$$…$$` renders as a formula on the
+    // page. As a description it is raw LaTeX, which is not what the post says.
+    expect(excerptOf('$$\\sum_{i=1}^{n} i$$\n\nTổng của n số đầu tiên.')).toBe(
+      'Tổng của n số đầu tiên.',
+    );
+    expect(excerptOf('$$\n\\sum_{i=1}^{n} i\n$$\n\nTổng.')).toBe('Tổng.');
+    // Inline math is prose and stays: it sits inside a sentence a reader wants.
+    expect(excerptOf('Ta cần $O(n \\log n)$ ở đây.')).toBe('Ta cần $O(n \\log n)$ ở đây.');
   });
 
   it('collapses the line breaks a body carries and a feed does not want', () => {

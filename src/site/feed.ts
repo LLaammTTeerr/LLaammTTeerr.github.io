@@ -150,6 +150,30 @@ function plainText(markdown: string): string {
     .trim();
 }
 
+/**
+ * A block with any setext headings taken off the front of it.
+ *
+ * `Tiêu đề` over `=======` is a heading to `remark-parse` exactly as `# Tiêu
+ * đề` is, and the post page renders it as one — but the skip rule below only
+ * knew the `#` spelling, so a post opening in the other one announced itself to
+ * every subscriber as `Tiêu đề =======`. The underline also ends the paragraph
+ * without needing a blank line after it, which is why this strips a prefix
+ * rather than rejecting the whole block: the prose may be on the very next
+ * line.
+ *
+ * The first line must be non-empty, which is what keeps a thematic break or a
+ * `- một` / `- hai` list from reading as one: an underline is only an underline
+ * under text, and a list's second line carries a word after the dash.
+ */
+function withoutSetextHeadings(block: string): string {
+  let rest = block;
+  for (;;) {
+    const heading = /^[^\n]+\n[ \t]*(=+|-+)[ \t]*(\n|$)/.exec(rest);
+    if (heading === null) return rest;
+    rest = rest.slice(heading[0].length).replace(/^[ \t\n]+/, '');
+  }
+}
+
 /** Cuts at a word boundary, so a description never ends mid-word. */
 function truncate(text: string, max: number): string {
   if (text.length <= max) return text;
@@ -184,10 +208,14 @@ function truncate(text: string, max: number): string {
  */
 export function excerptOf(body: string, max: number = MAX_EXCERPT): string {
   for (const block of body.split(/\n[ \t]*\n/)) {
-    const trimmed = block.trim();
-    // A heading, a fenced code block, a table or a raw HTML block is not the
-    // sentence that tells a reader what the post is about.
-    if (trimmed === '' || /^(#|```|~~~|\||<)/.test(trimmed)) continue;
+    const trimmed = withoutSetextHeadings(block.trim());
+    // A heading, a fenced code block, a table, a raw HTML block or a display
+    // formula is not the sentence that tells a reader what the post is about.
+    // `$$` is here because `remark-math` is in this site's pipeline: the page
+    // renders `$$\sum…$$` as a formula, and a description that read the LaTeX
+    // out instead would be the one thing on the page a reader cannot make sense
+    // of. Inline `$…$` is deliberately not skipped — it sits inside a sentence.
+    if (trimmed === '' || /^(#|```|~~~|\||<|\$\$)/.test(trimmed)) continue;
     const text = plainText(trimmed);
     if (text === '') continue;
     return truncate(text, max);
