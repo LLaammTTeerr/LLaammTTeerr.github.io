@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'astro/config';
-import { emitSiteAssets } from './src/site/asset-files.ts';
+import { committedAssetNamed, emitSiteAssets } from './src/site/asset-files.ts';
+import { mimeTypeFor } from './src/chain/asset.ts';
 
 /**
  * §3.2b — put the files posts reference into the build output.
@@ -20,6 +21,31 @@ function assetFiles() {
   return {
     name: 'blogchain:asset-files',
     hooks: {
+      // `astro dev` never reaches `astro:build:done`, so without this every
+      // image in every post is a broken icon while writing — exactly when you
+      // most need to see them. Same rule as the build: committed bytes only.
+      'astro:server:setup': ({ server }) => {
+        server.middlewares.use((req, res, next) => {
+          const path = (req.url ?? '').split('?')[0] ?? '';
+          if (!path.startsWith('/assets/')) return next();
+          let file;
+          try {
+            file = decodeURIComponent(path.slice('/assets/'.length));
+          } catch {
+            return next();
+          }
+          // `/assets/` itself is the gallery page, not a file — let Astro have it.
+          if (file === '') return next();
+          committedAssetNamed(file)
+            .then((asset) => {
+              if (asset === null) return next();
+              res.setHeader('Content-Type', mimeTypeFor(asset.file));
+              res.setHeader('Cache-Control', 'no-store');
+              res.end(Buffer.from(asset.bytes));
+            })
+            .catch(next);
+        });
+      },
       'astro:build:done': async ({ dir, logger }) => {
         const written = await emitSiteAssets(fileURLToPath(dir));
         logger.info(

@@ -199,3 +199,31 @@ export function emitSiteAssets(
     referencedAssetNames(),
   );
 }
+
+/**
+ * The bytes `/assets/<file>` should serve, or `null` if the chain does not
+ * vouch for them.
+ *
+ * `astro dev` never runs `astro:build:done`, so without a dev-server route
+ * every image in every post is a broken icon while writing — the one situation
+ * where you most need to see them. This is what that route serves, and it
+ * applies exactly the rule `emitSiteAssets` applies to the build: a file whose
+ * bytes hash to something a current transaction committed to, and nothing else.
+ * Swap an image without running `chain:build` and dev stops serving it, which
+ * is the same answer the build gives by failing.
+ */
+export async function committedAssetNamed(
+  file: string,
+  assetsDir: string = ASSETS_DIR,
+): Promise<CommittedAsset | null> {
+  // A name only — never a path. `foo/../../etc/passwd` and `sub/dir/x.png` are
+  // both rejected: §3.2b puts assets in one flat directory, so a name with a
+  // separator in it cannot be one the chain ever named.
+  if (file === '' || file.includes('/') || file.includes('\\')) return null;
+  const found = await committedAssetFiles(
+    assetsDir,
+    committedAssetHashes(getAssets(), pendingTransactions()),
+    referencedAssetNames(),
+  );
+  return found.find((a) => a.file === file) ?? null;
+}
