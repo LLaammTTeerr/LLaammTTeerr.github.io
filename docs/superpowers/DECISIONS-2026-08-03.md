@@ -357,3 +357,23 @@ chain vouches for. Fixed by marking the author-supplied half in the vocabulary t
 uses (`chưa lên chuỗi`, as the mempool does), without weakening how the committed half reads.
 
 Recorded in the spec as §5.1 so `/contracts` gets the same treatment instead of rediscovering it.
+
+---
+
+## D19 — I ran two agents in one working tree again
+
+**What happened:** while the asset-serving fix was still running, I dispatched the `/about`
+off-chain marker. Their file lists were disjoint, so I judged it safe. It was not — both run
+`astro build`, and each build clears `dist/` before writing it, so tests reading `dist/` failed
+spuriously when the other agent's build wiped it mid-read.
+
+No damage: the `/about` commit stayed scoped to its own two files and the other agent's work in
+progress was untouched. That was the agent's discipline in staging by explicit path, not my
+orchestration.
+
+**Why I am recording it:** I hit the same class of problem two days ago with two agents editing
+one file, wrote it down, and then did it again in a form my own note did not cover. Disjoint file
+lists are not sufficient — any two agents that run the build collide over `dist/`.
+
+**Rule going forward:** one agent at a time in this tree, or give each its own git worktree. A
+long, conclusive-sounding report is not a completion notification.
