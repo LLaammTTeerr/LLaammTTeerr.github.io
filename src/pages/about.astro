@@ -101,10 +101,20 @@ const hasProfileContent = bioHtml !== '' || links.length > 0;
         <span class="per">Giới thiệu</span>
         <span class="stamp off">Ngoài chuỗi</span>
       </div>
+      {/* §6 lists "deployed contracts" as part of the author profile, and
+          `/contracts` now exists — the nav was the only thing joining the two.
+          The link belongs in *this* card and not in the committed one below:
+          `content/contracts/` is hashed nowhere (§5.1), so a project sits
+          exactly where a self-declared bio sits, and a link beside the address
+          and the research total would read as another figure the chain vouches
+          for. A link and no count: how many projects there are is off-chain
+          data too, and the page at the other end says everything about them,
+          including that there are none. */}
       <p class="off-note">
         Tiểu sử và liên kết bên dưới do tác giả tự khai báo, <strong>chưa lên chuỗi</strong>:
-        không có hash, không được chuỗi xác minh. Địa chỉ, số giao dịch, giờ nghiên cứu và
-        lịch sử giao dịch trong thẻ bên dưới mới là dữ liệu chuỗi đã xác nhận.
+        không có hash, không được chuỗi xác minh. Các dự án của tác giả cũng vậy — chúng nằm
+        ở <a href="/contracts">Contracts</a>, ngoài chuỗi. Địa chỉ, số giao dịch, giờ nghiên
+        cứu và lịch sử giao dịch trong thẻ bên dưới mới là dữ liệu chuỗi đã xác nhận.
       </p>
       {bioHtml ? <div class="bio" set:html={bioHtml} /> : null}
       {links.length > 0 ? (

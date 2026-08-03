@@ -256,6 +256,30 @@ describe('the off-chain marker on the author-supplied half (§5.1/D18)', () => {
     );
   });
 
+  it("points at the author's contracts, and does it from the off-chain half", () => {
+    // §6 lists "deployed contracts" as part of the author profile. `/contracts`
+    // is built and in the nav, but nothing on `/about` reached it, so the one
+    // page describing the author did not carry the one thing §6 says it should
+    // beside the bio.
+    //
+    // In the off-chain card and nowhere else, because that is what a project
+    // is (§5.1): `content/contracts/` is hashed nowhere, and a link sitting in
+    // the committed address card — beside the address, the transaction count
+    // and the research total — would read as another figure the chain vouches
+    // for. A link and no count: the number of contracts is off-chain data too,
+    // and the page at the other end says everything about them, including when
+    // there are none.
+    const html = page();
+    const card = offchainCardOf(html);
+    expect(card, 'the real profile has a bio, so /about should render an off-chain card').not.toBeNull();
+    expect(card!, '/about does not link /contracts').toContain('href="/contracts"');
+    expect(resolvesIn(DIST, '/contracts')).toBe(true);
+    expect(
+      cardOf(html),
+      'the contracts link sits in the committed card, where it reads as chain data',
+    ).not.toContain('href="/contracts"');
+  });
+
   it('leaves the committed card reading as chain data — no off-chain badge, no dashed class', () => {
     // The requirement's other half: the contrast comes from labelling the
     // unverified half, not from weakening how the real data presents. If a
