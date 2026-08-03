@@ -338,3 +338,22 @@ text one.
 success, the page ships, and the reader finds a broken image where a diagram should be. A build
 failure is recoverable in one command. Deleting a referenced file gets its own message, since the
 remedy differs — restore it, or edit the post to stop referencing it.
+
+---
+
+## D18 — the profile stays off-chain (author's decision), so the page must admit it
+
+**Author's call:** `content/profile.md` is not a chain record. Their reason was that it is edited
+rarely.
+
+**Worth recording, because it cuts the other way:** rare edits are an argument *for* on-chain, not
+against — infrequent changes mean almost no amendment noise, which was the main cost I named. The
+decision holds on a better reason: a bio is identity metadata, not a claim about the chain's
+contents, and an about page does not need the tamper-evidence published writing does.
+
+**What follows:** `/about` renders the bio and links immediately above the address, transaction
+count and research total, with nothing distinguishing them. A reader cannot tell which half the
+chain vouches for. Fixed by marking the author-supplied half in the vocabulary the site already
+uses (`chưa lên chuỗi`, as the mempool does), without weakening how the committed half reads.
+
+Recorded in the spec as §5.1 so `/contracts` gets the same treatment instead of rediscovering it.
