@@ -258,6 +258,13 @@ describe('the rule that keeps a sixth surface from acquiring this bug', () => {
   const LEDGER_ROW_FILES = [
     'src/components/BlockCard.astro',
     'src/pages/block/[height].astro',
+    // The one ledger row that is not a block view: an **amendment** on `/tx`.
+    // `txMetaLine` is safe there for the reason it is unsafe on a post — an
+    // amendment's `gasUsed` and `value` are the accounting zeros §3.9 fixes
+    // them at, and the line says where the real figures were counted instead
+    // of printing them. The component's prop is `RecordedTx` narrowed to
+    // `type: 'amendment'`, so a post transaction cannot reach it at all.
+    'src/components/AmendmentRow.astro',
   ];
 
   function astroFiles(dir = 'src'): string[] {
@@ -277,13 +284,36 @@ describe('the rule that keeps a sixth surface from acquiring this bug', () => {
 
   it('renders every post row through the one component that takes a resolved post', () => {
     // `/address/[name]` and `/about` are the two surfaces the Critical was
-    // found at. Neither may build a row itself again.
-    for (const page of ['src/pages/address/[name].astro', 'src/pages/about.astro']) {
+    // found at. Neither may build a row itself again — and neither may `/tx`,
+    // which lists every post on the chain beside the amendments and so has
+    // exactly the same way to go wrong.
+    const pages = [
+      'src/pages/address/[name].astro',
+      'src/pages/about.astro',
+      'src/pages/tx/index.astro',
+    ];
+    for (const page of pages) {
       const source = readFileSync(page, 'utf8');
-      expect(source, `${page} does not use TxRow`).toContain('<TxRow post={post} />');
+      expect(source, `${page} does not use TxRow`).toMatch(/<TxRow post=\{[\w.]+\} \/>/);
       expect(source, `${page} reads a title off a transaction directly`).not.toMatch(/tx\.title/);
       expect(source, `${page} reads a hash off a transaction directly`).not.toMatch(/tx\.hash/);
     }
+  });
+
+  it('lets only an amendment reach the ledger row a non-block view renders', () => {
+    // The type is the guard — `AmendmentEntry.tx` is `RecordedTx` narrowed on
+    // its own discriminant, so `astro check` rejects a post transaction here.
+    // This pins the declaration, because widening the prop back to `RecordedTx`
+    // would compile perfectly and quietly let `txMetaLine` print a post's
+    // superseded word count and hours.
+    const row = readFileSync('src/components/AmendmentRow.astro', 'utf8');
+    expect(row, "AmendmentRow's prop is no longer the narrowed amendment entry").toMatch(
+      /interface Props \{\s*entry: AmendmentEntry;\s*\}/,
+    );
+    const index = readFileSync('src/site/tx-index.ts', 'utf8');
+    expect(index, 'AmendmentTx no longer narrows on the transaction type').toMatch(
+      /export type AmendmentTx = RecordedTx & \{ type: 'amendment' \}/,
+    );
   });
 
   it('keeps the resolution in one place', () => {

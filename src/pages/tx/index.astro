@@ -1,0 +1,91 @@
+---
+import Base from '../../layouts/Base.astro';
+import AmendmentRow from '../../components/AmendmentRow.astro';
+import TxRow from '../../components/TxRow.astro';
+import { transactionIndex } from '../../site/tx-index';
+// `.card`, `.card-top`, `.per`, `.stamp`, `.txs`, `.tx-list` and `.silent` are
+// BlockCard's classes (src/styles/chain.css), reused verbatim so the
+// transaction index reads as the same chrome as the block list rather than
+// drifting into a second style. `.page-head` lives in base.css, which
+// `Base.astro` always loads.
+import '../../styles/chain.css';
+
+/**
+ * §6 — every transaction on the chain, newest first: the counterpart of
+ * `/blocks`.
+ *
+ * `/blocks` answers "what did each block seal", so a post appears there as the
+ * ledger entry that block committed. This page answers "what is on the chain",
+ * and a *post-centric* row must show the state the chain asserts now — so post
+ * rows go through `TxRow`, whose prop is a `ResolvedPost` and which cannot be
+ * handed a raw ledger entry (§3.9). Amendments are transactions too and get
+ * rows of their own, through `AmendmentRow`, which is the ledger row `/blocks`
+ * already renders inside a block card.
+ *
+ * The list is split in two, and the split is §3.6's: what the chain has sealed,
+ * and what it has not. The open block's transactions are real, hashed and in
+ * the chain, but not yet immutable, and a page that ran them together with the
+ * sealed history would be relying on the `~` on each hash alone to say so. The
+ * open group carries the same `Chưa niêm phong` stamp the open block's card
+ * carries on `/blocks`.
+ *
+ * The sealed group's own heading says only where those transactions sit —
+ * `Khối đã niêm phong` — and carries no `Sealed` stamp. One row in it can print
+ * an unsealed hash: a post whose newest amendment is still in the open block is
+ * itself sealed, while the record on its row is not. The `~` follows the hash
+ * that is printed (§3.6), and a `Sealed` stamp over that row would contradict
+ * it.
+ *
+ * **No truncation and no paging**, deliberately. `/about` already lists every
+ * post on the chain on one page, so a flat index is not a new scale problem;
+ * what this adds is the amendments, which are a fraction of the posts. A chain
+ * that publishes a handful of posts a month reaches a few hundred rows in years,
+ * and a paged `/tx/page/2` would have to live in the same namespace as
+ * `/tx/<slug>`, where a post slugged `page` would shadow it. When the list does
+ * get long the answer is the homepage's: truncate *there* and link here, which
+ * is what `/blocks` already does.
+ *
+ * No clock is read here or under `src/site/` (§14).
+ */
+const index = transactionIndex();
+---
+
+<Base title="Transactions — Blogchain" description="Mọi giao dịch trên chuỗi, mới nhất trước.">
+  <div class="page-head">
+    <h1>Transactions</h1>
+    <span class="sub"><span class="num">{index.total}</span> giao dịch · mới nhất trước</span>
+  </div>
+
+  {index.open.length > 0 ? (
+    <article class="card" aria-label="Pending transactions">
+      <div class="card-top">
+        <span class="per">Khối đang mở{index.openPeriod === null ? '' : ` · ${index.openPeriod}`}</span>
+        <span class="stamp open">Chưa niêm phong</span>
+      </div>
+      <ul class="txs tx-list" data-tx-list="open">
+        {index.open.map((entry) => (entry.kind === 'post' ? (
+          <TxRow post={entry.post} />
+        ) : (
+          <AmendmentRow entry={entry} />
+        )))}
+      </ul>
+    </article>
+  ) : null}
+
+  <article class="card" aria-label="Sealed transactions">
+    <div class="card-top">
+      <span class="per">Khối đã niêm phong</span>
+    </div>
+    {index.sealed.length > 0 ? (
+      <ul class="txs tx-list" data-tx-list="sealed">
+        {index.sealed.map((entry) => (entry.kind === 'post' ? (
+          <TxRow post={entry.post} />
+        ) : (
+          <AmendmentRow entry={entry} />
+        )))}
+      </ul>
+    ) : (
+      <p class="silent">Chưa có giao dịch nào trong khối đã niêm phong.</p>
+    )}
+  </article>
+</Base>

@@ -23,7 +23,7 @@ export interface RouteEntry {
 export const ROUTES: RouteEntry[] = [
   { id: 'about', href: '/about', label: 'About', built: true },
   { id: 'blocks', href: '/blocks', label: 'Blocks', built: true },
-  { id: 'tx', href: '/tx', label: 'Transactions', built: false },
+  { id: 'tx', href: '/tx', label: 'Transactions', built: true },
   { id: 'address', href: '/address', label: 'Addresses', built: true },
   { id: 'assets', href: '/assets', label: 'Assets', built: true },
   { id: 'mempool', href: '/mempool', label: 'Mempool', built: true },
