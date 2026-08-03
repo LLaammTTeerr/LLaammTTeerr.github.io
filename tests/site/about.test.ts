@@ -18,10 +18,10 @@ import { buildSandbox, chainBuildSandbox, sandboxRepo } from './sandbox';
  * The shipped ledger holds one post from one author, so "lists every
  * transaction" and "shows no other address" are true of almost any
  * implementation over it. What the profile's *link* rendering does — no
- * section when there is nothing to show, a link only for an entry that
- * declares a url — cannot be exercised against the real
- * `content/profile.md` at all (it ships with real placeholder links), so
- * those two are fixture-driven, over a sandboxed copy with its own
+ * section when there is nothing to show, a link for an entry that declares a
+ * url and plain text for one that does not — cannot be exercised against the
+ * real `content/profile.md`, which declares three labels and no url at all, so
+ * those cases are fixture-driven over a sandboxed copy with its own
  * `content/profile.md`.
  */
 
@@ -306,7 +306,14 @@ describe('the profile links section, fixture-driven', () => {
     expect(html).not.toContain('TODO');
   }, 120_000);
 
-  it('renders a link only for a profile entry that declares a url', () => {
+  it('renders a link only for a profile entry that declares a url, and plain text otherwise', () => {
+    // §6, and the rule `src/site/routes.ts` already enforces for every
+    // internal route: the site never links to what does not exist, so an
+    // unbuilt route is rendered as plain text rather than dropped or linked.
+    // An external url the author has not filled in is the same claim — and
+    // this page shipped three of them (`https://github.com/your-handle` and
+    // two more) as live anchors under a heading §6 calls "verified social
+    // links".
     const html = withProfile([
       'handle: lamter',
       'name: lamter.eth',
@@ -317,8 +324,29 @@ describe('the profile links section, fixture-driven', () => {
       '  - label: "Chưa có liên kết"',
     ]);
     expect(html).toContain('<a href="https://example.test/co-lien-ket">Có liên kết</a>');
-    expect(html, 'a link-less entry was rendered as though it had one').not.toContain('Chưa có liên kết');
+    // Named, so the author can see the row is there…
+    expect(html).toContain('<span class="unlinked">Chưa có liên kết</span>');
+    // …and not clickable, in any shape. An anchor around that label — with
+    // any href, including an empty one — is the failure this replaces.
+    expect(html, 'a link-less entry was rendered as an anchor').not.toMatch(
+      /<a[^>]*>Chưa có liên kết<\/a>/,
+    );
   }, 120_000);
+
+  it('ships no profile link whose url is a placeholder, on the page as built', () => {
+    // The concrete thing that was wrong: `content/profile.md` carried three
+    // `your-handle` urls and they were the only external anchors in the whole
+    // build. Read from the real `dist/`, so this is about what ships.
+    const anchors = [...page().matchAll(/<a[^>]*href="(https?:\/\/[^"]*)"/g)].map((m) => m[1]!);
+    for (const href of anchors) {
+      expect(href, `${href} is a placeholder url shipped as a live link`).not.toMatch(
+        /your-handle|your-?name|example\.(com|org|net)|USERNAME/i,
+      );
+    }
+    // And the source it comes from carries none either — a later edit that
+    // pastes a placeholder back in fails here rather than on the page.
+    expect(readFileSync('content/profile.md', 'utf8')).not.toMatch(/your-handle/i);
+  });
 
   it('renders the bio paragraph when the profile declares one, and nothing when it does not', () => {
     const withBio = withProfile(['handle: lamter', 'name: lamter.eth', 'bio: "Một đoạn tiểu sử."', 'links: []']);

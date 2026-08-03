@@ -41,10 +41,19 @@ import '../styles/chain.css';
 const address = await identityAddress(CHAIN_CONFIG.authorHandle);
 const profile = getProfile();
 const bioHtml = profile.bio.trim() === '' ? '' : await renderMarkdown(profile.bio);
-// §6: "renders a link only for a profile entry that declares a url" — an
-// entry with a label and no url stays named in the source and silent here,
-// never a link to nowhere.
-const links = profile.links.filter((l) => l.url !== '');
+// §6: "renders a link only for a profile entry that declares a url".
+//
+// An entry that declares none is still *named* — as plain text, exactly the way
+// `src/site/routes.ts` renders a route the build has not produced and the way
+// `TxPanel` renders a tag when `/address` is unbuilt. That rule already governs
+// every internal link on this site: the site never links to what does not
+// exist. An external url that does not exist is the same claim, and this page
+// shipped three of them (`https://github.com/your-handle` and two more) as live
+// anchors under a heading §6 calls "verified social links". Dropping the entry
+// entirely was the old behaviour and hides from the author that the row is
+// there; a plain-text label says "this profile has a GitHub, its url is not
+// filled in yet" without asserting where it points.
+const links = profile.links;
 
 // Every post is sent FROM the author's address (§3.7), so its whole
 // transaction history is the whole chain — `senders()` is exactly that list,
@@ -100,7 +109,13 @@ const hasProfileContent = bioHtml !== '' || links.length > 0;
       {bioHtml ? <div class="bio" set:html={bioHtml} /> : null}
       {links.length > 0 ? (
         <ul class="profile-links">
-          {links.map((link) => <li><a href={link.url}>{link.label}</a></li>)}
+          {links.map((link) => (
+            <li>{link.url === '' ? (
+              <span class="unlinked">{link.label}</span>
+            ) : (
+              <a href={link.url}>{link.label}</a>
+            )}</li>
+          ))}
         </ul>
       ) : null}
     </article>

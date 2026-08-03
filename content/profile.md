@@ -9,11 +9,11 @@ bio: |
   lẫn cách nó được dùng để dựng nên trang này.
 
   Phần tiểu sử này còn sơ sài, sẽ được bổ sung dần.
+# Mỗi mục chỉ thành liên kết khi `url` được điền bằng một địa chỉ có thật.
+# Chưa có `url` thì nhãn vẫn hiện, nhưng ở dạng chữ thường, không bấm được —
+# trang này không bao giờ trỏ tới một nơi không tồn tại.
 links:
   - label: GitHub
-    url: "https://github.com/your-handle"
   - label: Codeforces
-    url: "https://codeforces.com/profile/your-handle"
   - label: X (Twitter)
-    url: "https://x.com/your-handle"
 ---

@@ -116,12 +116,15 @@ a.hash:hover { text-decoration-color: currentColor; }
 .bio p:last-child { margin-bottom: 0; }
 .bio a { color: var(--acc); text-underline-offset: 3px; }
 
-/* §6 — the author's declared links on /about. Only entries `getProfile`
-   resolved a non-empty `url` for ever reach the template (see about.astro),
-   so this rule never has to distinguish a live link from a placeholder one. */
+/* §6 — the author's declared links on /about. An entry with no url is named
+   here as plain text and never as an anchor (see about.astro): the site links
+   only to what exists, and an unfilled external url is no more real than an
+   unbuilt route. `.unlinked` reads as inactive rather than as a link the
+   reader's click will fail on. */
 .profile-links { list-style: none; display: flex; flex-wrap: wrap; gap: 0.5rem 0.9rem;
   margin: 0 0 1.4rem; padding: 0; font-family: var(--mono); font-size: 0.8rem; }
 .profile-links a { color: var(--acc); text-underline-offset: 3px; }
+.profile-links .unlinked { color: var(--dim); }
 
 .a-hash { color: var(--dim); }
 .a-hash .tilde { color: var(--warn); font-weight: 700; }
