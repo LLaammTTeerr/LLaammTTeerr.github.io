@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join } from 'node:path';
 import { sha256Hex } from '../chain/hash';
 import type { AssetRecord, Hex } from '../chain/types';
-import { getAssets, getPendingBlock, type RecordedTx } from './chain-data';
+import { getAssets, getPendingBlock, referencedAssetNames, type RecordedTx } from './chain-data';
 
 /**
  * §3.2b — the files `dist` may serve under `/assets/`.
@@ -28,10 +28,20 @@ import { getAssets, getPendingBlock, type RecordedTx } from './chain-data';
  *    same falsehood at a different surface: bytes under a path the chain does
  *    not vouch for.
  *
- * Selection is by **bytes**, and the output name is the name **on disk**. The
- * registry's `file` field is committed to no hash anywhere (see
- * `registryProblem` in `src/chain/verify.ts`), so it decides nothing here —
- * the same rule `bytesOnDisk` and `assetMime` are under.
+ * Selection is by **bytes and by name together**, and the output name is the
+ * name **on disk**. The registry's `file` field is committed to no hash
+ * anywhere (see `registryProblem` in `src/chain/verify.ts`), so it decides
+ * nothing here — the same rule `bytesOnDisk` and `assetMime` are under.
+ *
+ * The names come from `referencedAssetNames()`: the filenames the bodies the
+ * chain currently vouches for actually embed, which is precisely the set of
+ * `/assets/<file>` urls the site emits an `<img src>` for. Selecting on bytes
+ * alone published urls no transaction names. Two ways, both driven:
+ * `cp so-do.svg copy-of-so-do.svg` shipped `/assets/copy-of-so-do.svg`; and
+ * after an image swap, restoring the *old* bytes under any other name shipped
+ * them too — while `/asset/1` was saying, correctly, that the content that
+ * token commits to cannot be reconstructed. The site does not get to publish
+ * bytes at a url of its own invention, whatever they hash to.
  *
  * Build-time only: it reads the filesystem, so nothing in the browser bundle
  * may import it. Reads no clock (§14), like everything else under `src/site/`.
@@ -73,8 +83,14 @@ export function committedAssetHashes(
 }
 
 /**
- * The files directly inside `assetsDir` whose raw bytes hash to one of
- * `hashes`, sorted by filename.
+ * The files directly inside `assetsDir` that a post currently references **by
+ * that name** and whose raw bytes hash to one of `hashes`, sorted by filename.
+ *
+ * Both conditions, and neither alone is enough. The bytes are what the chain
+ * vouches for; the name is what a transaction actually put on the site. A file
+ * matching only the bytes is a url the chain never named (see the module doc);
+ * a file matching only the name is the drifted image `getPostContent` fails the
+ * build over.
  *
  * Sorted rather than in `readdir` order: two consecutive builds must produce
  * byte-identical output, and directory order is filesystem-dependent.
@@ -91,12 +107,14 @@ export function committedAssetHashes(
 export async function committedAssetFiles(
   assetsDir: string,
   hashes: ReadonlySet<Hex>,
+  referenced: ReadonlySet<string>,
 ): Promise<CommittedAsset[]> {
-  if (hashes.size === 0 || !existsSync(assetsDir)) return [];
+  if (hashes.size === 0 || referenced.size === 0 || !existsSync(assetsDir)) return [];
 
   const names = readdirSync(assetsDir, { withFileTypes: true })
     .filter((entry) => entry.isFile())
     .map((entry) => entry.name)
+    .filter((name) => referenced.has(name))
     .sort();
 
   const out: CommittedAsset[] = [];
@@ -133,8 +151,9 @@ export async function writeCommittedAssets(
   assetsDir: string,
   outDir: string,
   hashes: ReadonlySet<Hex>,
+  referenced: ReadonlySet<string>,
 ): Promise<string[]> {
-  const files = await committedAssetFiles(assetsDir, hashes);
+  const files = await committedAssetFiles(assetsDir, hashes, referenced);
   if (files.length === 0) return [];
   mkdirSync(outDir, { recursive: true });
   for (const asset of files) {
@@ -177,5 +196,6 @@ export function emitSiteAssets(
     assetsDir,
     join(distDir, OUT_SUBDIR),
     committedAssetHashes(getAssets(), pendingTransactions()),
+    referencedAssetNames(),
   );
 }

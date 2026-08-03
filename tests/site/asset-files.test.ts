@@ -63,6 +63,14 @@ function assetsDirWith(files: Record<string, string>): string {
   return dir;
 }
 
+/**
+ * The filenames the bodies the chain vouches for reference — the second half of
+ * the selection rule (`referencedAssetNames()` supplies this in production).
+ * Spelled out per call so a test that means "the chain names this file" and one
+ * that means "the chain names some other file" cannot be confused.
+ */
+const named = (...files: string[]): ReadonlySet<string> => new Set(files);
+
 function record(over: Partial<AssetRecord> & { hash: Hex }): AssetRecord {
   return { tokenId: 1, file: FILE, mime: 'image/svg+xml', bytes: 0, mintedIn: 0, ...over };
 }
@@ -116,7 +124,7 @@ describe('committedAssetHashes', () => {
 describe('committedAssetFiles', () => {
   it('selects a file whose bytes hash to a committed value', async () => {
     const dir = assetsDirWith({ [FILE]: V1 });
-    const files = await committedAssetFiles(dir, new Set([await sha256Hex(V1)]));
+    const files = await committedAssetFiles(dir, new Set([await sha256Hex(V1)]), named(FILE));
     expect(files.map((f) => f.file)).toEqual([FILE]);
     expect(Buffer.from(files[0]!.bytes).toString('utf8')).toBe(V1);
   });
@@ -125,7 +133,7 @@ describe('committedAssetFiles', () => {
     // §3.2b: "A file no post references is not on the chain at all; it is just
     // a file." `.gitkeep` is the same case and ships in the repository today.
     const dir = assetsDirWith({ [FILE]: V1, [SPARE]: UNREFERENCED, '.gitkeep': '' });
-    const files = await committedAssetFiles(dir, new Set([await sha256Hex(V1)]));
+    const files = await committedAssetFiles(dir, new Set([await sha256Hex(V1)]), named(FILE));
     expect(files.map((f) => f.file)).toEqual([FILE]);
   });
 
@@ -135,24 +143,58 @@ describe('committedAssetFiles', () => {
     // hash (src/site/assets-view.ts); serving them at `/assets/so-do.svg` would
     // publish exactly the image the token page declines to.
     const dir = assetsDirWith({ [FILE]: V2 });
-    expect(await committedAssetFiles(dir, new Set([await sha256Hex(V1)]))).toEqual([]);
+    expect(await committedAssetFiles(dir, new Set([await sha256Hex(V1)]), named(FILE))).toEqual([]);
   });
 
   it('keys on bytes, never on the recorded filename', async () => {
     // `file` is covered by no hash anywhere on the chain (`registryProblem` in
     // src/chain/verify.ts says so outright), so it cannot decide what is
-    // served. The name on disk is the name written out; the bytes decide
-    // whether it is written at all.
+    // served. The registry record here says `so-do.svg`; the post says
+    // `ten-khac.svg`, and that is the url the site emits, so that is the file
+    // written out. The name comes from the body — never from the registry.
     const dir = assetsDirWith({ 'ten-khac.svg': V1 });
-    const files = await committedAssetFiles(dir, new Set([await sha256Hex(V1)]));
+    const files = await committedAssetFiles(dir, new Set([await sha256Hex(V1)]), named('ten-khac.svg'));
     expect(files.map((f) => f.file)).toEqual(['ten-khac.svg']);
+  });
+
+  it('leaves a byte-identical duplicate under another name behind', async () => {
+    // Bytes alone are not enough. A copy of a committed file hashes to a
+    // committed value, and publishing it would put `/assets/copy-of-so-do.svg`
+    // on the site — a url no post embeds and no transaction covers. §3.2b: a
+    // file no post references "is not on the chain at all; it is just a file".
+    const dir = assetsDirWith({ [FILE]: V1, 'copy-of-so-do.svg': V1 });
+    const files = await committedAssetFiles(dir, new Set([await sha256Hex(V1)]), named(FILE));
+    expect(files.map((f) => f.file)).toEqual([FILE]);
+  });
+
+  it("leaves a superseded token's own bytes behind, whatever they are named", async () => {
+    // The case that matters. After a recorded image swap the chain still
+    // commits to token #1's hash (the registry is append-only), so V1's bytes
+    // are permanently "committed" — while `/asset/1` tells the reader, in so
+    // many words, that the content that token commits to cannot be
+    // reconstructed. Restoring V1 under a spare name and having the build
+    // serve it makes the site contradict its own token page.
+    const dir = assetsDirWith({ [FILE]: V2, 'so-do-v1-backup.svg': V1 });
+    const both = new Set([await sha256Hex(V1), await sha256Hex(V2)]);
+    const files = await committedAssetFiles(dir, both, named(FILE));
+    expect(files.map((f) => f.file)).toEqual([FILE]);
+    expect(
+      Buffer.from(files[0]!.bytes).toString('utf8'),
+      "the build published the superseded token's bytes",
+    ).toBe(V2);
+  });
+
+  it('publishes nothing when no post references anything', async () => {
+    const dir = assetsDirWith({ [FILE]: V1 });
+    expect(await committedAssetFiles(dir, new Set([await sha256Hex(V1)]), named())).toEqual([]);
   });
 
   it('is deterministic: the same directory always yields the same order', async () => {
     const dir = assetsDirWith({ 'b.svg': V1, 'a.svg': V2, 'c.svg': UNREFERENCED });
     const hashes = new Set([await sha256Hex(V1), await sha256Hex(V2), await sha256Hex(UNREFERENCED)]);
-    const once = (await committedAssetFiles(dir, hashes)).map((f) => f.file);
-    const twice = (await committedAssetFiles(dir, hashes)).map((f) => f.file);
+    const refs = named('a.svg', 'b.svg', 'c.svg');
+    const once = (await committedAssetFiles(dir, hashes, refs)).map((f) => f.file);
+    const twice = (await committedAssetFiles(dir, hashes, refs)).map((f) => f.file);
     // Sorted, not readdir order: two consecutive builds must produce
     // byte-identical output, and readdir order is filesystem-dependent.
     expect(once).toEqual(['a.svg', 'b.svg', 'c.svg']);
@@ -166,13 +208,17 @@ describe('committedAssetFiles', () => {
     const dir = assetsDirWith({ [FILE]: V1 });
     mkdirSync(join(dir, 'ben-trong'));
     writeFileSync(join(dir, 'ben-trong', 'sau.svg'), V2);
-    const files = await committedAssetFiles(dir, new Set([await sha256Hex(V1), await sha256Hex(V2)]));
+    const files = await committedAssetFiles(
+      dir,
+      new Set([await sha256Hex(V1), await sha256Hex(V2)]),
+      named(FILE, 'sau.svg'),
+    );
     expect(files.map((f) => f.file)).toEqual([FILE]);
   });
 
   it('is empty, not an error, when the assets directory is absent', async () => {
     const dir = join(mkdtempSync(join(tmpdir(), 'asset-files-')), 'khong-co');
-    expect(await committedAssetFiles(dir, new Set([await sha256Hex(V1)]))).toEqual([]);
+    expect(await committedAssetFiles(dir, new Set([await sha256Hex(V1)]), named(FILE))).toEqual([]);
   });
 
   it('reads no clock', () => {
@@ -187,7 +233,7 @@ describe('writeCommittedAssets', () => {
     const out = mkdtempSync(join(tmpdir(), 'asset-out-'));
     writeFileSync(join(out, 'index.html'), '<h1>Assets</h1>');
 
-    const written = await writeCommittedAssets(src, out, new Set([await sha256Hex(V1)]));
+    const written = await writeCommittedAssets(src, out, new Set([await sha256Hex(V1)]), named(FILE));
     expect(written).toEqual([FILE]);
     expect(readdirSync(out).sort()).toEqual(['index.html', FILE].sort());
     expect(readFileSync(join(out, FILE), 'utf8')).toBe(V1);
@@ -199,7 +245,7 @@ describe('writeCommittedAssets', () => {
   it('creates the output directory when the build emitted no gallery there', async () => {
     const src = assetsDirWith({ [FILE]: V1 });
     const out = join(mkdtempSync(join(tmpdir(), 'asset-out-')), 'assets');
-    expect(await writeCommittedAssets(src, out, new Set([await sha256Hex(V1)]))).toEqual([FILE]);
+    expect(await writeCommittedAssets(src, out, new Set([await sha256Hex(V1)]), named(FILE))).toEqual([FILE]);
     expect(readFileSync(join(out, FILE), 'utf8')).toBe(V1);
   });
 
@@ -212,7 +258,9 @@ describe('writeCommittedAssets', () => {
     const src = assetsDirWith({ 'index.html': V1 });
     const out = mkdtempSync(join(tmpdir(), 'asset-out-'));
     writeFileSync(join(out, 'index.html'), '<h1>Assets</h1>');
-    await expect(writeCommittedAssets(src, out, new Set([await sha256Hex(V1)]))).rejects.toThrow(
+    await expect(
+      writeCommittedAssets(src, out, new Set([await sha256Hex(V1)]), named('index.html')),
+    ).rejects.toThrow(
       /would overwrite the built page/,
     );
     expect(readFileSync(join(out, 'index.html'), 'utf8')).toBe('<h1>Assets</h1>');
@@ -226,9 +274,9 @@ describe('writeCommittedAssets', () => {
     // hashed in the same call.
     const src = assetsDirWith({ [FILE]: V1 });
     const out = mkdtempSync(join(tmpdir(), 'asset-out-'));
-    const files = await committedAssetFiles(src, new Set([await sha256Hex(V1)]));
+    const files = await committedAssetFiles(src, new Set([await sha256Hex(V1)]), named(FILE));
     expect(await sha256Hex(files[0]!.bytes)).toBe(await sha256Hex(V1));
-    await writeCommittedAssets(src, out, new Set([await sha256Hex(V1)]));
+    await writeCommittedAssets(src, out, new Set([await sha256Hex(V1)]), named(FILE));
     expect(await sha256Hex(new Uint8Array(readFileSync(join(out, FILE))))).toBe(await sha256Hex(V1));
   });
 });
@@ -362,6 +410,26 @@ describe('a published image, end to end', () => {
       expect(existsSync(join(sealedDist, 'assets', FILE))).toBe(true);
     } finally {
       rmSync(join(dir, 'content/assets', SPARE));
+    }
+  }, 300_000);
+
+  it('does not copy a byte-identical duplicate of a file that is on the chain', () => {
+    // The half `does not copy a file no post references` cannot reach: these
+    // bytes ARE committed, so a selection keyed on bytes alone publishes them
+    // under whatever name they happen to have. `/assets/copy-of-so-do.svg`
+    // would be a live url that no post embeds and no transaction covers.
+    const copy = 'copy-of-so-do.svg';
+    writeFileSync(join(dir, 'content/assets', copy), V1);
+    try {
+      const build = buildSandbox(dir);
+      expect(build.status, `sandbox build failed:\n${build.output}`).toBe(0);
+      expect(
+        existsSync(join(sealedDist, 'assets', copy)),
+        `${copy} is named by no post, and the build published it anyway`,
+      ).toBe(false);
+      expect(existsSync(join(sealedDist, 'assets', FILE))).toBe(true);
+    } finally {
+      rmSync(join(dir, 'content/assets', copy));
     }
   }, 300_000);
 
