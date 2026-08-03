@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { DIST, distPages, internalHrefs, readDist, resolvesIn } from './dist';
 import { ROUTES } from '../../src/site/routes';
+import { getAddresses } from '../../src/site/addresses';
 
 /**
  * Fix 2: `Base.astro`'s nav names the site's whole shape, including routes
@@ -113,7 +114,7 @@ describe('link integrity across the whole page', () => {
     expect(distPages().length).toBeGreaterThan(1);
   });
 
-  it('checks a dotted-looking href as a route, not skips it as a static file', () => {
+  it('checks a dotted-looking href as a route, not skips it as a static file', async () => {
     // `/address/<tag>.tag` looks like a filename (a dot before the end), but
     // it is a route this app defines, not a static asset. A resolver that
     // special-cased "the last path segment has a dot in it" to mean "skip,
@@ -121,7 +122,18 @@ describe('link integrity across the whole page', () => {
     // link — which is precisely how `TxPanel.astro`'s dead `/address/<tag>.tag`
     // links shipped past an earlier, unscoped link check. `resolves` here
     // makes no such exception: it only ever asks the filesystem.
-    expect(resolves('/address/meta.tag')).toBe(false);
+    //
+    // Both halves, now that the route is built: every dotted address route the
+    // chain produces resolves, and a dotted href with no page behind it is
+    // still reported dead. A resolver that skipped dots would answer `true` to
+    // both — the second assertion is the one that catches it.
+    const names = (await getAddresses()).map((a) => a.name);
+    expect(names.length, 'the chain produced no address routes to check').toBeGreaterThan(0);
+    for (const name of names) {
+      expect(name, `${name} has no dot, so it does not exercise this at all`).toContain('.');
+      expect(resolves(`/address/${name}`), `/address/${name} was never built`).toBe(true);
+    }
+    expect(resolves('/address/khong-ton-tai.tag')).toBe(false);
     expect(resolves('/blocks')).toBe(true);
   });
 

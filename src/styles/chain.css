@@ -54,6 +54,10 @@
    reads as a hash first and a link second — until it is hovered. */
 a.hash { text-underline-offset: 3px; text-decoration-color: var(--line2); }
 a.hash:hover { text-decoration-color: currentColor; }
+/* A tag or series address (§3.7), on the address pages and in the block
+   chrome. `.txpanel .addr` in post.css says the same thing for the panel; both
+   take the reader's own address token, never a colour of their own. */
+.addr { font-family: var(--mono); word-break: break-all; color: var(--c-addr); }
 .num { color: var(--c-num); font-variant-numeric: tabular-nums; }
 
 .txs { list-style: none; margin: 0.9rem 0 0; padding: 0.8rem 0 0; border-top: 1px solid var(--line); }

@@ -55,10 +55,13 @@ const readMinutes = Math.max(1, Math.round(gasUsed / 200));
 // not the `0.0` the chain (correctly) committed.
 const hours = researchHours(value);
 
-// A tag or series is an address in the `/address` namespace, which — like
-// the nav entries in src/site/routes.ts, and read from that same list — has
-// no page yet. Naming it stays; linking it to a route this build cannot
-// produce would be the identical dead link the nav used to ship.
+// A tag or series is an address in the `/address` namespace (§3.7), read from
+// the same route list the nav renders from (src/site/routes.ts). That route is
+// built now, so these are links again — `/address/<slug>.tag` and
+// `/address/<slug>.series`, the pages `src/pages/address/[name].astro`
+// produces from the very same tags. The `built` branch stays: naming a tag is
+// unconditional, linking it is not, and a route removed later must degrade to
+// plain text rather than to the dead link the nav used to ship.
 const address = routeById('address');
 ---
 

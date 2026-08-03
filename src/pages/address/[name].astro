@@ -1,0 +1,97 @@
+---
+import Base from '../../layouts/Base.astro';
+import { getAddresses } from '../../site/addresses';
+import { getPendingPosts, researchHours, shortHash, txMetaLine } from '../../site/chain-data';
+// `.card`, `.meta`, `.hash`, `.addr`, `.num` and `.txs` are BlockCard's
+// classes, used verbatim so an address page reads as the same chrome as the
+// block list rather than drifting into a second style.
+import '../../styles/chain.css';
+
+/**
+ * §3.7/§3.8 — one tag or series address: what sent to it, how much value it
+ * received, and when it was first and last seen.
+ *
+ * The route param carries a dot (`meta.tag`), which is a name and not a file
+ * extension. With `build.format: 'directory'` Astro emits
+ * `dist/address/meta.tag/index.html`, and `tests/site/address-pages.test.ts`
+ * pins that: a link checker that treated the dot as "probably a static asset"
+ * is how this project's dead `/address/<tag>.tag` links shipped once already.
+ *
+ * No clock is read here or under `src/site/` (§14): the routes are a function
+ * of `chain.lock.json` plus the recorded open block, so the same chain builds
+ * the same pages on any day.
+ */
+export async function getStaticPaths() {
+  return (await getAddresses()).map((address) => ({
+    params: { name: address.name },
+    props: { address },
+  }));
+}
+
+const { address } = Astro.props;
+
+// This address's own detail page, so the full 40 hex digits are rendered
+// rather than a middle-truncated one (§3.1's display rule): the page exists to
+// be checked from, and a reader with JavaScript off must be able to select the
+// value and hash `addr/1|tag|<slug>` themselves. Truncation is for lists, and
+// the transaction hashes below — which each have a page of their own — get it.
+const kind = address.kind === 'tag' ? 'Tag' : 'Series';
+
+// §3.8 — an address that received no declared hours shows an em dash, not the
+// `0.0` the chain (correctly) committed for every post that declared nothing.
+const hours = researchHours(address.valueReceived);
+
+// §3.6 — the open block's posts are on the chain and belong in this list, but
+// their hashes are not sealed. A pending hash shown with the same authority as
+// a confirmed one is the single most misleading thing this site could display,
+// so they carry the same `~` marker TxPanel uses. Looked up by hash: the view
+// lists sealed and unsealed transactions together, by design.
+const pendingHashes = new Set(getPendingPosts().map((t) => t.hash));
+---
+
+<Base
+  title={`${address.name} — Blogchain`}
+  description={`Địa chỉ ${address.name} · ${address.txCount} giao dịch đã gửi tới.`}
+>
+  <div class="page-head">
+    <h1>{address.name}</h1>
+    <span class="sub">{kind} address</span>
+  </div>
+
+  <article class="card" data-address={address.name} aria-label={`Address ${address.name}`}>
+    <div class="card-top">
+      <span class="per">Address</span>
+    </div>
+    <dl class="meta">
+      <dt>Address</dt>
+      <dd><span class="addr">{address.address}</span></dd>
+      <dt>Name</dt><dd>{address.name}</dd>
+      <dt>Type</dt><dd>{kind}</dd>
+      <dt>Txns</dt><dd><span class="num">{address.txCount}</span></dd>
+      <dt>Received</dt>
+      <dd>{hours ? <Fragment><span class="num">{hours}</span> giờ nghiên cứu</Fragment> : '—'}</dd>
+      <dt>First seen</dt><dd>{address.firstSeen}</dd>
+      <dt>Last seen</dt><dd>{address.lastSeen}</dd>
+    </dl>
+    <ul class="txs">
+      {address.transactions.map((tx) => (
+        <li>
+          <h2 class="t">{tx.slug ? <a href={`/tx/${tx.slug}`}>{tx.title}</a> : (tx.title ?? 'Amendment')}</h2>
+          <span class="g">
+            {pendingHashes.has(tx.hash) ? (
+              <span class="a-hash"><span class="tilde">~</span>{shortHash(tx.hash)}</span>
+            ) : (
+              <span class="hash">{shortHash(tx.hash)}</span>
+            )}
+            {' · '}{tx.date}{' · '}
+            {/* Shared with BlockCard and the block detail page, so the three
+                lists cannot drift — and so a word count that could not be
+                re-derived from the body its own contentHash commits to shows
+                an em dash here too, never the recorded number. */}
+            {txMetaLine(tx)}
+          </span>
+        </li>
+      ))}
+    </ul>
+  </article>
+</Base>
