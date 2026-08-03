@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DIST, readDist } from './dist';
 import { buildSandbox, sandboxRepo, startDevSandbox, type DevServer } from './sandbox';
@@ -156,17 +156,113 @@ describe('a build with an open block', () => {
     expect(open.height).toBe(tip.height + 1);
   });
 
-  it('serves both documents over http, as json', async () => {
-    for (const [route, file] of [
-      ['/chain.json', LOCK],
-      ['/chain.pending.json', PENDING],
+  /**
+   * The dev half of every rule above — and the reason it is written this way.
+   *
+   * The assertion this replaces asked for a 200, a `content-type` matching
+   * `application/json`, and the committed bytes. It passed with
+   * `src/pages/chain.pending.json.ts` **deleted from the tree**. Nothing was
+   * answering from that route in dev: `chain.pending.json` is a file at the
+   * project root, and Vite's static layer serves project-root files ahead of
+   * Astro's request handler, so what the test proved was that Vite can read a
+   * file. The gate the route exists for — an open block recorded against
+   * another history, or one whose transaction hashes do not recompute, is
+   * published nowhere — was dead code in the mode the author writes in, and the
+   * one assertion covering it could not fail.
+   *
+   * Two discriminators fix that here. `charset=utf-8` and the **absence** of an
+   * `ETag` say the answer came from the project's own rule
+   * (`astro.config.mjs`'s `chainDocuments` middleware, which calls the same
+   * `ledgerBytes`/`openBlockBytes` the routes call) rather than from a static
+   * file server, which always stamps a validator on what it sends. And the
+   * comparison is against what `astro build` **wrote**, not against the source
+   * file: the property is that dev and the build answer the same bytes, which
+   * is what makes a verifier developed against dev correct in production.
+   */
+  it('answers both documents from the project rule, byte for byte with the build', async () => {
+    for (const [route, built] of [
+      ['/chain.json', 'dist/chain.json'],
+      ['/chain.pending.json', 'dist/chain.pending.json'],
     ] as const) {
       const response = await server.get(route);
       expect(response.status, `dev did not serve ${route}:\n${server.output()}`).toBe(200);
-      expect(response.headers.get('content-type')).toMatch(/^application\/json/);
-      expect(await response.text()).toBe(readFileSync(join(dir, file), 'utf8'));
+      expect(response.headers.get('content-type')).toBe('application/json; charset=utf-8');
+      expect(
+        response.headers.get('etag'),
+        `${route} was answered by a static file server, not by the route's rule`,
+      ).toBeNull();
+      expect(await response.text()).toBe(readFileSync(join(dir, built), 'utf8'));
     }
   }, 60_000);
+
+  /**
+   * The case that separates the rule from the file: an open block whose
+   * `prevHash` is not the tip's. `isStale` rejects it, `getPendingBlock()`
+   * returns `null`, and every page on the site says there is no open block —
+   * so the published document must say so too.
+   *
+   * Before the dev middleware, this is precisely where the two pipelines
+   * disagreed: `astro build` wrote no `dist/chain.pending.json` while
+   * `astro dev` answered 200 with the forged document. Asserting both surfaces
+   * against **one** forged file, in one place, is what keeps them from drifting
+   * again — neither half can be satisfied by a route that stopped working,
+   * because the honest document has to come back at the end without the server
+   * being restarted.
+   */
+  describe('an open block recorded against a history this chain does not have', () => {
+    const FORGED = `0x${'de'.repeat(32)}`;
+    let honest = '';
+
+    beforeAll(() => {
+      honest = readFileSync(join(dir, PENDING), 'utf8');
+      writeFileSync(
+        join(dir, PENDING),
+        honest.replace(/"prevHash": "0x[0-9a-f]{64}"/, `"prevHash": "${FORGED}"`),
+        'utf8',
+      );
+      const built = buildSandbox(dir);
+      if (built.status !== 0) throw new Error(`the forged-block build failed:\n${built.output}`);
+    }, 600_000);
+
+    afterAll(() => {
+      // Whatever happened above, the sandbox goes back to the honest record and
+      // a build made from it, so nothing downstream inherits the forgery.
+      writeFileSync(join(dir, PENDING), honest, 'utf8');
+      buildSandbox(dir);
+    }, 600_000);
+
+    it('really is forged, and really is what the sandbox now holds', () => {
+      // Without this the two assertions below would both pass against a file
+      // the replace silently failed to touch.
+      expect(honest, 'the honest record already carried the forged hash').not.toContain(FORGED);
+      expect(readFileSync(join(dir, PENDING), 'utf8')).toContain(FORGED);
+    });
+
+    it('is left out of the build', () => {
+      expect(existsSync(join(dir, 'dist/chain.pending.json'))).toBe(false);
+    });
+
+    it('is refused in dev too, and comes back once the record is honest again', async () => {
+      const refused = await server.get('/chain.pending.json');
+      expect(
+        refused.status,
+        `dev published an open block the build refuses:\n${server.output()}`,
+      ).toBe(404);
+      expect(await refused.text(), 'dev served the forged document in the 404 body').not.toContain(
+        FORGED,
+      );
+
+      // Restored without restarting the server: otherwise a route that had
+      // simply stopped answering would satisfy the assertion above.
+      writeFileSync(join(dir, PENDING), honest, 'utf8');
+      const restored = await server.get('/chain.pending.json');
+      expect(
+        restored.status,
+        `the open block did not come back after being restored:\n${server.output()}`,
+      ).toBe(200);
+      expect(await restored.text()).toBe(honest);
+    }, 60_000);
+  });
 });
 
 describe('a build with nothing open', () => {
