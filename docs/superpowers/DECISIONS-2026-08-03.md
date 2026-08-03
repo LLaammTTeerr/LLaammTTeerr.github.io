@@ -377,3 +377,26 @@ lists are not sufficient — any two agents that run the build collide over `dis
 
 **Rule going forward:** one agent at a time in this tree, or give each its own git worktree. A
 long, conclusive-sounding report is not a completion notification.
+
+---
+
+## D20 — one rule for the stats bar, after deferring it twice
+
+**Found:** the bar showed `Transactions 1` (sealed only) beside `Addresses 3` (including the open
+block), and `/about` said `Txns 2`. Three numbers, two pages, one chain.
+
+I deferred this twice as "a homepage decision". That stopped being reasonable once this branch
+built a second page answering the same question.
+
+**Decision:** a tile counts everything the chain records, **including the open block**, except
+where the value does not exist until a block is sealed. `Chain height` is that exception — a
+height is minted, not predicted, and a size-split could still change the open block's. The asset
+token count is the other, since a token id is assigned at seal (§3.2b). The rule is written in a
+comment beside the tiles so it is inherited rather than re-derived.
+
+**Worth recording about the test:** my first version asserted `x - p + p`, a tautology — exactly
+the vacuous shape I have rejected from every implementer on this project. My second was honest but
+compared zero to zero, because this repo has no pending block. Only the third, driving a sandbox
+with a real pending transaction, fails when the rule is removed. I found a real bug in my own
+reasoning on the way: I asserted `Transactions >= Addresses`, which is simply false — one post
+sends to several tags and the identity is an address too.
