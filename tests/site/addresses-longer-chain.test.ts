@@ -5,6 +5,7 @@ import { readPending } from '../../src/chain/pending';
 import type { PendingLock } from '../../src/chain/pending';
 import type { Block, Chain, Hex, Transaction } from '../../src/chain/types';
 import { addressIndex, getAddress, getAddresses, senders } from '../../src/site/addresses';
+import { isResolvedPost } from '../../src/site/chain-data';
 
 /**
  * The address views, posed against a chain long enough to tell them apart.
@@ -421,7 +422,10 @@ describe('what is not an address', () => {
     const slugs = new Set(senders().map((p) => p.slug));
     for (const view of await getAddresses()) {
       for (const post of view.transactions) {
-        expect(post.resolved, `${view.name} lists something that is not a resolved post`).toBe(true);
+        expect(
+          isResolvedPost(post),
+          `${view.name} lists something that did not come from the resolution`,
+        ).toBe(true);
         expect(slugs.has(post.slug), `${view.name} lists a row with no post behind it`).toBe(true);
       }
     }

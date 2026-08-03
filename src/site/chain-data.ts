@@ -322,10 +322,30 @@ function valueGiven(tx: RecordedTx, amendment: { tx: RecordedTx } | null): numbe
  * surface holding a `Transaction` and reading a field off it.
  *
  * So the resolution is not something a surface remembers to call: it is a
- * *type*. `resolved: true` is a brand no `Transaction` and no `RecordedTx`
- * carries, so a component whose prop is a `ResolvedPost` cannot be handed a raw
+ * *type*. A component whose prop is a `ResolvedPost` cannot be handed a raw
  * ledger entry — `astro check` (`npm run typecheck`) rejects it. `TxPanel` and
  * `TxRow` both take exactly this and nothing else.
+ *
+ * The brand is `RESOLVED`, and it is a **module-private `unique symbol`** for a
+ * reason found the hard way. It was a `resolved: true` field, which TypeScript's
+ * structural typing makes no barrier at all: a page containing
+ *
+ *     {...tx, resolved: true as const, originalHash: tx.hash, …}
+ *
+ * — no cast, no `as ResolvedPost` — satisfied the type, typechecked with zero
+ * errors, and rendered the superseded state. That is precisely the sixth
+ * surface this exists to prevent, reproducing the Critical in full.
+ *
+ * A `unique symbol` that is never exported cannot be *named* outside this
+ * module, so no object literal written anywhere else can carry the property.
+ * `resolveWith` below is the only expression in the codebase that produces one,
+ * which makes "this value came from the resolution" a fact the compiler checks
+ * rather than a shape anyone can imitate.
+ *
+ * What it still does not stop: spreading a genuine `ResolvedPost` and
+ * overwriting a field (`{...post, title: 'lie'}` copies the symbol). Nothing in
+ * a structural language stops that, and it is not the accident this guards —
+ * it cannot happen by reaching for the wrong variable, only by deciding to.
  *
  * The distinction that survives: a **block** view still renders `RecordedTx`,
  * because a block card describes what that block sealed and an amendment
@@ -334,9 +354,16 @@ function valueGiven(tx: RecordedTx, amendment: { tx: RecordedTx } | null): numbe
  * block-scoped — they are "the posts that sent here", under a header totalling
  * those posts' current hours — so they resolve.
  */
+/**
+ * The brand key. Deliberately **not exported**: a symbol that cannot be named
+ * outside this module cannot be written into an object literal outside it, so
+ * `ResolvedPost` is nominal in practice however structural the language is.
+ */
+const RESOLVED: unique symbol = Symbol('blogchain/resolved-post');
+
 export interface ResolvedPost {
-  /** The brand. Present on nothing the ledger reader returns. */
-  readonly resolved: true;
+  /** The brand. Only `resolveWith` can produce it — see the note above. */
+  readonly [RESOLVED]: true;
   slug: string;
   /**
    * The hash of the record that governs this post now — the newest
@@ -420,7 +447,7 @@ function resolveWith(
   const governing = amendment === null ? tx : amendment.tx;
   const slug = tx.slug ?? '';
   return {
-    resolved: true,
+    [RESOLVED]: true,
     slug,
     hash: governing.hash,
     originalHash: tx.hash,
@@ -447,6 +474,22 @@ function resolveWith(
     pending: amendment === null ? originalPending : !amendment.sealed,
     amendedIn: amendment === null ? null : { height: amendment.height, sealed: amendment.sealed },
   };
+}
+
+/**
+ * Whether a value carries the resolution's own brand.
+ *
+ * The runtime half of the type, for tests: the compiler enforces the brand at
+ * every call site, and this lets a test state the same thing about a value it
+ * pulled out of a view. Nothing in `src/` needs it — a `ResolvedPost` is
+ * already a `ResolvedPost` there.
+ */
+export function isResolvedPost(value: unknown): value is ResolvedPost {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    (value as Record<symbol, unknown>)[RESOLVED] === true
+  );
 }
 
 /** §3.9 — one post as the chain currently describes it. */
