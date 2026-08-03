@@ -1,92 +1,84 @@
-import type { RecordedTx, ResolvedPost } from './chain-data';
-import { getBlocks, getPendingBlock, getPendingPosts, getPosts, resolvedPosts } from './chain-data';
+import type { RecordedTx } from './chain-data';
+import { getBlocks, getPendingBlock, getPendingPosts, getPosts } from './chain-data';
 
 /**
  * §6 — the ledger flattened into one list: every transaction on the chain,
  * newest first, for `/tx`.
  *
  * The counterpart of `getBlocks()`. That view answers "what did each block
- * seal"; this one answers "what is on the chain, in the order it got there",
- * which is a different question and so a different walk — but over the same
- * committed records, from `src/site/chain-data.ts` and nowhere else.
+ * seal"; this one answers "what is on the chain, in the order it got there".
+ * Different question, same records — read from `src/site/chain-data.ts` and
+ * nowhere else, and with no clock (§14), so the same chain builds the same page
+ * on any day.
  *
- * Reads no clock (§14), like everything under `src/site/`: the order is a
- * function of `chain.lock.json` plus the recorded open block, so the same chain
- * builds the same page on any day.
+ * **A row is a transaction, and it carries `RecordedTx`.** Not `ResolvedPost`,
+ * and the distinction is the whole design of this page. `chain-data.ts` states
+ * the rule on `ResolvedPost` itself: "a **block** view still renders
+ * `RecordedTx`, because a block card describes what that block sealed and an
+ * amendment appears in it as its own row… An address card's rows are not
+ * block-scoped — they are 'the posts that sent here' — so they resolve." `/tx`
+ * is the first kind of surface. It indexes transactions, so each row is one
+ * transaction stating its own committed fields, exactly as `/blocks` does.
  *
- * **One row per ledger transaction.** A post transaction contributes a post
- * entry and an amendment contributes an amendment entry — never both for one
- * record, and never neither, so the page's row count is the chain's own
- * transaction count (the number `getStats()` puts on the homepage) rather than
- * a second opinion about it.
+ * Resolving here was wrong twice over, and both were shipped and caught. An
+ * amended post's row printed the *amendment's* hash, so that hash appeared on
+ * two rows while the post transaction's own hash appeared on none — an index
+ * that omits one transaction's identity and prints another's twice is not an
+ * index. And `/tx` and `/blocks` then gave two different titles for one
+ * transaction in one block, with nothing on either page saying why.
+ *
+ * "What is this post now" is a real question, and `/tx/<slug>` answers it,
+ * resolved, with an `Amends` row and an "Đã sửa trong khối #N" notice. That is
+ * where a reader who wants the current state clicks through to. This page
+ * answers "what is on the chain", and the honest answer to that names each
+ * transaction once.
  */
 
-/**
- * An amendment as the index renders it.
- *
- * `RecordedTx` narrowed on its own discriminant, so a post transaction cannot
- * reach `AmendmentRow.astro`: `astro check` (`npm run typecheck`) rejects it.
- * The reason is the mirror of `ResolvedPost`'s. `txMetaLine` is safe on an
- * amendment because §3.9 fixes its `gasUsed` and `value` at 0 and the line says
- * where the real figures were counted; handed a **post** it prints that post's
- * sealed word count and hours, which after an amendment is the superseded state
- * — defect shape 1, at a sixth surface. The type is what stops that, not a
- * comment asking the caller to filter first.
- */
-export type AmendmentTx = RecordedTx & { type: 'amendment' };
-
-function isAmendment(tx: RecordedTx): tx is AmendmentTx {
-  return tx.type === 'amendment';
-}
-
-/**
- * A post, as the chain currently describes it (§3.9).
- *
- * `ResolvedPost` and nothing looser: the row this becomes prints the governing
- * record's title, hash, word count and hours, and the resolution is the only
- * thing on this project allowed to decide which record that is.
- */
-export interface PostEntry {
-  kind: 'post';
-  post: ResolvedPost;
-}
-
-export interface AmendmentEntry {
-  kind: 'amendment';
-  tx: AmendmentTx;
-  /**
-   * §3.9 — the slug of the post this amends, or `null` when the chain holds no
-   * post transaction with the hash it names.
-   *
-   * An amendment has no slug and no page of its own; it belongs to the post it
-   * amends, and that post's page is where its title, body and figures are
-   * rendered. Resolved here, from the `amends` hash the amendment's own
-   * transaction hash covers, so the row links to something committed rather
-   * than to a path assembled from a title.
-   */
-  amendedSlug: string | null;
-  /** §3.6 — true while this amendment is still in the open block. */
+/** One row of the index: one transaction, and what the page needs to place it. */
+export interface LedgerRow {
+  /** The transaction exactly as the chain recorded it. Never resolved. */
+  tx: RecordedTx;
+  /** §3.6 — true while the block holding this transaction is the open one. */
   pending: boolean;
+  /**
+   * The page this transaction belongs to, or `null` when it has none.
+   *
+   * A post's own page for a post. For an amendment, the page of the post it
+   * amends: §3.9 gives an amendment no slug and no page of its own, and
+   * `/tx/<slug>` renders the *governing* record — which for the newest
+   * amendment is that transaction, so the link lands on the page that shows
+   * what this row's transaction says. `null` when the `amends` hash names no
+   * post transaction the chain holds: the site links only to what exists.
+   */
+  href: string | null;
 }
-
-export type TxEntry = PostEntry | AmendmentEntry;
 
 export interface TxIndexView {
   /**
    * The open block's transactions, newest first — empty whenever nothing is
    * unsealed, which is most of the time.
    */
-  open: TxEntry[];
+  open: LedgerRow[];
   /** The open block's recorded period (`YYYY-MM`), or `null` when there is none. */
   openPeriod: string | null;
   /** Every sealed transaction, newest block first. */
-  sealed: TxEntry[];
+  sealed: LedgerRow[];
   /** `open.length + sealed.length` — one row per transaction on the chain. */
   total: number;
 }
 
 /**
- * One block's transactions as index entries, newest first.
+ * The page a transaction belongs to, as a slug — its own for a post, the
+ * amended post's for an amendment (§3.9), `undefined` when the chain names
+ * neither.
+ */
+function slugFor(tx: RecordedTx, slugOf: ReadonlyMap<string, string>): string | undefined {
+  if (tx.type !== 'amendment') return tx.slug ?? undefined;
+  return tx.amends === null ? undefined : slugOf.get(tx.amends);
+}
+
+/**
+ * One block's transactions as rows, newest first.
  *
  * "Newest first" inside a block is the reverse of the order `chain:build`
  * committed them, because that order *is* chain order: §5 sorts a block's
@@ -96,62 +88,35 @@ export interface TxIndexView {
  * (§3.9), so a correction recorded this month would file itself back among
  * last winter's posts.
  */
-function entriesOf(
+function rowsOf(
   txs: readonly RecordedTx[],
-  height: number,
   pending: boolean,
-  governing: ReadonlyMap<string, ResolvedPost>,
   slugOf: ReadonlyMap<string, string>,
-): TxEntry[] {
-  const out: TxEntry[] = [];
+): LedgerRow[] {
+  const out: LedgerRow[] = [];
   for (let i = txs.length - 1; i >= 0; i -= 1) {
     const tx = txs[i]!;
-    if (isAmendment(tx)) {
-      out.push({
-        kind: 'amendment',
-        tx,
-        amendedSlug: tx.amends === null ? null : (slugOf.get(tx.amends) ?? null),
-        pending,
-      });
-      continue;
-    }
-    // Every post transaction on the chain has a resolution — `resolvedPosts()`
-    // is built from `getPosts()` plus `getPendingPosts()`, which between them
-    // are every post transaction there is. A miss means the two walks have
-    // diverged, and a page that quietly dropped the row would hide that: the
-    // index would be one transaction short of the count it prints beside it.
-    const post = governing.get(tx.hash);
-    if (post === undefined) {
-      throw new Error(
-        `no resolved post for transaction ${tx.hash} in block #${height} — ` +
-          'resolvedPosts() and the ledger disagree about what a post is',
-      );
-    }
-    out.push({ kind: 'post', post });
+    const slug = slugFor(tx, slugOf);
+    out.push({ tx, pending, href: slug === undefined ? null : `/tx/${slug}` });
   }
   return out;
 }
 
 /** §6 — every transaction on the chain, newest first. */
 export function transactionIndex(): TxIndexView {
-  // Keyed by the *original* transaction's hash, which is what a block holds.
-  // `ResolvedPost.hash` is the governing record's and is the amendment's hash
-  // after an edit, so keying on that would leave every amended post unfindable
-  // from the ledger entry that stands for it.
-  const governing = new Map(resolvedPosts().map((p) => [p.originalHash, p]));
-
+  // Post transactions by hash, so an amendment can name the page of the post it
+  // amends. Sealed and pending alike: a post in the open block has a page
+  // (§3.6), and an amendment to one would otherwise be the single row on this
+  // page that links nowhere.
   const slugOf = new Map<string, string>();
   for (const tx of [...getPosts(), ...getPendingPosts()]) {
     if (tx.slug !== null) slugOf.set(tx.hash, tx.slug);
   }
 
   const pending = getPendingBlock();
-  const open =
-    pending === null ? [] : entriesOf(pending.transactions, pending.height, true, governing, slugOf);
+  const open = pending === null ? [] : rowsOf(pending.transactions, true, slugOf);
   // `getBlocks()` is already newest first (§9); the chain reads backwards.
-  const sealed = getBlocks().flatMap((b) =>
-    entriesOf(b.transactions, b.height, false, governing, slugOf),
-  );
+  const sealed = getBlocks().flatMap((b) => rowsOf(b.transactions, false, slugOf));
 
   return {
     open,

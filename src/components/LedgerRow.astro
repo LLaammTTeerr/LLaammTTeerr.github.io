@@ -1,0 +1,69 @@
+---
+import type { LedgerRow } from '../site/tx-index';
+import { shortHash, txMetaLine } from '../site/chain-data';
+// `.txs` and its `.t` / `.g` children are BlockCard's list classes
+// (src/styles/chain.css), reused verbatim so the transaction index reads as
+// the same chrome as a block's transaction list.
+import '../styles/chain.css';
+
+/**
+ * One transaction as a row in the transaction index (`/tx`).
+ *
+ * **A ledger row, not a post row**, and the difference is the point. `TxRow`
+ * describes a *post*, resolved to the state the chain asserts now (§3.9), under
+ * a header that totals that same current state — that is what `/address/<name>`
+ * and `/about` are for, and it must never be handed a raw ledger entry. This
+ * describes a *transaction*: its own hash, its own committed title, its own gas
+ * and hours. `/tx` indexes transactions, so a row here is one transaction
+ * stating what it says, exactly as `BlockCard` renders one.
+ *
+ * That is why this shares `txMetaLine` with `BlockCard` and `/block/<height>`
+ * rather than carrying its own copy: an undeclared `research` is an em dash and
+ * not `0.0 giờ`, an amendment says where its figures were counted instead of
+ * printing the accounting zeros §3.9 fixes it at, and a word count that could
+ * not be re-derived is omitted rather than taken on trust. Three pages, one
+ * definition, so `/tx` and `/blocks` cannot disagree about a transaction.
+ *
+ * `pending` is not computed here. It travels on the row from
+ * `src/site/tx-index.ts`, which knows whether the block holding this
+ * transaction is the open one; a component that guessed would be the
+ * caller-supplied flag that once rendered `Sealed` over an unconfirmed
+ * transaction (§3.6).
+ */
+interface Props {
+  row: LedgerRow;
+}
+const { row } = Astro.props;
+const { tx, pending, href } = row;
+
+// The same fallback `BlockCard` uses. §3.9 always sets an amendment's title and
+// a post cannot be without one, so this is for a ledger written before that was
+// true: it says what the row is rather than rendering an empty heading.
+const title = tx.title ?? 'Amendment';
+
+// §3.9 — the transaction this one supersedes, truncated as a list requires.
+// `null` on a post, which is every row but an amendment's.
+const amends = tx.amends === null ? null : shortHash(tx.amends);
+---
+
+<li data-tx={tx.hash} data-amends={tx.amends}>
+  <h2 class="t">{href === null ? <Fragment>{title}</Fragment> : <a href={href}>{title}</a>}</h2>
+  {/* One expression per segment and no newlines between them: a separator
+      belongs to the segment that follows it, so a segment that is not rendered
+      cannot leave a dangling ` · ` at the end of the line. */}
+  <span class="g">{pending ? (
+    /* §3.6 — the same `~` marker TxRow and TxPanel use for a hash the chain has
+       not sealed. A transaction in the open block has a true hash and no seal,
+       and "a pending hash presented with the same authority as a sealed one
+       would be the single most misleading thing this site could display." */
+    <span class="a-hash"><span class="tilde">~</span>{shortHash(tx.hash)}</span>
+  ) : (
+    <span class="hash">{shortHash(tx.hash)}</span>
+  )}<Fragment> · {tx.date} · {txMetaLine(tx)}</Fragment>{amends === null ? null : (
+    /* `TxPanel`'s `Amends` field in a list's truncated form, and unlinked
+       exactly as the panel's is — the original transaction has no page of its
+       own either. It is what ties this row to the row above it that carries
+       that hash as its own identity. */
+    <Fragment> · sửa <span class="hash">{amends}</span></Fragment>
+  )}</span>
+</li>
