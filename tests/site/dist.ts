@@ -34,6 +34,39 @@ export function internalHrefs(html: string): string[] {
 }
 
 /**
+ * Absolute site-internal `src` and `srcset` urls in a fragment or document,
+ * deduplicated.
+ *
+ * The sibling of `internalHrefs`, and the reason this file grew one: every
+ * link check in the suite read `href`, and an image uses `src`. Nothing
+ * copied `content/assets/` into `dist`, so every `![…](/assets/…)` in every
+ * post rendered an `<img src>` that 404ed, with 661 tests green.
+ *
+ * Absolute urls only, exactly as `internalHrefs` does: a `data:` uri carries
+ * its own bytes and fetches nothing (that is what every token page's embed
+ * is), and an `http(s)://` url is a third party, which is a different guard's
+ * job (`no built page references an absolute http(s) url`).
+ *
+ * `srcset` is a comma-separated list of `<url> <descriptor>` candidates, so
+ * each entry's url is its first whitespace-delimited token. A responsive
+ * image that shipped one resolvable candidate and one dead one would
+ * otherwise pass a check that only read `src`.
+ */
+export function internalSrcs(html: string): string[] {
+  const out: string[] = [];
+  for (const m of html.matchAll(/\bsrc="([^"]*)"/g)) {
+    if (m[1]!.startsWith('/')) out.push(m[1]!);
+  }
+  for (const m of html.matchAll(/\bsrcset="([^"]*)"/g)) {
+    for (const candidate of m[1]!.split(',')) {
+      const url = candidate.trim().split(/\s+/)[0] ?? '';
+      if (url.startsWith('/')) out.push(url);
+    }
+  }
+  return [...new Set(out)];
+}
+
+/**
  * Read a file from the build output, with an error that says what to do.
  * Call this INSIDE a test, never at module top level — a top-level throw
  * fails the entire file at import time and hides which assertion broke.
@@ -86,16 +119,16 @@ function cssLoadedBy(page: string): string {
  * `[slug].astro` shipped with a fully green suite. Anything asserted about
  * "the built page" must iterate this.
  */
-export function distPages(): string[] {
+export function distPages(distRoot: string = DIST): string[] {
   const out: string[] = [];
   const walk = (dir: string): void => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const path = join(dir, entry.name);
       if (entry.isDirectory()) walk(path);
-      else if (entry.name.endsWith('.html')) out.push(relative(DIST, path).split(sep).join('/'));
+      else if (entry.name.endsWith('.html')) out.push(relative(distRoot, path).split(sep).join('/'));
     }
   };
-  walk(DIST);
+  walk(distRoot);
   return out.sort();
 }
 

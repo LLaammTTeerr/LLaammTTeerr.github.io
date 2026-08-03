@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { DIST, distPages, internalHrefs, readDist, resolvesIn } from './dist';
+import { DIST, distPages, internalHrefs, internalSrcs, readDist, resolvesIn } from './dist';
 import { ROUTES } from '../../src/site/routes';
 import { getAddresses } from '../../src/site/addresses';
 
@@ -153,5 +153,56 @@ describe('link integrity across the whole page', () => {
     // Anti-vacuity: every page above emitting zero internal links would pass
     // this file having checked nothing.
     expect(checked).toBeGreaterThan(0);
+  });
+
+  /**
+   * The same guarantee for `src`, which every link check in this suite used to
+   * skip. That omission is how a build shipping no `content/assets/` at all
+   * went unnoticed: a post embedding `![Sơ đồ](/assets/so-do.svg)` renders an
+   * `<img src>` that 404s, and reading only `href` cannot see it.
+   *
+   * **This assertion is vacuous on the live repository today** — the author has
+   * published no image, so no built page emits a site-internal `src` at all,
+   * and a count-based anti-vacuity check here would fail for that reason alone.
+   * It is a standing guarantee for the day an image is published, and it is
+   * NOT the evidence that the copy works: `tests/site/asset-files.test.ts`
+   * drives a real image through a real build and checks every `src` in the
+   * *sandbox's* dist, which is the check that goes red when the copy is
+   * removed. What is asserted here instead is that the machinery would report
+   * a miss rather than shrug — see the two checks below.
+   */
+  it('reports a missing src rather than skipping it', () => {
+    expect(internalSrcs('<img src="/assets/so-do.svg" alt="">')).toEqual(['/assets/so-do.svg']);
+    expect(resolves('/assets/khong-ton-tai.svg')).toBe(false);
+  });
+
+  it('reads every candidate in a srcset, not just the first', () => {
+    // A responsive image shipping one resolvable candidate beside one dead one
+    // would pass a check that read `src` alone, or one that took `srcset` as a
+    // single url. Each entry is `<url> <descriptor>`, comma-separated.
+    expect(internalSrcs('<img src="/a.png" srcset="/a.png 1x, /b.png 2x">')).toEqual([
+      '/a.png',
+      '/b.png',
+    ]);
+    expect(internalSrcs('<img srcset="/hep.png 480w,   /rong.png 1200w">')).toEqual([
+      '/hep.png',
+      '/rong.png',
+    ]);
+  });
+
+  it('reads a data: uri and a third-party url as neither internal nor missing', () => {
+    // A token page's embed carries its own bytes (src/site/assets-view.ts), so
+    // it fetches nothing from `dist` and must not be demanded of it. A
+    // third-party url is a separate guard's business (dist-output.test.ts).
+    expect(internalSrcs('<img src="data:image/svg+xml;base64,PHN2Zz4=">')).toEqual([]);
+    expect(internalSrcs('<img src="https://evil.example.com/pixel.gif">')).toEqual([]);
+  });
+
+  it('no src anywhere in any built page 404s', () => {
+    for (const page of distPages()) {
+      for (const src of internalSrcs(readDist(page))) {
+        expect(resolves(src), `${src} is sourced by ${page} but is not in the build`).toBe(true);
+      }
+    }
   });
 });
