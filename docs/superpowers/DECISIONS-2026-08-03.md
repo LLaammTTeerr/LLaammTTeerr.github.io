@@ -400,3 +400,29 @@ compared zero to zero, because this repo has no pending block. Only the third, d
 with a real pending transaction, fails when the rule is removed. I found a real bug in my own
 reasoning on the way: I asserted `Transactions >= Addresses`, which is simply false — one post
 sends to several tags and the identity is an address too.
+
+---
+
+## D21 — merged plan 2b-iii to main
+
+**State at merge:** 739 tests passing **both** with the demo corpus seeded and without it,
+typecheck clean over 99 files, build clean, zero dead links or image sources, ledger untouched.
+
+**To reverse:** `git reset --hard bb6a66f` on main. Local only; nothing pushed.
+
+**Two things closed on the way in, neither in the original plan:**
+
+*Dev mode had no test coverage at all.* Every test drove `astro build`, which is why 691 tests
+were green while every image in every post was a broken icon under `astro dev` — the mode the
+author actually writes in. There is now a dev-server test file driving real HTTP against a
+sandbox. Worth knowing for the future: `process.env.VITEST` makes Astro skip installing its dev
+router entirely, so a naive dev-server test answers the asset route and 404s every page.
+
+*The suite only passed against the one-post ledger.* 59 tests failed with a realistic corpus:
+24 asserting "the live ledger has one/none of X", 17 sandboxes inheriting the committed chain
+where the test needed its own, 12 hard-coded counts or hashes, 4 index assumptions, 2 HTML
+escaping. All were test coupling — **no product bug**, no file under `src/` changed. Fifteen
+mutations were run afterwards to prove the decoupled versions still bite.
+
+That second one mattered because the author is about to write real content, and a suite that
+goes red when you add a blog post is a suite people stop believing.
