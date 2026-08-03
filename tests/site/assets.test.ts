@@ -221,6 +221,70 @@ describe('an empty registry', () => {
     expect(html()).not.toMatch(/href="\/asset\//);
     expect(distPages().some((p) => p.startsWith('asset/'))).toBe(false);
   });
+
+  it('says no token has been minted — not that no post references a file', () => {
+    // The registry is minted when a block *seals*, so an open month is exactly
+    // the state where posts reference files, the build serves them, and the
+    // registry is still empty. The old sentence — "chưa bài viết nào tham
+    // chiếu tệp trong content/assets/" — was false in that state, and the
+    // build's own log said `copied 1 committed asset file(s)` while rendering
+    // it. Driven below; asserted here as the wording the page must not carry.
+    expect(html(), 'the empty gallery still claims no post references a file').not.toMatch(
+      /chưa bài viết nào tham chiếu/i,
+    );
+    expect(html()).toMatch(/Chưa có token nào được đúc/);
+  });
+});
+
+describe('an open month, where files are served and no token exists yet', () => {
+  /**
+   * The state a working repository spends most of its life in, and the one the
+   * empty-state sentence was false in. One `chain:build` only: the post lands
+   * in the open block, the image is committed by its transaction and served,
+   * and the sealed registry says nothing about it.
+   */
+  const SLUG = '2026-08-02-dang-mo';
+  const POST = [
+    '---',
+    'title: "Bài trong khối mở"',
+    'date: 2026-08-02',
+    'tags: [meta]',
+    'research: 1.0',
+    '---',
+    '',
+    'Bài viết có hình, khối chưa niêm phong.',
+    '',
+    `![Sơ đồ](/assets/${FILE})`,
+    '',
+  ].join('\n');
+
+  it('serves the image and says no token has been minted, without contradicting itself', () => {
+    const dir = sandboxRepo();
+    mkdirSync(join(dir, 'content/assets'), { recursive: true });
+    writeFileSync(join(dir, 'content/assets', FILE), V1);
+    writeFileSync(join(dir, 'content/posts', `${SLUG}.md`), POST);
+
+    const chain = chainBuildSandbox(dir, '2026-08-10');
+    expect(chain.status, `chain:build failed:\n${chain.output}`).toBe(0);
+    const lock = JSON.parse(readFileSync(join(dir, 'chain.lock.json'), 'utf8')) as {
+      assets: AssetRecord[];
+    };
+    expect(lock.assets, 'the fixture minted a token — the open-month case is not exercised').toEqual([]);
+
+    const build = buildSandbox(dir);
+    expect(build.status, `sandbox build failed:\n${build.output}`).toBe(0);
+
+    // The build is serving the file…
+    expect(existsSync(join(dir, 'dist/assets', FILE)), 'the referenced image was not served').toBe(true);
+    // …so the gallery must not say no post references a file in content/assets.
+    const gallery = readFileSync(join(dir, 'dist/assets/index.html'), 'utf8');
+    expect(gallery).toContain('<span class="num">0</span> token');
+    expect(
+      gallery,
+      'the page denies a reference the same build just served',
+    ).not.toMatch(/chưa bài viết nào tham chiếu/i);
+    expect(gallery).toMatch(/Chưa có token nào được đúc/);
+  }, 600_000);
 });
 
 describe('a registry with a token in it', () => {
@@ -322,6 +386,64 @@ describe('a registry with a token in it', () => {
     expect(galleryV1).toContain(`${hash.slice(0, 8)}…${hash.slice(-6)}`);
     expect(galleryV1, 'a list printed a full 64-hex hash').not.toContain(hash);
     expect(galleryV1).toContain('href="/asset/1"');
+  });
+
+  /** One token's `<li>` in the gallery, so a figure cannot be satisfied by another row. */
+  function galleryRow(html: string, tokenId: number): string {
+    const rows = [...html.matchAll(/<li>[\s\S]*?<\/li>/g)].map((m) => m[0]);
+    const row = rows.find((r) => r.includes(`href="/asset/${tokenId}"`));
+    if (row === undefined) throw new Error(`the gallery has no row for token #${tokenId}`);
+    return row;
+  }
+
+  it('states the size on disk in the gallery, re-derived and never the recorded field', () => {
+    // Uncovered by anything: swapping the gallery's `bytesOnDisk` expression
+    // for `{view.bytes}` — the registry field this module's own doc says "is
+    // never displayed", because `registryProblem` authenticates it nowhere —
+    // left 704/704 green. `assets.test.ts` checked `bytesOnDisk` on the detail
+    // page and through `assetViews()`; the gallery's own rendering of size and
+    // staleness was unasserted, so a §14 falsehood was one edit away.
+    expect(galleryRow(galleryV1, 1)).toContain(`<span class="num">${bytesOf(V1)}</span> byte`);
+  });
+
+  it('prints an em dash, not the recorded size, for a superseded token in the gallery', () => {
+    // After the swap the file at that path is V2, and V2 is not what token #1
+    // commits to. The registry still records V1's byte count for it — which is
+    // the number `{view.bytes}` would print, and which describes an image the
+    // chain can no longer produce.
+    const stale = galleryRow(galleryV2, 1);
+    expect(stale, 'the superseded token printed the recorded size').not.toContain(
+      `<span class="num">${bytesOf(V1)}</span> byte`,
+    );
+    expect(stale, "the superseded token borrowed the replacement's size").not.toContain(
+      `<span class="num">${bytesOf(V2)}</span> byte`,
+    );
+    expect(stale).toMatch(/·\s*—/);
+    // The control: the current token still states its size, so the assertion
+    // above is about this row and not about sizes having stopped altogether.
+    expect(galleryRow(galleryV2, 2)).toContain(`<span class="num">${bytesOf(V2)}</span> byte`);
+  });
+
+  it('marks the superseded token stale in the gallery, and only it', () => {
+    expect(galleryRow(galleryV2, 1), 'the superseded token carries no stale marker').toContain(
+      '<span class="stale">tệp không khớp</span>',
+    );
+    expect(galleryRow(galleryV2, 2), 'the current token was marked stale').not.toContain('tệp không khớp');
+    // Before the swap nothing is stale at all — otherwise "the marker is
+    // always there" passes the assertion above.
+    expect(galleryRow(galleryV1, 1), 'a current token was marked stale').not.toContain('tệp không khớp');
+  });
+
+  it('drops the media type with the bytes, and keeps it while they are there', () => {
+    // `mime` is a registry field no hash covers, re-derived from the name of
+    // the file that matched. When nothing matches there is nothing to derive.
+    expect(galleryRow(galleryV1, 1)).toContain('image/svg+xml');
+    expect(galleryRow(galleryV2, 1), 'a superseded token stated a media type').not.toContain(
+      'image/svg+xml',
+    );
+    expect(galleryRow(galleryGone, 2), 'a token whose file is gone stated a media type').not.toContain(
+      'image/svg+xml',
+    );
   });
 
   it('shows the full hash on the token\'s own page', () => {

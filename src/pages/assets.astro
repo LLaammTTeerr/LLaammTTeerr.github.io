@@ -32,6 +32,14 @@ import '../styles/chain.css';
  * at all. It gets a sentence of its own rather than a blank card, so the page
  * reads as "nothing has been minted" instead of as a page that failed to load.
  *
+ * That sentence says **no token has been minted yet**, and deliberately not
+ * "no post references a file in content/assets/". A token is minted when the
+ * block holding the post *seals*, so a repository whose current month is open
+ * is serving referenced images at real urls with an empty registry — the state
+ * a working repository spends most of its life in. The old wording was false in
+ * exactly that state, and the build printed `copied 1 committed asset file(s)`
+ * on the way to rendering it.
+ *
  * No clock (§14): `getAssetViews()` reads the registry and the files on disk.
  */
 const views = await getAssetViews();
@@ -82,7 +90,10 @@ const rows = views.map((view) => ({
         ))}
       </ul>
     ) : (
-      <p class="silent">Chưa có token nào: chưa bài viết nào tham chiếu tệp trong content/assets/.</p>
+      <p class="silent">
+        Chưa có token nào được đúc. Token chỉ sinh ra khi khối chứa bài viết tham chiếu tệp được
+        niêm phong, nên tệp trong bài thuộc khối đang mở vẫn chưa có token của riêng nó.
+      </p>
     )}
   </article>
 </Base>
