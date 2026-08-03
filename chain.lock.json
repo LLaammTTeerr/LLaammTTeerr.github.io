@@ -4,17 +4,255 @@
   "blocks": [
     {
       "height": 0,
-      "period": "2026-06",
+      "period": "2026-03",
       "prevHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
-      "merkleRoot": "0xbace1a00bf063aaaaf002cfe38df9ac3e19a1087fcd06443d333244021674406",
-      "timestamp": "2026-06-15T00:00:00Z",
-      "txCount": 1,
-      "gasUsed": 44,
-      "value": 1,
+      "merkleRoot": "0x6a39f2bee47cfc6dc3e07770d52a18efbdec127aed67470946056398a2b97ca2",
+      "timestamp": "2026-03-19T00:00:00Z",
+      "txCount": 2,
+      "gasUsed": 212,
+      "value": 14.5,
       "difficulty": 5,
-      "nonce": 994454,
-      "hash": "0x00000b1ea722c8b1e3a50ff4ec3c813b120d59a6ec3b7ba0d6253632eca1bd36",
+      "nonce": 115265,
+      "hash": "0x000005dcd2ce81bdefdce12af737b7ddbf4fbe0b582c1ba25ac448759d8becbb",
       "transactions": [
+        {
+          "hash": "0x6968d2a7704200745b9addc523a25785aa3d3c9dd8d5686cf04336007a843972",
+          "type": "post",
+          "slug": "2026-03-04-mo-algorithm",
+          "title": "Mo's algorithm và thứ tự truy vấn",
+          "date": "2026-03-04",
+          "tags": [
+            "cp",
+            "algorithm"
+          ],
+          "series": "ghi-chu-thuat-toan",
+          "from": "0x017b046a17056ce94749f1d0cf26dfa3e33abc7b",
+          "to": [
+            "0x5e6abdbce628ff0853ca5d2a987785fd3243831b",
+            "0x936973fe3ac981cde4c6c026894ea6cf985ecc45",
+            "0x97f28539f3dcb91809767ac8404ab5b502689a36"
+          ],
+          "contentHash": "0xed725128ebd51ee71a24cfb02da61e11b77944aff107d6c7f917b23f3424c50c",
+          "assets": [],
+          "gasUsed": 104,
+          "value": 8.5,
+          "amends": null
+        },
+        {
+          "hash": "0x1b7e95d73b7323036bd6a2929be49f98516ce09c5614fbedd7a9d249a6a8e9e4",
+          "type": "post",
+          "slug": "2026-03-19-sqrt-decomposition",
+          "title": "Phân rã căn bậc hai, và khi nào nên dùng",
+          "date": "2026-03-19",
+          "tags": [
+            "cp",
+            "algorithm"
+          ],
+          "series": "ghi-chu-thuat-toan",
+          "from": "0x017b046a17056ce94749f1d0cf26dfa3e33abc7b",
+          "to": [
+            "0x5e6abdbce628ff0853ca5d2a987785fd3243831b",
+            "0x936973fe3ac981cde4c6c026894ea6cf985ecc45",
+            "0x97f28539f3dcb91809767ac8404ab5b502689a36"
+          ],
+          "contentHash": "0x8fd94ae80a28b774a8974536c79c3f63799930888f72bdfc7dffcd3b02f17eeb",
+          "assets": [
+            "0xe1578088b1ccdce93379d2e9e69b3cb05a617e09e2df1171a6466fc30524c4bf"
+          ],
+          "gasUsed": 108,
+          "value": 6,
+          "amends": null
+        }
+      ]
+    },
+    {
+      "height": 1,
+      "period": "2026-04",
+      "prevHash": "0x000005dcd2ce81bdefdce12af737b7ddbf4fbe0b582c1ba25ac448759d8becbb",
+      "merkleRoot": "0xef3a7891c69a9652fd9e6eb7448d6dc8228c2a7484a64e1ce995c1f8e98cea48",
+      "timestamp": "2026-04-21T00:00:00Z",
+      "txCount": 4,
+      "gasUsed": 313,
+      "value": 25.5,
+      "difficulty": 5,
+      "nonce": 1299594,
+      "hash": "0x00000bf8e1f27a9784b3702f9b4a891cbf685790b68b81ea02d2bd8ffd5fc11c",
+      "transactions": [
+        {
+          "hash": "0x43efce85ef0080b72dc0dbef8607f23e2f6776f8a88f3bff2e8c65c1d413e56e",
+          "type": "post",
+          "slug": "2026-04-02-fenwick",
+          "title": "Fenwick tree, bản tôi luôn nhớ được",
+          "date": "2026-04-02",
+          "tags": [
+            "cp",
+            "data-structures"
+          ],
+          "series": "ghi-chu-thuat-toan",
+          "from": "0x017b046a17056ce94749f1d0cf26dfa3e33abc7b",
+          "to": [
+            "0x5e6abdbce628ff0853ca5d2a987785fd3243831b",
+            "0xfed0d02d65c0ba2bd24393ab68780a94c83de081",
+            "0x97f28539f3dcb91809767ac8404ab5b502689a36"
+          ],
+          "contentHash": "0xed725128ebd51ee71a24cfb02da61e11b77944aff107d6c7f917b23f3424c50c",
+          "assets": [],
+          "gasUsed": 104,
+          "value": 4,
+          "amends": null
+        },
+        {
+          "hash": "0x7c6ab0739d0247bda1e4ae60296d93b51bfdd1d954b108e2574857151cd69d38",
+          "type": "post",
+          "slug": "2026-04-08-rust-cli",
+          "title": "Dựng một CLI nhỏ bằng Rust",
+          "date": "2026-04-08",
+          "tags": [
+            "rust",
+            "tooling"
+          ],
+          "series": null,
+          "from": "0x017b046a17056ce94749f1d0cf26dfa3e33abc7b",
+          "to": [
+            "0xdb4478a626dfa582597dc7b2b98265de9f45f177",
+            "0x260a7b9cf8ed6cbe362a19a3772dde15c1b0b2e1"
+          ],
+          "contentHash": "0xded43c3d2a51d05c131158dda64ab443350bcbecf3fca8f5c782ff71d1fe5a77",
+          "assets": [],
+          "gasUsed": 71,
+          "value": 12.5,
+          "amends": null
+        },
+        {
+          "hash": "0xb3e5ced5e4565da587f8d5746f6fe6754df55d5497e92d3385af15cbfbca9fbe",
+          "type": "post",
+          "slug": "2026-04-15-doc-va-viet",
+          "title": "Đọc thì dễ, viết mới khó",
+          "date": "2026-04-15",
+          "tags": [
+            "essay"
+          ],
+          "series": null,
+          "from": "0x017b046a17056ce94749f1d0cf26dfa3e33abc7b",
+          "to": [
+            "0xb8af9916daa8ef78a420f0fcedfba05fad692f87"
+          ],
+          "contentHash": "0x392803b5a40c353418bd96c49c097dc492fc685e3baf5dec286f48f703c78c8a",
+          "assets": [],
+          "gasUsed": 60,
+          "value": 0,
+          "amends": null
+        },
+        {
+          "hash": "0x291d4e7aaf6647f96bfa4e336b750a5f82372d9fbd436769ac4f66b26dea4401",
+          "type": "post",
+          "slug": "2026-04-21-merkle",
+          "title": "Cây Merkle giải thích không cần toán",
+          "date": "2026-04-21",
+          "tags": [
+            "blockchain"
+          ],
+          "series": null,
+          "from": "0x017b046a17056ce94749f1d0cf26dfa3e33abc7b",
+          "to": [
+            "0x8c488f7999359a5bfef64dc0352733527d932482"
+          ],
+          "contentHash": "0x218bd50170cc59adc0e845ffa7564a243de0018117ee5c85ef00fd3c6ab9c0ea",
+          "assets": [
+            "0xda19abb179a900b2d7ce1aebc3f3e2f1839be1faff8d383608f0ff42b0d798b9"
+          ],
+          "gasUsed": 78,
+          "value": 9,
+          "amends": null
+        }
+      ]
+    },
+    {
+      "height": 2,
+      "period": "2026-04",
+      "prevHash": "0x00000bf8e1f27a9784b3702f9b4a891cbf685790b68b81ea02d2bd8ffd5fc11c",
+      "merkleRoot": "0xa48add70f8e66fb2895090bc589c4e9102c01cdd0bbb6e384f085560f61f3ee1",
+      "timestamp": "2026-04-27T00:00:00Z",
+      "txCount": 1,
+      "gasUsed": 71,
+      "value": 5.5,
+      "difficulty": 5,
+      "nonce": 1073737,
+      "hash": "0x00000482e5efe2fe4f5d2c07e8a2774bcb6f041142b11be3d03903c75aecca93",
+      "transactions": [
+        {
+          "hash": "0xa48add70f8e66fb2895090bc589c4e9102c01cdd0bbb6e384f085560f61f3ee1",
+          "type": "post",
+          "slug": "2026-04-27-type-driven",
+          "title": "Để trình biên dịch giữ hộ bất biến",
+          "date": "2026-04-27",
+          "tags": [
+            "rust",
+            "essay"
+          ],
+          "series": null,
+          "from": "0x017b046a17056ce94749f1d0cf26dfa3e33abc7b",
+          "to": [
+            "0xdb4478a626dfa582597dc7b2b98265de9f45f177",
+            "0xb8af9916daa8ef78a420f0fcedfba05fad692f87"
+          ],
+          "contentHash": "0xded43c3d2a51d05c131158dda64ab443350bcbecf3fca8f5c782ff71d1fe5a77",
+          "assets": [],
+          "gasUsed": 71,
+          "value": 5.5,
+          "amends": null
+        }
+      ]
+    },
+    {
+      "height": 3,
+      "period": "2026-05",
+      "prevHash": "0x00000482e5efe2fe4f5d2c07e8a2774bcb6f041142b11be3d03903c75aecca93",
+      "merkleRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "timestamp": "2026-05-31T00:00:00Z",
+      "txCount": 0,
+      "gasUsed": 0,
+      "value": 0,
+      "difficulty": 5,
+      "nonce": 378619,
+      "hash": "0x000008adb43a2e3f857f411ecfde74db23294e3b52b8bc3639826cd7b65b5d66",
+      "transactions": []
+    },
+    {
+      "height": 4,
+      "period": "2026-06",
+      "prevHash": "0x000008adb43a2e3f857f411ecfde74db23294e3b52b8bc3639826cd7b65b5d66",
+      "merkleRoot": "0xcc18dba79a7ad83464c68ef60597f793caffa64b49b25c40312e70e261e2bb99",
+      "timestamp": "2026-06-15T00:00:00Z",
+      "txCount": 3,
+      "gasUsed": 120,
+      "value": 8,
+      "difficulty": 5,
+      "nonce": 410382,
+      "hash": "0x000006343ac6c6bec2f23f6624a8584dd117ee030a29ffa59378399647b9d53c",
+      "transactions": [
+        {
+          "hash": "0x1278f265e82083225da8754772c9477f8e8cd6e357b624d48f17306917876afc",
+          "type": "post",
+          "slug": "2026-06-11-proof-of-work",
+          "title": "Proof of work nhìn từ phía người viết blog",
+          "date": "2026-06-11",
+          "tags": [
+            "blockchain",
+            "essay"
+          ],
+          "series": null,
+          "from": "0x017b046a17056ce94749f1d0cf26dfa3e33abc7b",
+          "to": [
+            "0x8c488f7999359a5bfef64dc0352733527d932482",
+            "0xb8af9916daa8ef78a420f0fcedfba05fad692f87"
+          ],
+          "contentHash": "0xddad583d5e0cd56b6a436cbb63c2a5df883c5ae62e192d087f61282161509cf3",
+          "assets": [],
+          "gasUsed": 76,
+          "value": 7,
+          "amends": null
+        },
         {
           "hash": "0xbace1a00bf063aaaaf002cfe38df9ac3e19a1087fcd06443d333244021674406",
           "type": "post",
@@ -34,23 +272,128 @@
           "gasUsed": 44,
           "value": 1,
           "amends": null
+        },
+        {
+          "hash": "0xdb36ec1e3500882012f479f45339124fb7c407fd7336ac99481603f9bde292b7",
+          "type": "amendment",
+          "slug": null,
+          "title": "Mo's algorithm và thứ tự truy vấn (viết lại)",
+          "date": "2026-03-04",
+          "tags": [
+            "cp",
+            "algorithm"
+          ],
+          "series": "ghi-chu-thuat-toan",
+          "from": "0x017b046a17056ce94749f1d0cf26dfa3e33abc7b",
+          "to": [],
+          "contentHash": "0x331971ce54600f271889005d3c402077ce5f151afb93e068055121ac50cd91bf",
+          "assets": [],
+          "gasUsed": 0,
+          "value": 0,
+          "research": 11,
+          "amends": "0x6968d2a7704200745b9addc523a25785aa3d3c9dd8d5686cf04336007a843972"
         }
       ]
     },
     {
-      "height": 1,
+      "height": 5,
       "period": "2026-07",
-      "prevHash": "0x00000b1ea722c8b1e3a50ff4ec3c813b120d59a6ec3b7ba0d6253632eca1bd36",
-      "merkleRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
-      "timestamp": "2026-07-31T00:00:00Z",
-      "txCount": 0,
-      "gasUsed": 0,
-      "value": 0,
+      "prevHash": "0x000006343ac6c6bec2f23f6624a8584dd117ee030a29ffa59378399647b9d53c",
+      "merkleRoot": "0x9e9ca150539d592377e793e82aa8517adf2103c61b2ef697b4ec77c3b5e6e669",
+      "timestamp": "2026-07-26T00:00:00Z",
+      "txCount": 3,
+      "gasUsed": 255,
+      "value": 13.5,
       "difficulty": 5,
-      "nonce": 869928,
-      "hash": "0x00000908b841b204b938bd8a82045fba8d720ca2aeda5aa6bd8ef9bc79dc569a",
-      "transactions": []
+      "nonce": 1224043,
+      "hash": "0x00000121fe985abc12a8232432acd4da28f35959008da332482b83f8be553224",
+      "transactions": [
+        {
+          "hash": "0x062c4f5a10ffafc118d8ffe8c0b069a411f9f1732dd8165c1d8eb602c9f78fbf",
+          "type": "post",
+          "slug": "2026-07-05-segment-tree",
+          "title": "Segment tree: từ đệ quy sang lặp",
+          "date": "2026-07-05",
+          "tags": [
+            "cp",
+            "data-structures"
+          ],
+          "series": "ghi-chu-thuat-toan",
+          "from": "0x017b046a17056ce94749f1d0cf26dfa3e33abc7b",
+          "to": [
+            "0x5e6abdbce628ff0853ca5d2a987785fd3243831b",
+            "0xfed0d02d65c0ba2bd24393ab68780a94c83de081",
+            "0x97f28539f3dcb91809767ac8404ab5b502689a36"
+          ],
+          "contentHash": "0x8fd94ae80a28b774a8974536c79c3f63799930888f72bdfc7dffcd3b02f17eeb",
+          "assets": [
+            "0xe1578088b1ccdce93379d2e9e69b3cb05a617e09e2df1171a6466fc30524c4bf"
+          ],
+          "gasUsed": 108,
+          "value": 10,
+          "amends": null
+        },
+        {
+          "hash": "0x62a6c7c95a41aa0ef914da734dc74d7da51a6d13ac79e925bd010b80cadf5ffd",
+          "type": "post",
+          "slug": "2026-07-14-static-site",
+          "title": "Vì sao tôi chọn trang tĩnh",
+          "date": "2026-07-14",
+          "tags": [
+            "tooling",
+            "essay"
+          ],
+          "series": null,
+          "from": "0x017b046a17056ce94749f1d0cf26dfa3e33abc7b",
+          "to": [
+            "0x260a7b9cf8ed6cbe362a19a3772dde15c1b0b2e1",
+            "0xb8af9916daa8ef78a420f0fcedfba05fad692f87"
+          ],
+          "contentHash": "0xded43c3d2a51d05c131158dda64ab443350bcbecf3fca8f5c782ff71d1fe5a77",
+          "assets": [],
+          "gasUsed": 71,
+          "value": 3.5,
+          "amends": null
+        },
+        {
+          "hash": "0x57ae11cc700e06aa36fa548ef160ff2c003a561da2ee8aade2142c0b26a66d9a",
+          "type": "post",
+          "slug": "2026-07-26-hash-functions",
+          "title": "Hàm băm làm được gì và không làm được gì",
+          "date": "2026-07-26",
+          "tags": [
+            "blockchain"
+          ],
+          "series": null,
+          "from": "0x017b046a17056ce94749f1d0cf26dfa3e33abc7b",
+          "to": [
+            "0x8c488f7999359a5bfef64dc0352733527d932482"
+          ],
+          "contentHash": "0xddad583d5e0cd56b6a436cbb63c2a5df883c5ae62e192d087f61282161509cf3",
+          "assets": [],
+          "gasUsed": 76,
+          "value": 0,
+          "amends": null
+        }
+      ]
     }
   ],
-  "assets": []
+  "assets": [
+    {
+      "tokenId": 1,
+      "hash": "0xe1578088b1ccdce93379d2e9e69b3cb05a617e09e2df1171a6466fc30524c4bf",
+      "file": "so-do-sqrt.svg",
+      "mime": "image/svg+xml",
+      "bytes": 758,
+      "mintedIn": 0
+    },
+    {
+      "tokenId": 2,
+      "hash": "0xda19abb179a900b2d7ce1aebc3f3e2f1839be1faff8d383608f0ff42b0d798b9",
+      "file": "so-do-merkle.svg",
+      "mime": "image/svg+xml",
+      "bytes": 852,
+      "mintedIn": 1
+    }
+  ]
 }
