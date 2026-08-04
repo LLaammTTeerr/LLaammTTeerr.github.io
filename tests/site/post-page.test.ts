@@ -1,11 +1,12 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { readDist, rendered } from './dist';
+import { cssPerPage, readDist, rendered } from './dist';
 import { getBlocks, getPosts, researchHours, resolvedPost } from '../../src/site/chain-data';
 import { PREFS_INLINE_SCRIPT } from '../../src/site/prefs-script';
 import { routeById } from '../../src/site/routes';
 import { buildSandbox, chainBuildSandbox, sandboxRepo } from './sandbox';
+import { resolveProperty } from './css';
 import { normalizeBody } from '../../src/chain/canonical';
 import { parsePost } from '../../src/chain/post';
 
@@ -394,4 +395,42 @@ describe('a post published into the open block', () => {
       'a page was emitted for a pending body the chain does not record',
     ).toBe(false);
   }, 300_000);
+});
+
+describe('the reading column spaces its own children', () => {
+  /**
+   * The article card and the verification card sat flush, separated only by
+   * their two borders. `.txv` declared `margin: 2.2rem 0 0` and it never
+   * applied: the element is `class="card vfy txv"`, `.card` declares
+   * `margin: 0 0 .85rem` at the same specificity, and `chain.css` loads later.
+   *
+   * Resolved over the built stylesheets rather than grepped for, because that
+   * is the whole point — the rule was present in the source the entire time.
+   */
+  const column = [
+    { tag: 'div', classes: ['post-layout'] },
+    { tag: 'div', classes: ['post-col'] },
+  ];
+
+  it('separates the article from the verification card', () => {
+    const css = cssPerPage().get(`tx/${slug()}/index.html`);
+    expect(css, 'no stylesheet found for the post page').toBeTypeOf('string');
+    expect(resolveProperty(css!, column, 'display', { widthRem: 80 })).toBe('flex');
+    const gap = resolveProperty(css!, column, 'gap', { widthRem: 80 });
+    expect(gap, 'the reading column declares no gap').not.toBeNull();
+    expect(parseFloat(gap!), 'the gap is too small to read as separation').toBeGreaterThanOrEqual(1);
+  });
+
+  it('does not rely on the card\'s own margin, which loses the cascade', () => {
+    // Pinning the cause, so a later change that removes the container gap and
+    // "restores" the margin is caught rather than looking equivalent.
+    const css = cssPerPage().get(`tx/${slug()}/index.html`);
+    const margin = resolveProperty(
+      css!,
+      [...column, { tag: 'section', classes: ['card', 'vfy', 'txv'] }],
+      'margin',
+      { widthRem: 80 },
+    );
+    expect(margin, 'the check card now wins its own margin — re-check this test').toBe('0 0 .85rem');
+  });
 });

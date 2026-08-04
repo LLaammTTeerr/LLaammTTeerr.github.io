@@ -41,7 +41,17 @@
    title and the prose before a 64-character hash — so the collapsed layout
    hoists the panel visually rather than reordering the markup. */
 .post-rail { order: -1; min-width: 0; }
-.post-col { min-width: 0; }
+/* The reading column spaces its own children, rather than each child carrying
+   a margin that has to win a cascade fight to survive.
+   `.txv` declares `margin: 2.2rem 0 0`, and it never applied: the element is
+   `class="card vfy txv"`, `.card` (chain.css) declares `margin: 0 0 .85rem` at
+   the same specificity, and chain.css loads later — so the article and the
+   verification card sat flush, separated only by their two borders. Measured
+   with `resolveProperty`, which reports `0 0 .85rem` for that class list.
+   That is the third cascade collision on this project of exactly this shape
+   (`.nav ul` beating `.search-list` was the first). A card should not dictate
+   the space around it; where it sits is the container's business. */
+.post-col { min-width: 0; display: flex; flex-direction: column; gap: 1.6rem; }
 
 @media (min-width: 62rem) {
   /* `minmax(0, …)` on both tracks, and `min-width: 0` on what sits in them: a
