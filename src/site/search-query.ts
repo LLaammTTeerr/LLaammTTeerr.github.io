@@ -103,6 +103,9 @@ const TRUNCATED = /^0x([0-9a-f]+)\s*(?:…|\.{3})\s*([0-9a-f]+)$/i;
 /** `0x` and some hex, but neither a whole hash nor a whole address. */
 const PARTIAL = /^0x[0-9a-f]{1,63}$/i;
 
+/** Hex digits a truncation must keep at each end before it may be resolved. */
+const TRUNCATED_MIN = 4;
+
 /* ------------------------------------------------------------------ *
  * Folding
  * ------------------------------------------------------------------ */
@@ -192,8 +195,10 @@ export const NOTHING_FOUND =
  * liar.
  */
 export const TRUNCATED_HASH =
-  'Đây là hash đã bị rút gọn để hiển thị (0xabc123…def456), và phần bị cắt không đủ để xác định ' +
-  'một giao dịch. Dán hash đầy đủ — trang của mỗi giao dịch in đủ 64 chữ số.';
+  'Đây là hash đã bị rút gọn để hiển thị (0xabc123…def456), và phần còn lại không đủ để chỉ ra ' +
+  'đúng một giao dịch. Dán hash giao dịch đầy đủ — trang của mỗi giao dịch in đủ 64 chữ số. Còn ' +
+  'nếu đây là hash của một khối thì dán bao nhiêu chữ số cũng không tra được ở đây: chỉ mục này ' +
+  'không mang hash khối, khối được liệt kê ở /blocks.';
 
 /**
  * §6 — a block hash is 64 hex too, and deliberately does not resolve (see
@@ -206,12 +211,28 @@ export const HASH_NOT_A_TX =
 
 export const NOT_AN_ADDRESS = 'Không địa chỉ nào trên chuỗi mang hash này.';
 
-/** §6 — the open block's height is a prediction, so it has no page yet. */
-export function heightNotSealed(height: number): string {
-  return (
-    `Chuỗi chưa niêm phong khối #${String(height)}. Khối đang mở chỉ có trang riêng sau khi được ` +
-    'đào, vì trước đó chiều cao của nó vẫn còn có thể đổi.'
-  );
+/**
+ * §6 — a height with no page.
+ *
+ * Two sentences, and the second depends on which height it is. The open
+ * block's own height is the interesting case: it has no page because the height
+ * is a prediction a size split can still change (see
+ * `src/pages/block/[height].astro`), and saying so is the difference between
+ * "not yet" and "never". Any other number is simply past the tip, and telling a
+ * reader who typed `2026` about the open block would be a non sequitur about a
+ * block two thousand heights away — it was one, before this took `tip`.
+ */
+export function heightNotSealed(height: number, tip: number | null): string {
+  const opening = `Chuỗi chưa niêm phong khối #${String(height)}.`;
+  if (tip !== null && height === tip + 1) {
+    return (
+      `${opening} Đó là khối đang mở: nó chỉ có trang riêng sau khi được đào, vì trước đó chiều ` +
+      'cao của nó vẫn còn có thể đổi.'
+    );
+  }
+  return tip === null
+    ? `${opening} Chuỗi này chưa có khối nào được niêm phong.`
+    : `${opening} Khối cao nhất đã niêm phong là #${String(tip)}.`;
 }
 
 export const PARTIAL_HASH =
@@ -219,6 +240,15 @@ export const PARTIAL_HASH =
 
 export const INDEX_UNREACHABLE =
   'Không tải được chỉ mục tìm kiếm. Bấm lại vào ô này để thử lần nữa.';
+
+/**
+ * Shown while the document is in flight, not merely announced.
+ *
+ * A reader who types before it lands sees an open panel with no rows; without
+ * this they had no way of knowing whether the box was working or broken, and
+ * only the live region carried the answer.
+ */
+export const LOADING = 'Đang tải chỉ mục tìm kiếm…';
 
 /* ------------------------------------------------------------------ *
  * Building a hit
@@ -298,9 +328,21 @@ function scorePost(post: SearchPost, q: string): number | null {
   const facets = [post.series ?? '', ...post.tags].map(fold).filter((f) => f !== '');
   if (facets.some((f) => f === q)) return 2;
   if (facets.some((f) => f.includes(q))) return 3;
-  if (fold(post.slug).includes(q) || post.date.includes(q)) return 4;
+  // A slug or a date is matched by substring, which is only a *query* once
+  // there is enough of it to mean something. `0` used to fill the whole panel
+  // with the eight posts whose dates happen to contain a zero, pushing the
+  // `/block/0` the reader actually asked for under a wall of noise; a single
+  // letter did the same through the slug. Four is a year and three is the
+  // shortest slug fragment that reads as a word.
+  if (q.length >= SLUG_MIN && fold(post.slug).includes(q)) return 4;
+  if (q.length >= DATE_MIN && post.date.includes(q)) return 4;
   return null;
 }
+
+/** Shortest query allowed to match a slug by substring. */
+const SLUG_MIN = 3;
+/** Shortest query allowed to match a date — a four-digit year. */
+const DATE_MIN = 4;
 
 function scoreAddress(address: SearchAddress, q: string): number | null {
   const name = fold(address.name);
@@ -330,6 +372,18 @@ export function searchFor(index: SearchIndex, query: string, limit = LIMIT): Sea
   let note: string | null = null;
 
   const direct = resolveIdentifier(index, raw);
+  /**
+   * A note that is only worth printing if nothing else answers the query.
+   *
+   * `HEIGHT` matches any bare number, and a number is also ordinary text: `2026`
+   * is eight posts by date *and* a height the chain has not sealed. Printing
+   * "the chain has not sealed block #2026" over a list of eight posts told the
+   * reader something true and irrelevant, in a panel where the note is the most
+   * prominent thing. A `#`-prefixed query is different — `#2026` is a reader
+   * asking for a block and nothing else — so that one is never held back.
+   */
+  let heldNote: string | null = null;
+
   if (direct !== null) {
     const hit = identifierHit(index, direct);
     if (hit !== null) hits.push(hit);
@@ -338,15 +392,26 @@ export function searchFor(index: SearchIndex, query: string, limit = LIMIT): Sea
   } else if (ADDRESS.test(raw)) {
     note = NOT_AN_ADDRESS;
   } else if (HEIGHT.test(raw)) {
-    note = heightNotSealed(Number(HEIGHT.exec(raw)![1]));
+    const tip = index.blocks.length === 0 ? null : Math.max(...index.blocks);
+    const said = heightNotSealed(Number(HEIGHT.exec(raw)![1]), tip);
+    if (raw.startsWith('#')) note = said;
+    else heldNote = said;
   } else {
     const truncated = TRUNCATED.exec(raw);
     if (truncated !== null) {
       const head = `0x${truncated[1]!.toLowerCase()}`;
       const tail = truncated[2]!.toLowerCase();
-      const matches = everyHash(index).filter(
-        ({ hash }) => hash.startsWith(head) && hash.endsWith(tail),
-      );
+      // Uniqueness on this chain is not on its own enough to navigate on.
+      // `0x0…f` is a unique match against fourteen posts and two hex digits of
+      // evidence, and fifteen such one-digit truncations resolve today; that is
+      // a confident answer to a question the reader did not ask, and it gets
+      // *more* reachable as the corpus grows rather than less. Four each side
+      // is 32 bits, and the site's own `shortHash` gives six each side, so
+      // nothing this site prints is refused by it.
+      const enough = truncated[1]!.length >= TRUNCATED_MIN && tail.length >= TRUNCATED_MIN;
+      const matches = !enough
+        ? []
+        : everyHash(index).filter(({ hash }) => hash.startsWith(head) && hash.endsWith(tail));
       // Exactly one, or nothing. Two records sharing both ends is vanishingly
       // unlikely and is still not a question this box may answer by guessing.
       const only = matches.length === 1 ? matches[0] : undefined;
@@ -392,6 +457,6 @@ export function searchFor(index: SearchIndex, query: string, limit = LIMIT): Sea
     added += 1;
   }
 
-  if (hits.length === 0 && note === null) note = NOTHING_FOUND;
+  if (note === null && hits.length === 0) note = heldNote ?? NOTHING_FOUND;
   return { hits, note };
 }

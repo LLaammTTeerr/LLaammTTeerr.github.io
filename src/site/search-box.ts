@@ -1,5 +1,5 @@
 import type { SearchIndex } from './search-index';
-import { INDEX_UNREACHABLE, searchFor, type SearchHit } from './search-query';
+import { INDEX_UNREACHABLE, LOADING, searchFor, type SearchHit } from './search-query';
 
 /**
  * §8/§9 — the search box's behaviour, with no DOM in it.
@@ -64,11 +64,29 @@ export interface SearchState {
 export interface SearchController {
   /**
    * The reader has put the caret in the box. **This is the only thing that
-   * starts a fetch**, and it starts at most one: §8 asks for the index
-   * "lazy-loaded on first focus", which means a reader who never uses the box
-   * downloads nothing for it, on every page of the site.
+   * starts a fetch** other than `retry()`, and it starts at most one: §8 asks
+   * for the index "lazy-loaded on first focus", which means a reader who never
+   * uses the box downloads nothing for it, on every page of the site.
    */
   focus(): void;
+  /**
+   * The reader pressed on the box again. Starts a load only if the last one
+   * failed and none is under way; after a success it is a no-op.
+   *
+   * This exists because `INDEX_UNREACHABLE` tells the reader to click the box
+   * again, and a reader who has just watched a fetch fail is **still focused in
+   * it** — clicking an already-focused input fires `mousedown` and `click` and
+   * no `focus` at all, so the one gesture the note named was the one gesture
+   * that could not work. Measured: the fetch count stayed at 1 through the
+   * click and only reached 2 after a blur and a refocus. The wording could have
+   * been changed instead; making the stated gesture work is the better half of
+   * that choice, since it is also what a reader does without being told.
+   *
+   * It does not touch the panel: a click that reopens a popup the reader has
+   * just dismissed with Escape would be a second, unasked-for behaviour riding
+   * along on a bug fix.
+   */
+  retry(): void;
   /** The reader has typed or pasted. */
   input(value: string): void;
   /** A key went down. Returns true when the box consumed it. */
@@ -101,15 +119,24 @@ export function createSearchBox(deps: SearchDeps): SearchController {
   const trimmed = (): string => query.trim();
   const isOpen = (): boolean => opened && trimmed() !== '';
 
+  /**
+   * The visible line in the panel.
+   *
+   * The loading sentence is here and not only in the live region, which is
+   * where it used to be: a reader who typed while the document was still in
+   * flight got an open panel, no rows, and an explanation only a screen reader
+   * was told. A panel that shows nothing and says nothing is the empty void
+   * this box is not allowed to render, whatever the reason for it.
+   */
   function note(): string | null {
     if (failed) return INDEX_UNREACHABLE;
-    if (loading || index === null) return null;
+    if (loading) return trimmed() === '' ? null : LOADING;
+    if (index === null) return null;
     return queryNote;
   }
 
   function status(): string {
     if (trimmed() === '') return '';
-    if (loading) return 'Đang tải chỉ mục tìm kiếm…';
     const said = note();
     if (said !== null) return said;
     // Announced in the reader's own language, like every other sentence the
@@ -203,6 +230,13 @@ export function createSearchBox(deps: SearchDeps): SearchController {
       ensure();
       opened = true;
       render();
+    },
+
+    retry(): void {
+      const before = started;
+      ensure();
+      // Nothing was armed, so nothing changed on screen either.
+      if (started !== before) render();
     },
 
     input(value: string): void {

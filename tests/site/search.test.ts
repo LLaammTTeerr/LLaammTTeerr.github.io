@@ -10,12 +10,14 @@ import {
   sameOriginPath,
   scriptClosure,
 } from './dist';
-import { parseRules, selectorParts } from './css';
+import { parseRules, resolveProperty, selectorParts, type StyledElement } from './css';
+import { searchDom } from './fake-dom';
 import { getBlocks, getPendingBlock, resolvedPosts, shortHash } from '../../src/site/chain-data';
 import { addressIndex } from '../../src/site/addresses';
 import type { SearchAddress, SearchIndex, SearchPost } from '../../src/site/search-index';
 import { fold, searchFor } from '../../src/site/search-query';
 import { createSearchBox, type SearchState } from '../../src/site/search-box';
+import { attachSearch } from '../../src/site/search-dom';
 import type { Hex } from '../../src/chain/types';
 
 /**
@@ -229,6 +231,27 @@ describe('pasting an identifier', () => {
     expect(truncated).not.toBeNull();
     expect(truncated).not.toBe(nothing);
     expect(truncated!, 'the note does not tell the reader to paste the full hash').toMatch(/đầy đủ/i);
+    // Every block card prints `shortHash(block.hash)` too, and no number of
+    // extra digits would ever make one resolve — the index carries no block
+    // hash at all. A note that only said "paste the whole thing" would send a
+    // reader off to fetch 52 more hex digits for nothing.
+    expect(truncated!, 'the note never mentions that a block hash cannot resolve here').toMatch(
+      /khối/i,
+    );
+  });
+
+  it('refuses to assert a transaction from two hex digits', () => {
+    // Uniqueness on this chain is not evidence. `0x0…f` matched exactly one
+    // post out of fourteen and was made the active result, so Enter navigated
+    // on two digits; fifteen such one-digit truncations resolved on the live
+    // index. The site's own `shortHash` keeps six digits each side, so nothing
+    // this site prints is refused by the floor.
+    const hash = POST_A.hash;
+    const outcome = searchFor(INDEX, `0x${hash.slice(2, 3)}…${hash.slice(-1)}`);
+    expect(outcome.hits.filter((h) => h.kind === 'identifier')).toEqual([]);
+    expect(outcome.note).not.toBeNull();
+    expect(searchFor(INDEX, shortHash(hash)).hits[0]?.kind, 'the floor refuses the site\'s own format')
+      .toBe('identifier');
   });
 
   it('says a 64-hex hash the chain does not carry is not a post, and why', () => {
@@ -244,7 +267,45 @@ describe('pasting an identifier', () => {
     const note = searchFor(INDEX, '#404').note;
     expect(note, 'an unsealed height got no explanation').not.toBeNull();
     expect(note!).toContain('404');
-    expect(note!, 'the open block is not mentioned').toMatch(/đang mở|chưa được đào|chưa đào/i);
+    // …and names the tip, rather than explaining the open block. #404 is 402
+    // heights past it, and "the open block has no page until it is mined" is a
+    // true sentence about something the reader did not ask about.
+    expect(note!, 'the note does not say how high the chain actually is').toContain('#2');
+    expect(note!, 'a far-off height was explained as the open block').not.toMatch(/đang mở/i);
+  });
+
+  it('explains the open block only for the height that is actually the open block', () => {
+    // INDEX seals 0, 1, 2 — so #3 is the next one, whose height is a prediction
+    // a size split can still change. That is the one case where "not yet" is
+    // the whole answer.
+    const note = searchFor(INDEX, '#3').note;
+    expect(note, 'the next height got no explanation').not.toBeNull();
+    expect(note!, 'the open block was not named as such').toMatch(/đang mở/i);
+  });
+
+  it('does not hang a block note off a bare number that found posts', () => {
+    // `HEIGHT` matches any bare number and a number is also ordinary text.
+    // `2026` is every post on this chain by date; printing "the chain has not
+    // sealed block #2026" above them is true and irrelevant, in the most
+    // prominent line of the panel.
+    const outcome = searchFor(INDEX, '2026');
+    expect(outcome.hits.length, 'no post matched the year, so this proves nothing')
+      .toBeGreaterThan(0);
+    expect(outcome.note, 'a year of posts was captioned with a block that does not exist')
+      .toBeNull();
+    // …but asking for a block, with the `#` a block card prints, still answers.
+    expect(searchFor(INDEX, '#2026').note).not.toBeNull();
+  });
+
+  it('does not fill the panel with every date that contains one digit', () => {
+    // `0` resolves to /block/0 and used to be followed by every post whose
+    // date happens to carry a zero — the limit spent on noise, under the one
+    // answer the reader asked for.
+    const outcome = searchFor(INDEX, '0');
+    expect(outcome.hits[0]?.href).toBe('/block/0');
+    expect(outcome.hits.map((h) => h.kind).filter((k) => k === 'post')).toEqual([]);
+    // A whole year is a query; one digit of one is not.
+    expect(searchFor(INDEX, '2026').hits.some((h) => h.kind === 'post')).toBe(true);
   });
 
   it('says a half-typed hash is not a whole one', () => {
@@ -333,6 +394,41 @@ describe('the index is fetched on first focus, once', () => {
     expect(h.last()!.hits.length).toBeGreaterThan(0);
   });
 
+  it('retries when the reader does the thing the failure note tells them to', async () => {
+    // `INDEX_UNREACHABLE` says "bấm lại vào ô này" — click the box again. After
+    // a failed load the reader is still focused in it, and clicking an
+    // already-focused input fires no `focus` event at all, so the one gesture
+    // the note named was the one gesture that could not work. Measured in
+    // Chromium before the fix: the fetch count stayed at 1 through the click
+    // and only reached 2 after a blur and a refocus.
+    let calls = 0;
+    const load = (): Promise<SearchIndex> => {
+      calls += 1;
+      return calls === 1 ? Promise.reject(new Error('offline')) : Promise.resolve(INDEX);
+    };
+    const h = harness(load);
+    h.box.focus();
+    await h.box.ready();
+    expect(calls).toBe(1);
+    h.box.retry();
+    expect(calls, 'clicking the box again after a failure did nothing').toBe(2);
+    await h.box.ready();
+    h.box.input('cp');
+    expect(h.last()!.hits.length).toBeGreaterThan(0);
+  });
+
+  it('does not re-fetch when the reader clicks a box that already worked', async () => {
+    // The other half: `retry` is a repair, not a second load on every click.
+    const { load, calls } = countingLoader();
+    const h = harness(load);
+    h.box.focus();
+    await h.box.ready();
+    h.box.retry();
+    h.box.retry();
+    await h.box.ready();
+    expect(calls()).toBe(1);
+  });
+
   it('answers a query typed before the document arrived', async () => {
     let settle: (index: SearchIndex) => void = () => {};
     const h = harness(() => new Promise<SearchIndex>((resolve) => (settle = resolve)));
@@ -340,6 +436,11 @@ describe('the index is fetched on first focus, once', () => {
     h.box.input('ham');
     expect(h.last()!.loading, 'the box did not say it was still loading').toBe(true);
     expect(h.last()!.hits).toEqual([]);
+    // Shown, not only announced: a panel with no rows and no words is the empty
+    // void this box may not render, whatever the reason for it. This used to
+    // live in the live region alone, where only a screen reader was told.
+    expect(h.last()!.note, 'a sighted reader saw an empty panel while it loaded').not.toBeNull();
+    expect(h.last()!.status).not.toBe('');
     settle(INDEX);
     await h.box.ready();
     expect(h.last()!.hits.map((x) => x.href)).toContain(`/tx/${POST_B.slug}`);
@@ -429,6 +530,323 @@ describe('the keyboard alone drives the box', () => {
 });
 
 /* ------------------------------------------------------------------ *
+ * The adapter: what actually reaches the document
+ * ------------------------------------------------------------------ */
+
+/**
+ * `attachSearch` driven against the small DOM in `./fake-dom`.
+ *
+ * This group exists because of a measured hole. Deleting every `setAttribute`
+ * in the adapter — `role="option"`, `aria-selected`, `aria-expanded`,
+ * `aria-controls`, `aria-autocomplete`, `aria-activedescendant` — together with
+ * the `mousedown` guard that makes a result clickable at all left the suite
+ * green at 1024 passing, while the browser showed a stateless combobox nobody
+ * could use. The controller tests could not see it (they never touch a
+ * document) and the built-output group could not either (it reads markup, and
+ * all of this is set at runtime).
+ *
+ * What this proves: the adapter sets these attributes, keeps them in step with
+ * the state, and routes a click on a row's inner `<span>` to the right result.
+ * What it cannot prove: that a real browser behaves as `./fake-dom` does. That
+ * is checked by hand in Chromium and recorded in the task report — including
+ * Chrome's own accessibility tree, which is the only thing that can confirm the
+ * attributes add up to a combobox a screen reader can follow.
+ */
+describe('the adapter wires the document up', () => {
+  /** Attached, with the index already loaded and a query typed. */
+  async function typed(query: string) {
+    const dom = searchDom();
+    const went: string[] = [];
+    let calls = 0;
+    const box = attachSearch(dom.document as unknown as Document, {
+      load: () => {
+        calls += 1;
+        return Promise.resolve(INDEX);
+      },
+      go: (href) => went.push(href),
+    })!;
+    dom.field.fire('focus');
+    await box.ready();
+    if (query !== '') {
+      dom.field.value = query;
+      dom.field.fire('input');
+    }
+    return { ...dom, box, went, calls: () => calls };
+  }
+
+  it('finds the markup and enables the control', () => {
+    const dom = searchDom();
+    expect(dom.field.disabled, 'the fixture does not start from the shipped state').toBe(true);
+    const box = attachSearch(dom.document as unknown as Document, {
+      load: () => Promise.resolve(INDEX),
+      go: () => {},
+    });
+    expect(box, 'attachSearch found none of the markup it expects').not.toBeNull();
+    expect(dom.field.disabled).toBe(false);
+  });
+
+  it('says nothing at all when the markup is not on the page', () => {
+    // Every page carries the box, so this is the "someone renamed an id" case:
+    // half-attaching would leave a live combobox over a listbox that is not
+    // there.
+    const empty = { getElementById: () => null, createElement: () => null };
+    expect(attachSearch(empty as unknown as Document, { load: () => Promise.resolve(INDEX), go: () => {} }))
+      .toBeNull();
+  });
+
+  it('makes the input a combobox, pointed at the listbox', async () => {
+    const dom = await typed('');
+    expect(dom.field.getAttribute('role')).toBe('combobox');
+    expect(dom.field.getAttribute('aria-controls')).toBe('search-list');
+    expect(dom.field.getAttribute('aria-autocomplete')).toBe('list');
+    expect(dom.field.getAttribute('aria-expanded')).toBe('false');
+    // Narrowed from the markup's two ids: `#search-nojs` is a `<noscript>` and
+    // is not in this document, so leaving it named would dangle.
+    expect(dom.field.getAttribute('aria-describedby')).toBe('search-hint');
+  });
+
+  it('fetches the index from the focus event and nowhere else', async () => {
+    const dom = searchDom();
+    let calls = 0;
+    attachSearch(dom.document as unknown as Document, {
+      load: () => {
+        calls += 1;
+        return Promise.resolve(INDEX);
+      },
+      go: () => {},
+    });
+    expect(calls, 'attaching the box fetched the index').toBe(0);
+    dom.field.fire('focus');
+    expect(calls, 'the focus event did not reach the controller').toBe(1);
+  });
+
+  it('retries from a click on a box the reader is already focused in', async () => {
+    // The DOM half of the same finding: `focus` never fires a second time, so
+    // without a `click` listener the instruction in `INDEX_UNREACHABLE` is
+    // unfollowable however right the controller is.
+    const dom = searchDom();
+    let calls = 0;
+    const box = attachSearch(dom.document as unknown as Document, {
+      load: () => {
+        calls += 1;
+        return calls === 1 ? Promise.reject(new Error('offline')) : Promise.resolve(INDEX);
+      },
+      go: () => {},
+    })!;
+    dom.field.fire('focus');
+    await box.ready();
+    expect(calls).toBe(1);
+    dom.field.fire('click');
+    expect(calls, 'the gesture the failure note names does nothing').toBe(2);
+  });
+
+  it('renders each result as an option, with exactly one selected', async () => {
+    const dom = await typed('cp');
+    expect(dom.list.children.length, 'nothing was rendered to check').toBeGreaterThan(1);
+    for (const row of dom.list.children) {
+      expect(row.getAttribute('role'), 'a result is not an option').toBe('option');
+      expect(row.getAttribute('aria-selected'), 'an option has no selected state').not.toBeNull();
+    }
+    const selected = dom.list.children.filter((r) => r.getAttribute('aria-selected') === 'true');
+    expect(selected.length, 'a listbox with no or several active options').toBe(1);
+    expect(selected[0]).toBe(dom.list.children[0]);
+  });
+
+  it('opens the popup and points the input at the active option', async () => {
+    const dom = await typed('cp');
+    expect(dom.panel.hidden).toBe(false);
+    expect(dom.field.getAttribute('aria-expanded')).toBe('true');
+    expect(dom.field.getAttribute('aria-activedescendant')).toBe(dom.list.children[0]!.id);
+  });
+
+  it('moves the active option, and the pointer to it, on ArrowDown', async () => {
+    const dom = await typed('cp');
+    const event = dom.field.fire('keydown', { key: 'ArrowDown' });
+    expect(event.prevented, 'ArrowDown was left to scroll the page').toBe(1);
+    expect(dom.field.getAttribute('aria-activedescendant')).toBe(dom.list.children[1]!.id);
+    expect(dom.list.children[1]!.getAttribute('aria-selected')).toBe('true');
+    expect(dom.list.children[0]!.getAttribute('aria-selected')).toBe('false');
+    expect(dom.list.children[1]!.scrolled, 'the active option was not scrolled into view')
+      .toBeGreaterThan(0);
+  });
+
+  it('closes on Escape and stops pointing at anything', async () => {
+    const dom = await typed('cp');
+    dom.field.fire('keydown', { key: 'Escape' });
+    expect(dom.panel.hidden).toBe(true);
+    expect(dom.field.getAttribute('aria-expanded')).toBe('false');
+    expect(
+      dom.field.getAttribute('aria-activedescendant'),
+      'the input still points at an option in a closed popup',
+    ).toBeNull();
+  });
+
+  it('goes where a clicked row points, from a click on the text inside it', async () => {
+    // A reader clicks a word, not a row: the event target is the inner
+    // `<span>`, two levels below the element the handler is bound to.
+    const dom = await typed('cp');
+    const row = dom.list.children[1]!;
+    const label = row.find('search-label');
+    expect(label, 'a result row has no label to click').not.toBeNull();
+    label!.fire('click');
+    expect(dom.went, 'clicking a result went nowhere').toEqual([
+      searchFor(INDEX, 'cp').hits[1]!.href,
+    ]);
+  });
+
+  it('keeps the panel from stealing focus before a click can land', async () => {
+    // Without this the default action of pressing inside the panel blurs the
+    // input, the box dismisses, and the click lands on nothing. Results are
+    // visible and unclickable — which is how it was found.
+    const dom = await typed('cp');
+    const event = dom.panel.fire('mousedown');
+    expect(event.prevented, 'a press inside the panel blurs the input').toBe(1);
+  });
+
+  it('closes when focus leaves', async () => {
+    const dom = await typed('cp');
+    dom.field.fire('blur');
+    expect(dom.panel.hidden).toBe(true);
+  });
+
+  it('shows and announces a result that is no result', async () => {
+    const dom = await typed('không có gì như thế cả');
+    expect(dom.list.children).toEqual([]);
+    expect(dom.note.hidden, 'an empty result rendered an empty panel').toBe(false);
+    expect(dom.note.textContent.length).toBeGreaterThan(20);
+    expect(dom.live.textContent, 'nothing was announced').not.toBe('');
+  });
+
+  it('writes every string it took off the network as text', async () => {
+    // `textContent`, never `innerHTML`: a title comes out of a fetched
+    // document. The fake DOM has no `innerHTML` at all, so an adapter that
+    // reached for one would fail here rather than ship.
+    const dom = await typed('cp');
+    const row = dom.list.children[0]!;
+    expect(row.find('search-label')!.textContent).toBe(searchFor(INDEX, 'cp').hits[0]!.label);
+    expect(row.find('search-detail')!.textContent).toBe(searchFor(INDEX, 'cp').hits[0]!.detail);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * The cascade, not the stylesheet
+ * ------------------------------------------------------------------ */
+
+/**
+ * Where the results list actually sits, and what it wears there.
+ *
+ * The chain is the point: `#search-list` is inside the panel, inside
+ * `.search`, inside `<nav class="nav">`, and it was that last ancestor that
+ * relaid it. The nesting is asserted against the built page below, so this
+ * fixture cannot go on describing markup the site no longer ships.
+ */
+const NAV: StyledElement[] = [
+  { tag: 'html' },
+  { tag: 'body' },
+  { tag: 'nav', classes: ['nav'] },
+  { tag: 'div', classes: ['search'], attrs: { role: 'search' } },
+];
+const PANEL: StyledElement = { tag: 'div', id: 'search-panel', classes: ['search-panel'] };
+const LIST: StyledElement = {
+  tag: 'ul',
+  id: 'search-list',
+  classes: ['search-list'],
+  attrs: { role: 'listbox' },
+};
+const OPTION: StyledElement = {
+  tag: 'li',
+  classes: ['search-opt'],
+  attrs: { role: 'option', 'aria-selected': 'false', 'data-kind': 'post', 'data-at': '0' },
+};
+
+const LIST_CHAIN = [...NAV, PANEL, LIST];
+const OPTION_CHAIN = [...LIST_CHAIN, OPTION];
+
+describe('the results read as a list, once the whole cascade is resolved', () => {
+  it('is nested where this fixture says it is', () => {
+    // Anti-drift: every assertion below is about a chain, and a chain that
+    // stopped matching the markup would resolve properties for an element that
+    // is not on the page.
+    const html = readDist('index.html');
+    const nav = /<nav class="nav">[\s\S]*?<\/nav>/.exec(html);
+    expect(nav, 'the page has no nav').not.toBeNull();
+    const box = boxOf(nav![0]);
+    expect(box).toContain('<div class="search-panel" id="search-panel"');
+    expect(box).toContain('<ul class="search-list" id="search-list" role="listbox"');
+    expect(box.indexOf('id="search-panel"')).toBeLessThan(box.indexOf('id="search-list"'));
+  });
+
+  it('lays the results out as a block, not as a row of chips', () => {
+    // The defect: `base.css`'s `.nav ul` is (0,1,1) and `.search-list` is
+    // (0,1,0), so the nav's own link-list rule won and eight results laid
+    // themselves out 3/3/2 across three lines, with ArrowDown moving the
+    // highlight sideways. Resolved through the built cascade rather than
+    // asserted of a declaration, because every declaration involved was
+    // already correct in its own file.
+    for (const [page, css] of cssPerPage()) {
+      expect(resolveProperty(css, LIST_CHAIN, 'display'), `${page} lays the results out wrong`).toBe(
+        'block',
+      );
+    }
+  });
+
+  it('keeps each result a grid row of its own', () => {
+    for (const [page, css] of cssPerPage()) {
+      expect(resolveProperty(css, OPTION_CHAIN, 'display'), `${page} relays a result row`).toBe(
+        'grid',
+      );
+    }
+  });
+
+  it('still resolves the nav\'s own link list as the row it is meant to be', () => {
+    // The fix narrowed `.nav ul` to `.nav > ul`, so this is the half that must
+    // not have been broken by it: the section links are still a wrapped row.
+    // `<nav class="nav"> > <ul>` — the section links, a direct child, which is
+    // exactly the element the narrowed selector still has to reach.
+    const links: StyledElement[] = [...NAV.slice(0, 3), { tag: 'ul' }];
+    for (const [page, css] of cssPerPage()) {
+      expect(resolveProperty(css, links, 'display'), `${page} broke the nav's own list`).toBe(
+        'flex',
+      );
+    }
+  });
+
+  it('would report the defect it was written for', () => {
+    // Anti-vacuity, and the only assertion here allowed to state the old rule:
+    // an evaluator that answered "block" whatever it was given would pass every
+    // check above. Fed the stylesheet as it was, it must say `flex`.
+    const before = '.nav ul { display: flex } .search-list { display: block }';
+    expect(resolveProperty(before, LIST_CHAIN, 'display')).toBe('flex');
+    // …and the narrowed selector is what changes the answer, on its own.
+    const after = '.nav > ul { display: flex } .search-list { display: block }';
+    expect(resolveProperty(after, LIST_CHAIN, 'display')).toBe('block');
+  });
+
+  it('reads specificity and source order the way a browser does', () => {
+    // The evaluator is the instrument; these pin it. An id beats any number of
+    // classes, and equal specificity is decided by which rule came last.
+    expect(resolveProperty('.a.b.c { display: flex } #search-list { display: grid }', LIST_CHAIN, 'display')).toBe('grid');
+    expect(resolveProperty('.search-list { display: flex } .search-list { display: block }', LIST_CHAIN, 'display')).toBe('block');
+    expect(resolveProperty('.search-panel > ul { display: flex }', LIST_CHAIN, 'display')).toBe('flex');
+    // A child combinator that does not hold must not match.
+    expect(resolveProperty('.nav > ul { display: flex }', LIST_CHAIN, 'display')).toBeNull();
+    // An attribute selector on the element itself.
+    expect(resolveProperty('[role=listbox] { display: flex }', LIST_CHAIN, 'display')).toBe('flex');
+  });
+
+  it('refuses a selector it cannot model rather than skipping it', () => {
+    // The failure mode this class of evaluator has: quietly ignoring the one
+    // rule that decides the answer. A pseudo-class on an element in this chain
+    // has to be a loud refusal.
+    expect(() => resolveProperty('.search-list:hover { display: flex }', LIST_CHAIN, 'display')).toThrow();
+    expect(() => resolveProperty('@media (min-width: 1px) { .search-list { display: flex } }', LIST_CHAIN, 'display')).toThrow();
+    // …and something that plainly cannot concern it is skipped, not thrown on,
+    // or the built stylesheets could never be resolved at all.
+    expect(resolveProperty('.katex .mord:first-child { display: flex }', LIST_CHAIN, 'display')).toBeNull();
+  });
+});
+
+/* ------------------------------------------------------------------ *
  * The box the build ships
  * ------------------------------------------------------------------ */
 
@@ -498,6 +916,31 @@ describe('without JavaScript', () => {
     expect(note![1]!, 'the reader is left with nowhere to go').toContain('href="/tx"');
   });
 
+  it('describes the field with an id that exists whatever runs', () => {
+    // Three states, one attribute. With scripting off, `#search-nojs` is the
+    // `<noscript>` paragraph. With scripting on it is not in the document, and
+    // a lone reference to it dangled — including in the case that matters, an
+    // island whose bundle failed, where the field stays disabled with a
+    // description pointing at nothing. `#search-hint` is unconditional.
+    const box = boxOf(readDist('index.html'));
+    const described = /aria-describedby="([^"]*)"/.exec(box);
+    expect(described, 'the disabled field is described by nothing').not.toBeNull();
+    const ids = described![1]!.split(/\s+/);
+    expect(ids).toContain('search-nojs');
+    expect(ids, 'no id in the list survives the noscript not being rendered').toContain(
+      'search-hint',
+    );
+    for (const id of ids) {
+      expect(box, `aria-describedby names ${id}, which is not in the markup`).toContain(`id="${id}"`);
+    }
+    // …and the one the script narrows to is outside the `<noscript>`.
+    const noscript = /<noscript>[\s\S]*?<\/noscript>/.exec(box)![0];
+    expect(noscript).toContain('id="search-nojs"');
+    expect(noscript, 'the unconditional description is inside the noscript too').not.toContain(
+      'id="search-hint"',
+    );
+  });
+
   it('claims no combobox it cannot open', () => {
     // A `role="combobox"` that never expands is a promise to a screen reader
     // that nothing can keep. The script adds the role along with the behaviour.
@@ -534,20 +977,27 @@ describe('what the box ships to the browser', () => {
     expect(code, 'the bundle names an off-origin url').not.toMatch(OFF_ORIGIN);
   });
 
-  it('asks for the index from a focus listener and from nowhere else', () => {
-    // The static half of the lazy-fetch guarantee. The controller's own tests
-    // prove it fetches once and only after `focus()`; this proves the island
-    // actually wires `focus()` to the focus event rather than calling it on
-    // load. Confirmed in a real browser too — devtools shows one request for
-    // `/search-index.json`, on first focus and not before.
+  it('does nothing at load but attach, and fetches from the reader\'s focus', () => {
+    // The island's script is now three statements: define `load`, and hand it
+    // to `attachSearch`. That the fetch happens on focus and once is asserted
+    // twice over by execution — by the controller group against a counted
+    // loader, and by the adapter group against a fired `focus` event — so what
+    // is left for a source scan is only that this file does not reach past
+    // them and call anything itself.
     const source = readFileSync('src/components/Search.astro', 'utf8');
     const script = /<script>([\s\S]*)<\/script>/.exec(source);
     expect(script, 'Search.astro ships no script').not.toBeNull();
-    expect(script![1]!).toMatch(/addEventListener\(\s*['"]focus['"]/);
-    // Nothing calls the controller's `focus()` outside a listener body.
-    for (const m of script![1]!.matchAll(/^\s*box\.focus\(\)/gm)) {
-      throw new Error(`Search.astro focuses the box at load time: ${m[0]}`);
+    expect(script![1]!, 'the island does not attach the box at all').toMatch(/attachSearch\(/);
+    expect(script![1]!, 'the island fetches something other than the index').not.toMatch(
+      /fetch\((?!\s*'\/search-index\.json')/,
+    );
+    for (const m of script![1]!.matchAll(/^\s*(load|attachSearch)\(\)/gm)) {
+      throw new Error(`Search.astro calls ${m[1]!} at load time`);
     }
+    expect(
+      readFileSync('src/site/search-dom.ts', 'utf8'),
+      'nothing binds the focus event',
+    ).toMatch(/addEventListener\(\s*['"]focus['"]/);
   });
 
   it('carries no Node global and no node: specifier', () => {
@@ -596,9 +1046,16 @@ describe('the box under eleven palettes', () => {
 
 describe('the box is derived, not dated', () => {
   it('reads no clock (§14)', () => {
+    // Every module this feature owns, including the two that run during
+    // `astro build` rather than in the browser — which is where a clock read
+    // would actually make two builds disagree, and which the first version of
+    // this guard did not scan at all.
     for (const file of [
       'src/site/search-query.ts',
       'src/site/search-box.ts',
+      'src/site/search-dom.ts',
+      'src/site/search-index.ts',
+      'src/pages/search-index.json.ts',
       'src/components/Search.astro',
     ]) {
       expect(readFileSync(file, 'utf8'), `${file} reads the clock`).not.toMatch(

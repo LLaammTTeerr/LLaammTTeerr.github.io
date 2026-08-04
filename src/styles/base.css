@@ -28,7 +28,20 @@ a { color: inherit; }
 }
 .nav .brand { font-family: var(--mono); font-weight: 600; text-decoration: none; }
 .nav .brand span { color: var(--acc); }
-.nav ul { display: flex; flex-wrap: wrap; gap: 1.05rem; list-style: none; margin: 0; padding: 0; }
+/* `> ul`, and the child combinator is the whole point of the rule.
+   This was written when the nav contained exactly one list — the section
+   links — and `.nav ul` was a fair way to say "that list". The search box
+   added a second one, `<ul id="search-list">`, nested two levels down inside
+   the results panel, and this rule reached it: `.nav ul` is (0,1,1) against
+   `.search-list`'s (0,1,0), so the component's own stylesheet lost the
+   cascade however late it loaded, and eight results laid themselves out as a
+   wrapped row of chips with the keyboard's ArrowDown moving the highlight
+   sideways.
+   Narrowed here rather than escalated in `search.css`, because the defect is
+   that this selector says more than it means: it is about the nav's own link
+   list, and now has to say so. Escalating in the component would leave the
+   over-broad rule in place for the next list anyone nests in the nav. */
+.nav > ul { display: flex; flex-wrap: wrap; gap: 1.05rem; list-style: none; margin: 0; padding: 0; }
 .nav li a {
   font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.06em;
   text-transform: uppercase; color: var(--dim); text-decoration: none;

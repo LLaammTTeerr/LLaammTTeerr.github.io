@@ -31,9 +31,11 @@
 .search-input:disabled { opacity: 0.55; cursor: default; }
 
 /* Only ever rendered inside <noscript>, so it exists exactly when the input
-   above cannot be enabled. Full width of the nav row, since it is prose. */
+   above cannot be enabled. It sits inside `.search`, which is a flex *item* of
+   the nav and not a flex container, so an earlier `flex-basis: 100%` here did
+   nothing at all; the paragraph is a block in normal flow and the nav wraps
+   around it. */
 .search-nojs {
-  flex-basis: 100%;
   margin: 0.5rem 0 0;
   max-width: 42rem;
   line-height: 1.6;
@@ -57,7 +59,17 @@
 }
 .search-panel[hidden] { display: none; }
 
-.search-list { list-style: none; margin: 0; padding: 0; max-height: 22rem; overflow-y: auto; }
+/* `display: block` is declared rather than left to the UA default, and the
+   reason is a real defect: `base.css`'s `.nav ul` used to reach this element
+   and lay the results out as a wrapped horizontal row. That rule is now
+   scoped to the nav's own list, which is the actual fix — but a component
+   that states its own layout cannot be silently relaid by the next ancestor
+   rule either, and `tests/site/search.test.ts` resolves this property through
+   the whole built cascade rather than trusting that the declaration exists. */
+.search-list {
+  display: block; list-style: none; margin: 0; padding: 0;
+  max-height: 22rem; overflow-y: auto;
+}
 
 .search-opt {
   display: grid;
