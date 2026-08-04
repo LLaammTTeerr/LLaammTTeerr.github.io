@@ -18,20 +18,36 @@ anything. Two standard commands, no JavaScript:
 
 ```sh
 SITE=https://llaammtteerr.github.io
-SLUG=2026-07-26-hash-functions
+SLUG=2026-07-26-hash-functions          # any slug from /tx
 
 # what the post actually says
-curl -s "$SITE/tx/$SLUG/body.txt" | sha256sum
-# ddad583d5e0cd56b6a436cbb63c2a5df883c5ae62e192d087f61282161509cf3
+BODY=$(curl -s "$SITE/tx/$SLUG/body.txt" | sha256sum | cut -d" " -f1)
 
-# what the chain committed to
-curl -s "$SITE/chain.json" | python3 -c "import json,sys;print(next(t['contentHash'] for b in json.load(sys.stdin)['blocks'] for t in b['transactions'] if t.get('slug')=='$SLUG'))"
-# 0xddad583d5e0cd56b6a436cbb63c2a5df883c5ae62e192d087f61282161509cf3
+# what the chain committed to — the newest record governing that post,
+# which is its latest amendment if it has been edited, else the post itself
+CHAIN=$(curl -s "$SITE/chain.json" | python3 -c "
+import json, sys
+txs = [t for b in json.load(sys.stdin)['blocks'] for t in b['transactions']]
+post = next(t for t in txs if t.get('slug') == '$SLUG')
+amendments = [t for t in txs if t.get('amends') == post['hash']]
+print((amendments[-1] if amendments else post)['contentHash'])")
+
+[ "0x$BODY" = "$CHAIN" ] && echo "MATCH" || echo "MISMATCH"
 ```
 
-They match, or the site is lying. Nothing in that check runs code this repository wrote —
-`/chain.json` is served byte-for-byte identical to the `chain.lock.json` committed here, and
-`body.txt` is the exact text the hash is over.
+They match, or the site is lying. Change `SLUG` to any post you like — the expected hash is
+whatever that post's own record says, so there is nothing to memorise and nothing to compare by
+eye.
+
+The amendment step is not incidental. Editing a published post never rewrites its sealed
+transaction: it appends an **amendment** that commits to the new text, and the original stays on
+the chain exactly as it was. So the hash to check a post against is the newest record that governs
+it, and a checker that stops at the post's own transaction will report a mismatch on every post
+that has ever been edited — while the site is behaving correctly.
+
+Nothing in that check runs code this repository wrote: `/chain.json` is served byte-for-byte
+identical to the `chain.lock.json` committed here, and `body.txt` is the exact text the hash is
+over.
 
 For the whole chain at once, [`/verify`](https://llaammtteerr.github.io/verify) recomputes every
 block in your browser via Web Crypto — block hashes from headers, Merkle roots from transaction
