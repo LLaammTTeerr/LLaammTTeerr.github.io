@@ -99,12 +99,20 @@ export function readPending(path: string): PendingLock | null {
   // §3.6 — "a pending transaction still carries its own real hash". Shape is
   // not realness: `transactionStructuralProblem` checks that `hash` is 64 hex
   // digits, not that it is the sha256 of this transaction's own canonical
-  // form. Nothing else ever checks this file — `buildChain` reads it for
-  // periods and overwrites it, and `/verify` cannot see the open block at all
-  // — so without this a hand-edited or badly merged `chain.pending.json`
+  // form. `/verify` still cannot see the open block — `ChainVerifier` fetches
+  // `/chain.json` and nothing else — and `buildChain` only reads this file for
+  // periods before overwriting it, so at build time this is the sole check on
+  // it: without it a hand-edited or badly merged `chain.pending.json`
   // publishes a fabricated hash, title and value through a green `astro
   // build`. The lock is `verifyChain`'d twice per `chain:build`; this holds
   // the open block to the same standard.
+  //
+  // One reader has since joined, in the browser rather than in the build:
+  // `TxVerifier.astro` fetches `/chain.pending.json` and `verifyTransaction`
+  // recomputes a pending record's hash and `contentHash` from it. That check
+  // runs on the reader's machine, on bytes served from `dist/`. It does not
+  // make this one redundant — it is the same standard applied twice, at the
+  // two ends of the pipe.
   //
   // Rejecting the whole file rather than the offending transaction, and by
   // returning null rather than throwing: the file is provisional and fully

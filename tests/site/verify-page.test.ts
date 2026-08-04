@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { DIST, cssPerPage, distPages, readDist, rendered, resolvesIn, scriptClosure } from './dist';
+import { DIST, OFF_ORIGIN, cssPerPage, distPages, readDist, rendered, resolvesIn, sameOriginPath, scriptClosure } from './dist';
 import { parseRules, selectorParts } from './css';
 import { ROUTES, routeById } from '../../src/site/routes';
-import { CHECKS } from '../../src/site/verify-checks';
+import { CHECKS, chainVerdict } from '../../src/site/verify-checks';
 
 /**
  * §7 — `/verify`, the page that lets a reader check the chain instead of
@@ -114,10 +114,17 @@ describe('what actually reaches the browser', () => {
       /fetch\(\s*["'`]\/chain\.json/,
     );
     // Every fetch target in the bundle, whatever it is spelled as.
+    //
+    // `sameOriginPath` rather than `startsWith('/')`: the bare prefix test
+    // accepts `//example.com/chain.json`, which is a cross-origin request the
+    // browser resolves against the page's own scheme. That is not a hypothetical
+    // — a beacon at that spelling shipped past this very loop.
     for (const m of code.matchAll(/fetch\(\s*(["'`])([^"'`]*)\1/g)) {
-      expect(m[2]!.startsWith('/'), `the island fetches ${m[2]!}, which is not same-origin`).toBe(true);
+      expect(sameOriginPath(m[2]!), `the island fetches ${m[2]!}, which is not same-origin`).toBe(true);
     }
-    expect(code, 'the bundle names an absolute url').not.toMatch(/https?:\/\//);
+    expect(sameOriginPath('//example.com/chain.json'), 'the predicate accepts a protocol-relative url').toBe(false);
+    expect(sameOriginPath('/chain.json')).toBe(true);
+    expect(code, 'the bundle names an off-origin url').not.toMatch(OFF_ORIGIN);
   });
 
   it('lets no built page load a script that names a third party', () => {
@@ -128,7 +135,7 @@ describe('what actually reaches the browser', () => {
       const { code } = scriptClosure(page);
       if (code === '') continue;
       scanned += 1;
-      expect(code, `${page} loads a script that names a third party`).not.toMatch(/https?:\/\//);
+      expect(code, `${page} loads a script that names a third party`).not.toMatch(OFF_ORIGIN);
     }
     expect(scanned, 'no built page loads a script, so this checked nothing').toBeGreaterThan(0);
   });
@@ -200,5 +207,65 @@ describe('the page is derived, not dated', () => {
     expect(readFileSync('src/components/ChainVerifier.astro', 'utf8')).not.toMatch(
       /new Date\(\)|Date\.now\(\)/,
     );
+  });
+});
+
+describe('which verdict /verify reaches', () => {
+  // I4 — the chain-level problem is answered before the empty-chain branch.
+  // Four malformed ledgers (`{"version":1}`, `[]`, `"hello"`, and a genuinely
+  // empty `{"blocks":[]}`) all reached the reader as "the chain has no blocks
+  // to check": one message for four different documents, on the one page whose
+  // purpose is a legible diagnosis. The right string had already been computed
+  // and was discarded three lines later.
+
+  it('names the document problem when there was nothing to check', () => {
+    const out = chainVerdict(0, 0, 'chain is not an object with a "blocks" array');
+    expect(out.state).toBe('fail');
+    expect(out.verdict).toContain('chain is not an object with a "blocks" array');
+    expect(
+      out.verdict,
+      'a malformed ledger was reported as an empty one',
+    ).not.toContain('Chuỗi chưa có khối nào để kiểm');
+  });
+
+  it('still names it when blocks were checked and the fault is above them', () => {
+    // The asset registry reaches this branch too, and a registry-only fault
+    // leaves every block green — so without the problem in the text the reader
+    // gets "not valid" and no cause anywhere.
+    const out = chainVerdict(6, 0, 'asset #0 has tokenId 7, expected 1');
+    expect(out.state).toBe('fail');
+    expect(out.verdict).toContain('asset #0 has tokenId 7, expected 1');
+  });
+
+  it('reserves the empty-chain message for a chain that is genuinely empty', () => {
+    const out = chainVerdict(0, 0, null);
+    expect(out.state).toBe('idle');
+    expect(out.stamp).toBe('Trống');
+    expect(out.verdict).toBe('Chuỗi chưa có khối nào để kiểm.');
+  });
+
+  it('passes only when there is no problem and no failing block', () => {
+    const ok = chainVerdict(6, 0, null);
+    expect(ok.state).toBe('ok');
+    expect(ok.stamp).toBe('Verified');
+    // …and says what it did *not* check. §14 asks that a displayed field be
+    // committed or re-derived; per-transaction gas is neither, and only the
+    // block sum is checked here — a claim strictly weaker than the per-post
+    // control's, which re-derives the count from the body.
+    expect(
+      ok.verdict,
+      'the chain-level pass claimed more than the block sums prove',
+    ).toMatch(/tổng của khối/);
+
+    expect(chainVerdict(6, 1, null).state).toBe('fail');
+    expect(chainVerdict(6, 1, null).verdict).toContain('1/6');
+  });
+
+  it('is what the island actually uses, not a second copy of the rule', () => {
+    // The whole point of extracting it. If the island went back to spelling the
+    // branches inline, these assertions would be about a function nothing calls.
+    const { code } = scriptClosure(PAGE);
+    expect(code).toContain('Chuỗi chưa có khối nào để kiểm');
+    expect(code).toContain('Không kiểm được:');
   });
 });
