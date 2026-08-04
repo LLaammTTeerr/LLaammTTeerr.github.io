@@ -426,3 +426,26 @@ mutations were run afterwards to prove the decoupled versions still bite.
 
 That second one mattered because the author is about to write real content, and a suite that
 goes red when you add a blog post is a suite people stop believing.
+
+---
+
+## D22 — deployed to https://llaammtteerr.github.io
+
+Repo `LLaammTTeerr/LLaammTTeerr.github.io`, a GitHub **user** site, so `base` stays `/`. First CI
+run green: install → typecheck → 872 tests → verify the committed ledger → build → publish.
+`/chain.json` served over the internet is byte-identical to `chain.lock.json` in the repo.
+
+**Failure mode to remember:** CI never runs `chain:build`. Edit a published post without
+recording the amendment and the build fails — so the site *stops updating* rather than showing a
+broken page. A push that appears to do nothing means: check Actions.
+
+### Two tidy items, deliberately deferred
+
+1. **A stray `pages-build-deployment` run.** GitHub auto-enabled Pages with the legacy
+   branch-based build the moment the repo was created, before the workflow existed. I switched
+   the source to Actions (`build_type: workflow`), but that one legacy run stays in the history.
+   Harmless; no action needed unless it recurs, which would mean the source reverted.
+2. **Actions pinned to majors that target Node 20**, which GitHub has deprecated —
+   `checkout@v4`, `setup-node@v4`, `upload-pages-artifact@v3`. The runner currently forces them
+   onto Node 24 and warns. Not urgent and not broken. Bump the majors on the next CI change, and
+   verify rather than assuming the newer majors are drop-in.
