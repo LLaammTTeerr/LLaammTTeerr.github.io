@@ -49,11 +49,26 @@ function text(html: string): string {
   return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
-/** The verify control's own markup on a post page, and nothing around it. */
+/**
+ * The verify control's own markup on a post page, and nothing around it.
+ *
+ * The control is a `<details>` that *contains* another `<details>` — the manual
+ * commands — so this counts depth rather than matching lazily to the first
+ * closing tag, which would cut the control in half at the inner one and quietly
+ * hide whatever came after it from every assertion below.
+ */
 function controlOf(html: string): string {
-  const m = /<section class="card vfy txv"[\s\S]*?<\/section>/.exec(html);
-  if (m === null) throw new Error('the post page has no transaction-verify control');
-  return m[0];
+  const open = /<details class="card vfy txv"[^>]*>/.exec(html);
+  if (open === null) throw new Error('the post page has no transaction-verify control');
+  const start = open.index;
+  let depth = 0;
+  const tag = /<(\/?)details\b[^>]*>/g;
+  tag.lastIndex = start;
+  for (let m = tag.exec(html); m !== null; m = tag.exec(html)) {
+    depth += m[1] === '/' ? -1 : 1;
+    if (depth === 0) return html.slice(start, m.index + m[0].length);
+  }
+  throw new Error('the transaction-verify control is never closed');
 }
 
 // ---------------------------------------------------------------------------
@@ -700,5 +715,37 @@ describe('the control is derived, not dated', () => {
     // file in `dist`, not only as an href nothing resolves.
     expect(distPages().length).toBeGreaterThan(1);
     expect(existsSync(join(DIST, BODY_FILE(sealedSlug())))).toBe(true);
+  });
+});
+
+describe('the control is a disclosure, closed at rest', () => {
+  /**
+   * At rest the whole control is one bar. Expanded it runs to about 580 words
+   * on a page whose article is 607 — the control was as long as the post.
+   */
+  it('ships closed, with the label and the verdict still on the bar', () => {
+    const html = readDist(PAGE_FILE(sealedSlug()));
+    const open = /<details class="card vfy txv"[^>]*>/.exec(html)![0];
+    expect(open, 'the control ships expanded').not.toMatch(/\bopen\b/);
+
+    const summary = /<summary[\s\S]*?<\/summary>/.exec(controlOf(html))![0];
+    expect(text(summary)).toContain('Transaction check');
+    expect(text(summary), 'the verdict is hidden when the bar is closed').toContain('Chưa chạy');
+  });
+
+  it('keeps the manual commands reachable without JavaScript', () => {
+    // The reason for a native <details> rather than a scripted toggle: the
+    // reader with scripts off is exactly the one who needs the curl fallback,
+    // and a scripted disclosure would lock them out of it.
+    const control = controlOf(readDist(PAGE_FILE(sealedSlug())));
+    expect(control).toContain('sha256sum');
+    expect(control).not.toMatch(/<summary[^>]*\sonclick/);
+  });
+
+  it('states every step in the markup, not only after running', () => {
+    // Collapsing must not become hiding: the steps are still in the document,
+    // so a reader who opens the bar sees the scope without pressing anything.
+    const control = controlOf(readDist(PAGE_FILE(sealedSlug())));
+    expect((control.match(/txv-step/g) ?? []).length).toBeGreaterThanOrEqual(4);
   });
 });

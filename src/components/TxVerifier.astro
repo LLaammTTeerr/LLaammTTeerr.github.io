@@ -65,19 +65,35 @@ const digest = post.contentHash.slice(2);
 const source = `/tx/${slug}/body.txt`;
 ---
 
-<section
+{/*
+  A `<details>`, closed by default, and native rather than scripted.
+
+  At rest this is one bar. Everything below it — the explanation, the button,
+  six steps and the manual commands — came to about 580 words on a page whose
+  article is 607, so the control was as long as the post it belonged to. Nobody
+  reads an explanation of a check they have not run.
+
+  `<details>` and not a class toggled by script, because the disclosure then
+  works with JavaScript off, keyboard and screen reader support come from the
+  browser, and the summary is a real button without any of it being reimplemented
+  here. The check *inside* still needs JavaScript, which the status paragraph
+  says plainly — but opening the bar to read the two `curl` commands does not,
+  and that is exactly the reader who has scripts off.
+
+  The stamp lives in the summary, so a verdict stays visible once the bar is
+  collapsed again.
+*/}
+<details
   class="card vfy txv"
   id="txv"
-  aria-labelledby="txv-heading"
   data-slug={slug}
   data-hash={post.hash}
   data-gas={post.gasUsed === null ? '' : String(post.gasUsed)}
 >
-  <h2 id="txv-heading" class="sr-only">Kiểm chứng giao dịch này</h2>
-  <div class="card-top">
-    <span class="per">Transaction check</span>
+  <summary class="txv-bar">
+    <h2 id="txv-heading" class="per">Transaction check</h2>
     <span class="vfy-stamp" id="txv-stamp" data-state="idle">Chưa chạy</span>
-  </div>
+  </summary>
 
   {/*
     The no-JavaScript state, and the honest one for the moment before the module
@@ -143,7 +159,7 @@ const source = `/tx/${slug}/body.txt`;
       <a href="/chain.json"><code>/chain.json</code></a> rồi tìm hash giao dịch in ở đầu trang.
     </p>
   </details>
-</section>
+</details>
 
 <script>
   import { verifyTransaction } from '../chain/verify';

@@ -125,7 +125,35 @@
    (there is no catalogue elsewhere on a post page to point at), and the two
    commands that reach the same verdict without running any of this. */
 
-.txv { margin: 2.2rem 0 0; }
+/* The whole control is a disclosure, closed by default — see the note in
+   TxVerifier.astro for why native `<details>` rather than a scripted toggle. */
+.txv { padding: 0; }
+
+/* The bar. `display: flex` also removes the default disclosure triangle in
+   Firefox, which `list-style: none` alone does not do in every engine, so both
+   are declared rather than one being assumed to cover the other. */
+.txv-bar {
+  display: flex; flex-wrap: wrap; gap: 0.55rem 1rem; align-items: center;
+  padding: 0.85rem 1.1rem; cursor: pointer; list-style: none;
+}
+.txv-bar::-webkit-details-marker { display: none; }
+.txv-bar .per { font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.11em;
+  text-transform: uppercase; color: var(--dim); font-weight: 400; margin: 0; }
+.txv-bar .vfy-stamp { margin-left: auto; }
+/* The affordance, since the browser's own marker is gone. Rotates on open, and
+   holds still for a reader who has asked for less motion. */
+.txv-bar::after {
+  content: '▸'; color: var(--dim); font-size: 0.8rem; margin-left: 0.15rem;
+  transition: transform 0.15s ease;
+}
+.txv[open] .txv-bar::after { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) { .txv-bar::after { transition: none; } }
+.txv-bar:focus-visible { outline: 2px solid var(--acc); outline-offset: -2px; border-radius: 4px; }
+.txv[open] .txv-bar { border-bottom: 1px solid var(--line); }
+
+/* Everything the bar hides. */
+.txv > :not(.txv-bar) { margin-left: 1.1rem; margin-right: 1.1rem; }
+.txv > :last-child { margin-bottom: 1.1rem; }
 
 .txv-run {
   margin: 0.9rem 0 0;
