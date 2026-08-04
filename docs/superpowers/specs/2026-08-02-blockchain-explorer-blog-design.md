@@ -499,13 +499,30 @@ Pasting a full `0x…` transaction hash into the search box resolves to its post
 
 ### 6.1 Post page layout
 
-A compact transaction-detail panel (hash, block, timestamp, from, to, gas used,
-confirmation status), followed by the article body in proper long-form typography
-at a 65–75 character measure.
+Two columns on a wide viewport: the article body on the left at a 65–75
+character measure, and the transaction-detail panel (hash, block, timestamp,
+from, to, gas used, confirmation status) as a **sticky rail** on the right. Below
+`62rem` the rail collapses and the panel returns above the article.
 
-This split is deliberate. An explorer interface is optimized for scanning dense
-tables and is hostile to reading two thousand words; the theme owns the chrome,
-and readability owns the body. Code blocks and LaTeX render normally.
+**Revised 2026-08-04.** The panel was a full-width band above the article, which
+left the article floating narrow between two wider blocks — visibly unaligned,
+and the width went unused. As a rail it is aligned, the space is spent, and the
+hash and address stay on screen while the article is read: on a band, checking a
+hash against the text meant scrolling back to the top.
+
+The article carries its own card — surface, border, radius — matching the panel
+and the verification control, so the three read as one visual language rather
+than as prose that happens to sit between two boxes.
+
+A **reading-progress indicator** shows how far through the article the reader
+is. It measures the *article's* own extent, not the document's: a document-scoped
+bar reports progress that includes the header, the panel and the footer, so it
+reads as complete before the article is.
+
+The split between chrome and body is unchanged and remains the point. An explorer
+interface is optimized for scanning dense tables and is hostile to reading two
+thousand words; the theme owns the chrome, and readability owns the body. Code
+blocks and LaTeX render normally.
 
 ---
 
