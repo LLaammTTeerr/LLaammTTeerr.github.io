@@ -20,9 +20,16 @@ const page = () => readDist(`tx/${slug()}/index.html`);
  */
 const post = () => resolvedPost(slug())!;
 
-/** The `<article>` alone — the panel and `Base.astro`'s chrome excluded. */
+/**
+ * The `<article>` alone — the panel and `Base.astro`'s chrome excluded.
+ *
+ * `class="post card"` since §6.1's revision: the article carries the same card
+ * as the panel and the verification control, so the three read as one visual
+ * language. Anchored to the whole attribute rather than to `class="post`, so a
+ * page that stopped rendering the card is a failure here and not a silent pass.
+ */
 function articleOf(html: string): string {
-  const m = /<article class="post">([\s\S]*?)<\/article>/.exec(html);
+  const m = /<article class="post card">([\s\S]*?)<\/article>/.exec(html);
   if (m === null) throw new Error('the page has no post article');
   return m[1]!;
 }

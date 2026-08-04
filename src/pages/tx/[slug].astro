@@ -47,17 +47,60 @@ const post = content.post;
 ---
 
 <Base title={`${post.title} — Blogchain`} description={`${post.title} · ${content.gasUsed} từ`}>
-  <TxPanel post={post} />
-  <article class="post">
-    <h1>{post.title}</h1>
-    <p class="byline">{post.date} · {post.tags.map((t) => `#${t}`).join(' ')}</p>
-    <Fragment set:html={html} />
-  </article>
   {/*
-    §7 — after the text, not before it. The reader came to read; the offer to
-    check what they just read only means anything once they have. The control
-    verifies `post` — the resolution — because that is the record the panel and
-    the body above it describe (§3.9).
+    §6.1 (revised 2026-08-04) — two columns above 62rem, one below.
+
+    The article comes first in the document and the panel second, which is the
+    reverse of what this page used to render. Document order is what a screen
+    reader follows at every width, and the title and the prose are what a reader
+    came for; a 64-character hash read out ahead of them is chrome in front of
+    content. The rail is placed to the right by the grid and hoisted above the
+    article by `order` when the grid collapses (src/styles/post.css) — the
+    layout moves, the reading order does not.
   */}
-  <TxVerifier post={post} />
+  <div class="post-layout">
+    <div class="post-col">
+      <article class="post card">
+        {/*
+          §6.1's reading-progress indicator. Decorative, and nothing but a
+          painted bar: `aria-hidden`, no text, no role. It is inside the article
+          because the article is what it measures — the CSS names this element's
+          own ancestor as the animation's timeline, so there is no way for it to
+          drift onto the document's extent. `data-on` starts `false` and
+          src/site/reading-progress.ts flips it only when the article is taller
+          than the viewport.
+        */}
+        <div class="post-progress" data-on="false" aria-hidden="true"><i></i></div>
+        <h1>{post.title}</h1>
+        <p class="byline">{post.date} · {post.tags.map((t) => `#${t}`).join(' ')}</p>
+        <Fragment set:html={html} />
+      </article>
+      {/*
+        §7 — after the text, not before it. The reader came to read; the offer to
+        check what they just read only means anything once they have. The control
+        verifies `post` — the resolution — because that is the record the panel and
+        the body above it describe (§3.9).
+
+        In the reading column rather than the rail or a band under both, and the
+        §7 argument is why: "after the text" is a statement about the sequence a
+        reader moves through, which only means anything if the two are in one
+        column. It is also far too big for a 20rem rail — a step list, prose and
+        a `curl` command — and a full-width band under two columns would be the
+        very misalignment §6.1 removed. Beside it, the rail is still stuck to the
+        top of the screen, so the hash being checked is on screen while it runs.
+      */}
+      <TxVerifier post={post} />
+    </div>
+    <aside class="post-rail">
+      <TxPanel post={post} />
+    </aside>
+  </div>
 </Base>
+
+<script>
+  import { watchReadingProgress } from '../../site/reading-progress';
+
+  // The only JavaScript §6.1 needs: the bar itself is a CSS scroll-driven
+  // animation, and this decides whether there is any progress to show at all.
+  watchReadingProgress(document, window);
+</script>

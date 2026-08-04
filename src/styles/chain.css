@@ -135,7 +135,16 @@ a.hash:hover { text-decoration-color: currentColor; }
 .profile-links a { color: var(--acc); text-underline-offset: 3px; }
 .profile-links .unlinked { color: var(--dim); }
 
-.a-hash { color: var(--dim); }
+/* The unconfirmed sibling of `.hash`, and it has to be able to do everything
+   `.hash` can. It only declared a colour, inheriting the monospace from
+   whatever held it and breaking nowhere — which was invisible for as long as
+   the only full-length one sat in a full-width band. §6.1's rail is about
+   20rem wide, and there a pending post's 66-character `~0x…` refused to wrap
+   and pushed the panel's `dl` to 469px inside a 313px column, giving the rail
+   a horizontal scrollbar. Every other use is a `shortHash`, so this changes
+   nothing anywhere else; it stops the pair from disagreeing about what a hash
+   is allowed to do. */
+.a-hash { color: var(--dim); font-family: var(--mono); word-break: break-all; }
 .a-hash .tilde { color: var(--warn); font-weight: 700; }
 .stamp.open { color: var(--warn); border-color: var(--warn); border-style: dashed; }
 .gutter .dot.open { border-style: dashed; border-color: var(--warn); }

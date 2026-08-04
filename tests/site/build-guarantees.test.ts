@@ -244,9 +244,22 @@ describe("an amended post's page describes the amendment, not the original", () 
     writeFileSync(path, edited);
   }
 
+  /**
+   * The transaction panel alone.
+   *
+   * Bounded by the rail §6.1 put the panel in, not by "everything up to the
+   * article": since that revision the article comes *first* in the document —
+   * a screen reader reaches the prose before a 64-character hash — so a slice
+   * that ran from the panel to the article would have matched nothing at all,
+   * and this helper's job is to make sure an assertion about the panel is about
+   * the panel.
+   */
   function panelOf(html: string): string {
-    const panel = /<div class="txpanel">[\s\S]*?<article class="post">/.exec(html);
+    const panel = /<aside class="post-rail">[\s\S]*?<\/aside>/.exec(html);
     expect(panel, 'the page rendered no transaction panel at all').not.toBeNull();
+    expect(panel![0], 'the rail holds something other than the transaction panel').toContain(
+      '<div class="txpanel">',
+    );
     return panel![0];
   }
 

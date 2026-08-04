@@ -17,7 +17,68 @@
   border-top: 1px solid var(--line); font-size: .78rem; color: var(--dim); }
 .txpanel .amended a { color: var(--acc); }
 
-article.post { max-width: 38rem; margin: 2rem auto 0; }
+/* §6.1 (revised 2026-08-04) — the post page's two columns.
+   ------------------------------------------------------------------
+   The panel used to be a full-width band above a 38rem article centred in a
+   64rem `main`, so the prose floated narrow between two wider blocks and none
+   of the width was spent. Here the article and the panel are columns: the
+   article keeps its measure, the rail takes the rest, and the hash and the
+   address stay on screen while the article is read — on a band, checking a
+   hash against the text meant scrolling back to the top.
+
+   Written collapsed-first, and that is not a style preference. The collapsed
+   form is the one that must survive a browser that understands none of what
+   follows, and `@media (min-width: 62rem)` is the exact breakpoint §6.1 names;
+   spelling it `max-width: 62rem` would make 62rem itself narrow, which the
+   spec's "below 62rem" says it is not.
+
+   Collapsed, all three blocks — panel, article, verifier — share one column of
+   the article's own measure, so they align. A full-width panel over a 38rem
+   article is the defect this revision exists to remove, at any width. */
+.post-layout { display: flex; flex-direction: column; gap: 1.25rem;
+  max-width: 38rem; margin: 0 auto; }
+/* The article is first in the document — a screen reader should reach the
+   title and the prose before a 64-character hash — so the collapsed layout
+   hoists the panel visually rather than reordering the markup. */
+.post-rail { order: -1; min-width: 0; }
+.post-col { min-width: 0; }
+
+@media (min-width: 62rem) {
+  /* `minmax(0, …)` on both tracks, and `min-width: 0` on what sits in them: a
+     grid track's automatic minimum is min-content, and this is the one route
+     that renders code blocks and KaTeX. A single unwrapped line in a `<pre>`
+     would otherwise push the article column past its measure and squeeze the
+     rail off the viewport. */
+  .post-layout { display: grid; grid-template-columns: minmax(0, 38rem) minmax(0, 1fr);
+    align-items: start; gap: 1.6rem; max-width: none; margin: 0; }
+  /* `start`, so the rail is the height of its own content and its top is what
+     sticks. Stretched, a rail's top scrolls away with the article. */
+  .post-rail { order: 0; position: sticky; top: 1.25rem;
+    max-height: calc(100vh - 2.5rem); overflow-y: auto; }
+  /* The panel's `dl` is two columns everywhere else (`chain.css`: `.meta`,
+     `4.2rem 1fr`). Inside a rail around 20rem wide that leaves under 16rem for
+     a 66-character hash, which wraps to four ragged lines against its label.
+     Stacked, the label sits over the value and the hash gets the full width.
+     (0,3,0) against `.meta`'s (0,1,0), so this wins the cascade wherever the
+     two files happen to load — the collision that already shipped once here
+     was `.nav ul` beating `.search-list` on exactly this kind of tie.
+
+     `minmax(0, 1fr)` and not a bare `1fr`, which was measured in a browser and
+     not guessed at: a `1fr` track's automatic minimum is min-content, so one
+     value that will not wrap sizes the whole column. A pending post's
+     `~0x…` did exactly that — a 469px `dl` inside a 313px rail, with a
+     horizontal scrollbar. `.a-hash` in chain.css is the other half of the fix. */
+  .post-layout .post-rail .meta { grid-template-columns: minmax(0, 1fr); gap: 0.1rem; }
+  .post-layout .post-rail .meta dt { margin-top: 0.45rem; }
+}
+
+/* §6.1 — the article's own card: the same surface, border and radius as the
+   panel and the verification control, so the three read as one visual language
+   rather than as prose that happens to sit between two boxes. `.card` itself
+   (chain.css) carries the colours, so they cannot drift apart; what is
+   overridden here is the room prose needs and the top edge the progress
+   indicator occupies. */
+article.post { max-width: none; margin: 0; padding: 0 1.5rem 1.5rem; min-width: 0; }
 article.post h1 { font-size: clamp(1.5rem, 3.4vw, 2rem); line-height: 1.25;
   margin: 0 0 .5rem; letter-spacing: -.018em; font-weight: 660; text-wrap: balance; }
 article.post .byline { font-family: var(--mono); font-size: .7rem;
@@ -38,3 +99,51 @@ article.post blockquote { margin: 0 0 1.15rem; padding-left: .9rem;
   border-left: 2px solid var(--line2); color: var(--dim); }
 article.post img { max-width: 100%; height: auto; }
 .katex-display { overflow-x: auto; overflow-y: hidden; padding: .2rem 0; }
+
+/* §6.1 — the reading-progress indicator.
+   ------------------------------------------------------------------
+   **It measures the article, not the document.** `view-timeline-name` is
+   declared on the article and nowhere else, and the fill's `animation-timeline`
+   names it: a document-scoped bar counts the nav, the panel and the verifier,
+   so it reports complete while the article still has text left. The range is
+   `contain` — from the moment the article's top edge reaches the top of the
+   viewport to the moment its bottom edge reaches the bottom — which is exactly
+   "how much of this article is still below the fold".
+
+   Sticky at the top of the article's own card, rather than fixed at the top of
+   the viewport or tucked into the rail. Fixed would be a new piece of global
+   chrome on a site that has none, and would say nothing about *what* is
+   progressing; the rail does not exist below 62rem, so an indicator living
+   there would vanish at exactly the widths where an article is longest. Here it
+   appears when the card reaches the top of the screen and leaves with the
+   card's last line, which is the article's extent made visible.
+
+   It degrades to nothing rather than to a broken control. Without scroll-driven
+   animation support the fill stays `scaleX(0)` and the strip is `--surf` on a
+   `--surf` card: invisible, and no empty track advertising a feature that is
+   not running. `prefers-reduced-motion` reaches the same place through
+   base.css's blanket `animation: none`, which is the right answer for a purely
+   decorative element.
+
+   `data-on` is written by src/site/reading-progress.ts, and is the one thing
+   CSS cannot decide: whether the article is longer than the viewport at all. */
+/* `padding-top: 0` on the card above and a matching negative inline margin
+   here, so the bar is flush with the card's own top and side edges: a strip
+   inset from three edges reads as a stray rule rather than as the card's lip.
+   The `-1.5rem` is `article.post`'s inline padding, restated — the two are a
+   pair and must be edited together. */
+.post-progress { position: sticky; top: 0; z-index: 1;
+  height: 3px; margin: 0 -1.5rem 1.5rem; border-radius: 5px 5px 0 0;
+  background: var(--surf); overflow: hidden; }
+.post-progress i { display: block; height: 100%; background: var(--acc);
+  transform: scaleX(0); transform-origin: 0 50%; }
+/* Longhands, deliberately: the `animation` shorthand resets `animation-timeline`
+   and `animation-range` to their initial values, so `animation: read linear both`
+   written above them would silently put the fill back on the document timeline. */
+.post-progress[data-on='true'] i {
+  animation-name: post-read;
+  animation-timing-function: linear; animation-fill-mode: both;
+  animation-timeline: --post-article; animation-range: contain;
+}
+article.post { view-timeline-name: --post-article; }
+@keyframes post-read { from { transform: scaleX(0); } to { transform: scaleX(1); } }

@@ -138,6 +138,76 @@ interface Step {
 export class UnmodelledSelector extends Error {}
 
 /**
+ * Whether `atRule` applies at a viewport `widthRem` wide, or `null` when this
+ * evaluator cannot say.
+ *
+ * Deliberately narrow: only `@media` preludes built from width terms joined by
+ * `and`. `@media (prefers-reduced-motion: reduce)`, `@supports`, a
+ * comma-separated query list and anything else answer `null` — which callers
+ * must treat as "unknown", never as "no". §6.1's rail lives behind a width
+ * query and its collapsed form does not, so a cascade assertion about the post
+ * page is meaningless unless the width query is evaluated rather than skipped.
+ *
+ * **Both spellings, because the build rewrites one into the other.** A source
+ * file says `@media (min-width: 62rem)`; what reaches `dist` is
+ * `@media (width>=62rem)`, because esbuild's CSS minifier converts every
+ * `min-`/`max-` prefix into range syntax. Every assertion this file supports is
+ * made against the *built* stylesheet, so an evaluator that only understood the
+ * source spelling would answer `null` for every query on the site and turn each
+ * of those assertions into a thrown refusal.
+ *
+ * `rem` is resolved against a 16px root, which is what every browser ships and
+ * what this repository's stylesheets assume; `px` is accepted and converted so
+ * a query in either unit is answered rather than silently unknown.
+ */
+export function mediaWidthMatches(atRule: string, widthRem: number): boolean | null {
+  const prelude = /^@media\b(.*)$/s.exec(atRule);
+  if (prelude === null) return null;
+  const condition = prelude[1]!.trim();
+  if (condition === '' || condition.includes(',')) return null;
+  let matches = true;
+  for (const term of condition.split(/\s+and\s+/i)) {
+    const applies = widthTermMatches(term.trim(), widthRem);
+    if (applies === null) return null;
+    matches &&= applies;
+  }
+  return matches;
+}
+
+/** One media feature: `(min-width: 62rem)` or its range spelling. */
+function widthTermMatches(term: string, widthRem: number): boolean | null {
+  const length = (raw: string): number =>
+    Number(raw.replace(/(rem|px)$/i, '')) / (/px$/i.test(raw) ? 16 : 1);
+
+  // `(min-width: 62rem)` / `(max-width: 44rem)`, inclusive of the boundary in
+  // both directions — the same rule a browser applies, and the reason §6.1's
+  // breakpoint is a `min-width` rather than a `max-width: 62rem`.
+  const prefixed = /^\(\s*(min|max)-width\s*:\s*([\d.]+(?:rem|px))\s*\)$/i.exec(term);
+  if (prefixed !== null) {
+    const value = length(prefixed[2]!);
+    return prefixed[1]!.toLowerCase() === 'min' ? widthRem >= value : widthRem <= value;
+  }
+
+  // `(width >= 62rem)` and `(62rem <= width)` — what the minifier emits.
+  const after = /^\(\s*width\s*(<=|>=|<|>|=)\s*([\d.]+(?:rem|px))\s*\)$/i.exec(term);
+  if (after !== null) return compare(widthRem, after[1]!, length(after[2]!));
+  const before = /^\(\s*([\d.]+(?:rem|px))\s*(<=|>=|<|>|=)\s*width\s*\)$/i.exec(term);
+  if (before !== null) return compare(length(before[1]!), before[2]!, widthRem);
+  return null;
+}
+
+function compare(left: number, operator: string, right: number): boolean | null {
+  switch (operator) {
+    case '<=': return left <= right;
+    case '>=': return left >= right;
+    case '<': return left < right;
+    case '>': return left > right;
+    case '=': return left === right;
+    default: return null;
+  }
+}
+
+/**
  * One compound selector — `ul`, `.nav`, `#search-list`, `.a.b[hidden]` — or
  * `null` when it uses something this evaluator does not model.
  */
@@ -261,19 +331,27 @@ const beats = (a: Specificity, b: Specificity): boolean =>
  * pseudo-element, `*`, or a sibling combinator is skipped when it plainly
  * cannot concern this chain, and throws `UnmodelledSelector` when it mentions
  * any class or id the chain carries — so a rule that might really decide the
- * answer can never be quietly ignored. At-rules are treated the same way:
- * this evaluator does not model media queries, and one that declares
- * `property` on this chain is a refusal, not a shrug.
+ * answer can never be quietly ignored.
+ *
+ * **At-rules.** With no `widthRem`, an at-rule that declares `property` on this
+ * chain is a refusal, not a shrug — the original behaviour, unchanged. Given a
+ * `widthRem`, a width media query is *evaluated*: one that does not apply at
+ * that width is dropped, one that does takes part in the cascade like any other
+ * rule. Anything `mediaWidthMatches` cannot answer still throws. §6.1's rail is
+ * a `@media (min-width: 62rem)` block and its collapsed form is not, so
+ * "resolve the computed value" for this page means resolving it *at a width*;
+ * skipping the query would leave both halves of the breakpoint unasserted.
  *
  * What it models: type, id, class and attribute selectors, descendant and child
- * combinators, specificity, source order. What it does not: `!important`,
- * inline styles, inheritance, shorthand expansion, and every selector shape
- * listed above.
+ * combinators, specificity, source order, and width media queries when a width
+ * is given. What it does not: `!important`, inline styles, inheritance,
+ * shorthand expansion, and every selector shape listed above.
  */
 export function resolveProperty(
   css: string,
   chain: StyledElement[],
   property: string,
+  options: { widthRem?: number } = {},
 ): string | null {
   const subject = chain[chain.length - 1];
   if (subject === undefined) throw new Error('resolveProperty was given an empty chain');
@@ -281,7 +359,17 @@ export function resolveProperty(
   // many unrelated selectors (KaTeX alone ships hundreds) for its presence to
   // be evidence that a rule concerns this element.
   const marks = new Set(chain.flatMap((e) => [...(e.classes ?? []), ...(e.id === undefined ? [] : [e.id])]));
-  const concerns = (part: string): boolean => [...marks].some((mark) => part.includes(mark));
+  // A whole identifier, not a substring. `.txv-run:hover:not(:disabled)` was
+  // refused as "concerning" a `<section class="card vfy txv">` because `txv` is
+  // a prefix of `txv-run` — a rule for the button inside the card, which cannot
+  // match the card. Every such false refusal is a real assertion that cannot be
+  // made, and the cure for it must not be to drop the assertion: a chain that
+  // genuinely carries `txv-run` still matches `.txv-run` here, because the mark
+  // is then `txv-run` itself.
+  const concerns = (part: string): boolean =>
+    [...marks].some((mark) =>
+      new RegExp(`(?<![\\w-])${mark.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`).test(part),
+    );
 
   let winner: { value: string; specificity: Specificity } | null = null;
   for (const rule of parseRules(css)) {
@@ -297,9 +385,14 @@ export function resolveProperty(
       }
       if (!matchesChain(chain, steps)) continue;
       if (rule.atRule !== null) {
-        throw new UnmodelledSelector(
-          `"${part}" declares ${property} inside ${rule.atRule}; at-rules are not modelled`,
-        );
+        const applies =
+          options.widthRem === undefined ? null : mediaWidthMatches(rule.atRule, options.widthRem);
+        if (applies === null) {
+          throw new UnmodelledSelector(
+            `"${part}" declares ${property} inside ${rule.atRule}; at-rules are not modelled`,
+          );
+        }
+        if (!applies) continue;
       }
       const specificity = specificityOf(steps);
       // Later source order wins a tie, which is why this is `!beats(winner, …)`

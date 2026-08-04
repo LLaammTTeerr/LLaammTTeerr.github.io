@@ -371,6 +371,32 @@ export function scriptClosure(page: string): { files: string[]; code: string } {
 }
 
 /**
+ * Every line of JavaScript one built page actually runs: the closure of the
+ * module scripts it names, **plus the ones Astro chose to inline**.
+ *
+ * `scriptClosure` alone is not that, and the difference was measured. Astro
+ * inlines a module script under its size threshold straight into the document,
+ * so `src/site/reading-progress.ts` reaches the reader inside
+ * `<script type="module">…</script>` and appears in no `_astro/*.js` file at
+ * all. A guard reading only the closure scanned the search box and the verifier
+ * and reported clean on a page whose third script it had never opened: adding
+ * `window.addEventListener('scroll', …)` to the indicator shipped past it.
+ *
+ * `sources` names where each part came from, so a failure says which script.
+ */
+export function pageScripts(page: string): { sources: string[]; code: string } {
+  const closure = scriptClosure(page);
+  const html = readDist(page);
+  const inline = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/g)]
+    .filter((m) => !/\bsrc=/.test(m[1]!))
+    .map((m) => m[2]!);
+  return {
+    sources: [...closure.files, ...inline.map((_, at) => `${page}#inline-${String(at)}`)],
+    code: [closure.code, ...inline].join('\n'),
+  };
+}
+
+/**
  * Every JavaScript file the build emits, by path, with its source.
  *
  * The §9 guard scanned pages and stylesheets and **not scripts**, which was
