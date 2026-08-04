@@ -1,0 +1,209 @@
+---
+// The box's styles travel with the box, like every other component here.
+import '../styles/search.css';
+
+/**
+ * §9 — the nav row's fourth element: "identity, section links, search,
+ * preferences". On every page, because it is layout chrome and a box a reader
+ * loses the moment they open a post is not a search box.
+ *
+ * **Without JavaScript it ships disabled, with the reason stated**, rather than
+ * being omitted. Three reasons, and the decision is deliberate:
+ *
+ *  - it is the site's own precedent. `/verify` and every post page render their
+ *    control disabled and say in the same breath what it needs and what still
+ *    works without it (`ChainVerifier.astro`, `TxVerifier.astro`);
+ *  - omitting it teaches a reader nothing. A reader with scripts off would not
+ *    learn that this site has search, nor why it is absent, nor where the same
+ *    answers are — `/tx` lists every post and `/address` groups them by tag and
+ *    series, and both work with nothing running;
+ *  - the alternative to omitting it in the markup is injecting it from a
+ *    script, which moves the nav row on every page load of the whole site.
+ *
+ * The explanation is in a `<noscript>` rather than in a paragraph the script
+ * hides, which is the one place this differs from the verifier's pattern: the
+ * verifier's status line has something to say on every run, whereas this one
+ * would only ever flash through the nav row of every page and then vanish.
+ *
+ * The **combobox role is added by the script, not written here** (§ARIA). A
+ * `role="combobox"` on a disabled input that can never expand is a promise to a
+ * screen reader that nothing on the page can keep; what the static markup
+ * claims is what it is, a disabled search field.
+ *
+ * Deliberately not `define:vars`, for the reason `TxVerifier.astro` gives: it
+ * would force the script inline, and an inline script cannot import — which
+ * would mean reimplementing `searchFor` in the template.
+ *
+ * No clock (§14).
+ */
+---
+
+<div class="search" role="search">
+  <label class="sr-only" for="search-q">Search</label>
+  <input
+    id="search-q"
+    class="search-input"
+    type="search"
+    name="q"
+    placeholder="Search"
+    autocomplete="off"
+    spellcheck="false"
+    aria-describedby="search-nojs"
+    disabled
+  />
+
+  {/*
+    Rendered only when nothing is going to enable the input above. `/tx` and
+    `/address` are the two routes that answer the same questions with no script
+    running at all.
+  */}
+  <noscript>
+    <p class="search-nojs" id="search-nojs">
+      Ô tìm kiếm <strong>cần JavaScript</strong>: nó tải <code>/search-index.json</code> rồi tìm ngay
+      trong trình duyệt của bạn, không có máy chủ nào ở giữa. Không bật JavaScript thì{' '}
+      <a href="/tx">danh sách giao dịch</a> vẫn liệt kê đủ mọi bài, và{' '}
+      <a href="/address">danh sách địa chỉ</a> gom chúng theo tag và series.
+    </p>
+  </noscript>
+
+  <div class="search-panel" id="search-panel" hidden>
+    <ul class="search-list" id="search-list" role="listbox" aria-label="Search results"></ul>
+    <p class="search-note" id="search-note" hidden></p>
+    <p class="search-hint" id="search-hint">
+      Tìm theo tiêu đề, tag, series — hoặc dán hash <code>0x…</code>, địa chỉ, hay{' '}
+      <code>#height</code>.
+    </p>
+  </div>
+
+  {/*
+    The live region. Separate from the panel and always present, because a
+    region announces a *change* to its own contents: one that appeared at the
+    same moment as its text would announce nothing at all.
+  */}
+  <span class="sr-only" id="search-live" role="status" aria-live="polite"></span>
+</div>
+
+<script>
+  import { createSearchBox } from '../site/search-box';
+  import type { SearchState } from '../site/search-box';
+  import type { SearchIndex } from '../site/search-index';
+  import type { SearchHit } from '../site/search-query';
+
+  const input = document.getElementById('search-q');
+  const panel = document.getElementById('search-panel');
+  const list = document.getElementById('search-list');
+  const noteLine = document.getElementById('search-note');
+  const live = document.getElementById('search-live');
+
+  if (
+    input instanceof HTMLInputElement &&
+    panel !== null &&
+    list !== null &&
+    noteLine !== null &&
+    live !== null
+  ) {
+    const field = input;
+
+    /**
+     * §8 — the document, fetched once, when a reader first asks for it.
+     *
+     * The path is written out here at its call rather than held in a constant,
+     * for the reason `TxVerifier.astro` gives: a constant is what a minifier
+     * renames, and the §9 guard that reads the built bundle for off-origin
+     * targets would be left with nothing to check.
+     *
+     * No `cache: 'no-store'`, unlike the verifier's fetches. A stale ledger is a
+     * false answer to the question that control exists to ask; a stale search
+     * index costs a reader at worst a post published since they last loaded the
+     * site, and refusing the browser's cache would re-download it on every page.
+     */
+    async function load(): Promise<SearchIndex> {
+      const response = await fetch('/search-index.json');
+      if (!response.ok) throw new Error(`HTTP ${String(response.status)}`);
+      return (await response.json()) as SearchIndex;
+    }
+
+    /**
+     * One result row. Built with `textContent` throughout — every string in it
+     * came out of a document fetched over a network.
+     *
+     * No `<a>` inside: an option in a listbox owns its own accessible name, and
+     * a link nested in one is read out as a second, competing control. The row
+     * is the option, and Enter or a click navigates.
+     */
+    function option(hit: SearchHit, at: number, isActive: boolean): HTMLLIElement {
+      const row = document.createElement('li');
+      row.id = `search-opt-${String(at)}`;
+      row.className = 'search-opt';
+      row.setAttribute('role', 'option');
+      row.setAttribute('aria-selected', String(isActive));
+      row.dataset.at = String(at);
+      row.dataset.kind = hit.kind;
+
+      const label = document.createElement('span');
+      label.className = 'search-label';
+      label.textContent = hit.label;
+
+      const detail = document.createElement('span');
+      detail.className = 'search-detail';
+      detail.textContent = hit.detail;
+
+      row.append(label, detail);
+      return row;
+    }
+
+    function render(state: SearchState): void {
+      // Only when it differs, so Escape can empty the box without the caret
+      // jumping on every keystroke a reader makes.
+      if (field.value !== state.query) field.value = state.query;
+
+      field.setAttribute('aria-expanded', String(state.open));
+      panel!.hidden = !state.open;
+
+      list!.replaceChildren(...state.hits.map((hit, at) => option(hit, at, at === state.active)));
+
+      if (state.active >= 0 && state.open) {
+        field.setAttribute('aria-activedescendant', `search-opt-${String(state.active)}`);
+        list!.children[state.active]?.scrollIntoView({ block: 'nearest' });
+      } else {
+        field.removeAttribute('aria-activedescendant');
+      }
+
+      noteLine!.textContent = state.note ?? '';
+      noteLine!.hidden = state.note === null;
+      if (live!.textContent !== state.status) live!.textContent = state.status;
+    }
+
+    const box = createSearchBox({
+      load,
+      view: { render, go: (href) => window.location.assign(href) },
+    });
+
+    // The combobox is made here, with the behaviour, and not in the markup —
+    // see the note at the top of this file.
+    field.setAttribute('role', 'combobox');
+    field.setAttribute('aria-expanded', 'false');
+    field.setAttribute('aria-controls', 'search-list');
+    field.setAttribute('aria-autocomplete', 'list');
+    field.setAttribute('aria-describedby', 'search-hint');
+    field.disabled = false;
+
+    field.addEventListener('focus', () => box.focus());
+    field.addEventListener('input', () => box.input(field.value));
+    field.addEventListener('blur', () => box.dismiss());
+    field.addEventListener('keydown', (event) => {
+      if (box.key(event.key)) event.preventDefault();
+    });
+
+    // `mousedown` rather than `click` for the guard: the default action of
+    // pressing inside the panel is to move focus out of the input, which would
+    // fire `blur` and close the panel before the click could land on anything.
+    panel.addEventListener('mousedown', (event) => event.preventDefault());
+    list.addEventListener('click', (event) => {
+      const row = (event.target as Element | null)?.closest('.search-opt');
+      if (row instanceof HTMLElement && row.dataset.at !== undefined) {
+        box.choose(Number(row.dataset.at));
+      }
+    });
+  }
+</script>

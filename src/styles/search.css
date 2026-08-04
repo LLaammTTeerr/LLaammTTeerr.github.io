@@ -1,0 +1,111 @@
+/* §9 — the search box in the nav row.
+   Every colour is a token from tokens.css; eleven palettes redefine them and a
+   literal hex here would be wrong under ten. */
+
+/* `margin-left: auto` here and on `.prefs` both: the first `auto` in a flex row
+   absorbs the free space, so the box is pushed to the right of the section
+   links and the preferences sit immediately after it, rather than the two
+   fighting over the same gap. */
+.search {
+  position: relative;
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+}
+
+.search-input {
+  font: inherit;
+  color: var(--txt);
+  background: var(--bg);
+  border: 1px solid var(--line2);
+  border-radius: 3px;
+  padding: 0.36rem 0.6rem;
+  width: 13rem;
+  max-width: 40vw;
+}
+.search-input::placeholder { color: var(--dim); }
+.search-input:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+/* The no-JavaScript state. Dimmed through opacity, so the colour underneath is
+   still a token, and with the default cursor — it reads as "not available"
+   rather than as something to keep clicking. */
+.search-input:disabled { opacity: 0.55; cursor: default; }
+
+/* Only ever rendered inside <noscript>, so it exists exactly when the input
+   above cannot be enabled. Full width of the nav row, since it is prose. */
+.search-nojs {
+  flex-basis: 100%;
+  margin: 0.5rem 0 0;
+  max-width: 42rem;
+  line-height: 1.6;
+  color: var(--dim);
+}
+.search-nojs a { color: var(--acc); text-underline-offset: 3px; }
+.search-nojs code { color: var(--c-hash); }
+
+.search-panel {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 0.4rem);
+  right: 0;
+  width: 24rem;
+  max-width: min(24rem, 90vw);
+  background: var(--surf);
+  border: 1px solid var(--line2);
+  border-radius: 4px;
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--bg) 70%, transparent);
+  overflow: hidden;
+}
+.search-panel[hidden] { display: none; }
+
+.search-list { list-style: none; margin: 0; padding: 0; max-height: 22rem; overflow-y: auto; }
+
+.search-opt {
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.5rem 0.7rem;
+  cursor: pointer;
+  border-bottom: 1px solid var(--line);
+}
+.search-opt:last-child { border-bottom: 0; }
+/* Not colour alone: the active row also carries a left edge, so the difference
+   survives a reader who cannot separate --acc from --line2. */
+.search-opt[aria-selected='true'] {
+  background: var(--bg);
+  box-shadow: inset 3px 0 0 var(--acc);
+}
+
+.search-label {
+  font-family: var(--sans);
+  font-size: 0.86rem;
+  color: var(--txt);
+  overflow-wrap: anywhere;
+}
+.search-detail { font-size: 0.64rem; letter-spacing: 0.05em; color: var(--dim); }
+/* An identifier result answers a paste and is the one row a reader was looking
+   for; it is marked in the same hue the site paints hashes in. */
+.search-opt[data-kind='identifier'] .search-detail { color: var(--c-hash); }
+.search-opt[data-kind='address'] .search-detail { color: var(--c-addr); }
+
+.search-note,
+.search-hint {
+  margin: 0;
+  padding: 0.55rem 0.7rem;
+  line-height: 1.6;
+  color: var(--dim);
+}
+.search-note {
+  color: var(--txt);
+  border-bottom: 1px solid var(--line);
+}
+.search-note[hidden] { display: none; }
+.search-hint { font-size: 0.66rem; border-top: 1px solid var(--line); }
+.search-list:empty + .search-note { border-bottom: 0; }
+.search-hint code { color: var(--c-hash); }
+
+@media (max-width: 34rem) {
+  /* On a narrow screen the nav wraps, and a box pinned to the right of a row
+     of its own reads as detached from everything. */
+  .search { margin-left: 0; flex-basis: 100%; }
+  .search-input { width: 100%; max-width: none; }
+  .search-panel { left: 0; right: auto; width: 100%; max-width: none; }
+}

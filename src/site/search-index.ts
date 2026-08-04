@@ -223,60 +223,16 @@ export async function searchIndexJson(): Promise<string> {
   return `${JSON.stringify(await searchIndex())}\n`;
 }
 
-/** `0x` + 64 hex — a transaction hash, in whatever case it was pasted. */
-const TX_HASH = /^0x[0-9a-f]{64}$/i;
-/** §3.7 — `0x` + 40 hex, an address. */
-const ADDRESS = /^0x[0-9a-f]{40}$/i;
-/** A block height, with the `#` a reader copies off a block card. */
-const HEIGHT = /^#?(\d{1,9})$/;
-
 /**
- * §6 — a pasted identifier, resolved to the page that shows it, or `null`.
+ * §6 — a pasted identifier, resolved to the page that shows it.
  *
- * "Pasting a full `0x…` transaction hash into the search box resolves to its
- * post." Three kinds of identifier resolve, and each is decided by its own
- * shape, so nothing here can guess: a transaction hash, an address, a block
- * height. Anything else — a word, a slug, a partial hash — is `null`, which is
- * the box's cue to search rather than to navigate.
- *
- * **A pure function of the index.** It reads no ledger and touches no
- * filesystem, so the same rule runs at build time in a test and in the reader's
- * browser over the fetched document; the index's contract is therefore
- * executable rather than a description Task 2 has to reimplement.
- *
- * Case-folded, because a hash copied out of a terminal, a diff or another
- * explorer arrives upper-cased as often as not, and the chain writes hex in
- * lower case throughout. Trimmed, because a paste brings whitespace with it.
- *
- * What deliberately does not resolve: a **block hash**. It is 64 hex like a
- * transaction hash, so it would have to be told apart by lookup rather than by
- * shape, and carrying every block's hash to make that lookup possible costs
- * more bytes than the case is worth — a reader who has a block hash is reading
- * a block page, which already links itself. It returns `null`, and the box
- * falls back to searching, rather than claiming the hash is a post's.
+ * Defined in `./search-query` and re-exported here, where its contract belongs
+ * and where the index's own tests read it from. It moved for one reason: this
+ * module imports `chain-data.ts` to build the document, and `chain-data.ts`
+ * reads `chain.lock.json` through `node:fs`. The search box runs the very same
+ * rule in the reader's browser, and a value import from here would have dragged
+ * the ledger reader into the bundle a reader downloads. The rule itself is
+ * unchanged, and the function is still the executable form of what this
+ * document promises rather than a description the box reimplements.
  */
-export function resolveIdentifier(index: SearchIndex, query: string): string | null {
-  const q = query.trim();
-  if (q === '') return null;
-
-  if (TX_HASH.test(q)) {
-    const hash = q.toLowerCase();
-    const post = index.posts.find(
-      (p) => p.hash.toLowerCase() === hash || (p.superseded ?? []).some((h) => h.toLowerCase() === hash),
-    );
-    return post === undefined ? null : `/tx/${post.slug}`;
-  }
-
-  if (ADDRESS.test(q)) {
-    const address = q.toLowerCase();
-    return index.addresses.find((a) => a.address.toLowerCase() === address)?.href ?? null;
-  }
-
-  const height = HEIGHT.exec(q);
-  if (height !== null) {
-    const n = Number(height[1]);
-    return index.blocks.includes(n) ? `/block/${n}` : null;
-  }
-
-  return null;
-}
+export { resolveIdentifier } from './search-query';

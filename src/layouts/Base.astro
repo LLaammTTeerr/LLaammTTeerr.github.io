@@ -3,6 +3,7 @@ import { FEED_TITLE } from '../site/feed';
 import { PREFS_INLINE_SCRIPT } from '../site/prefs-script';
 import { ROUTES } from '../site/routes';
 import Preferences from '../components/Preferences.astro';
+import Search from '../components/Search.astro';
 import '../styles/fonts.css';
 import '../styles/tokens.css';
 import '../styles/base.css';
@@ -52,6 +53,13 @@ const { title, description = 'Blog của lamter, hiển thị như một trình 
           )}</li>
         ))}
       </ul>
+      {/*
+        §9 — "identity, section links, search, preferences", in that order. The
+        box is layout chrome for the same reason the section links are: a reader
+        who has just recomputed a hash on /verify has it in their clipboard, and
+        losing the one place to paste it by opening a post would make it useless.
+      */}
+      <Search />
       <Preferences />
     </nav>
     <main>
