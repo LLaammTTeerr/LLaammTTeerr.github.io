@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { cssPerPage, distPages, distScripts, readDist, readDistCss, withoutAnchorHrefs, withoutNamespaceUris } from './dist';
+import { OFF_ORIGIN, cssPerPage, distPages, distScripts, readDist, readDistCss, withoutAnchorHrefs, withoutNamespaceUris } from './dist';
 import { parseRules, selectorParts, declaredValue, stripComments } from './css';
 import { METERS, DEFAULTS } from '../../src/site/themes';
 import { getBlocks, splitHashWork } from '../../src/site/chain-data';
@@ -26,7 +26,23 @@ describe('no external requests', () => {
     expect(distPages()).toContain('index.html');
   });
 
-  it('no built page references an absolute http(s) url', () => {
+  it('the guard pattern catches a protocol-relative url, not only an absolute one', () => {
+    // Anti-vacuity for the widening itself, and it is the assertion that would
+    // have caught the hole: `//example.com/beacon.js` is a real cross-origin
+    // request — the browser supplies the page's own scheme — and the previous
+    // `/https?:\/\//` walked straight past it. Pinned here rather than only
+    // implied by the loops below, because a loop over honest output cannot
+    // tell a strong pattern from a weak one.
+    expect(OFF_ORIGIN.test('//example.com/beacon.js')).toBe(true);
+    expect(OFF_ORIGIN.test('https://example.com/x')).toBe(true);
+    expect(OFF_ORIGIN.test('http://example.com/x')).toBe(true);
+    // …and does not fire on the two things that legitimately carry `//`: a
+    // same-origin path, and the base64 font payloads every stylesheet ships.
+    expect(OFF_ORIGIN.test('/chain.json')).toBe(false);
+    expect(OFF_ORIGIN.test('url(data:font/woff2;base64,A//A/evkhSpkOMDA9VTmwAV)')).toBe(false);
+  });
+
+  it('no built page references an absolute or protocol-relative url', () => {
     // `withoutAnchorHrefs` first: `/about` links real placeholder urls in
     // `<a href>` (src/site/profile.ts), which a reader may choose to follow
     // but which no page *load* fetches — see its own doc comment for why
@@ -35,7 +51,7 @@ describe('no external requests', () => {
       expect(
         withoutNamespaceUris(withoutAnchorHrefs(readDist(page))),
         `${page} makes a third-party request`,
-      ).not.toMatch(/https?:\/\//);
+      ).not.toMatch(OFF_ORIGIN);
     }
   });
 
@@ -46,19 +62,26 @@ describe('no external requests', () => {
     expect(distScripts().size).toBeGreaterThan(0);
   });
 
-  it('no script the build emits references an absolute http(s) url', () => {
+  it('no script the build emits references an absolute or protocol-relative url', () => {
     // The hole this closes was measured, not imagined: the verifier island's
     // `fetch` was pointed at `https://example.com` and every test stayed green,
     // because nothing read the bundle. A script is the easiest place to reach a
     // third party, not the hardest — it can do it conditionally, after load.
+    //
+    // And measured a second time, after this guard existed: a reviewer added
+    // `void fetch('//example.com/beacon.js')` *beside* the honest fetch — a
+    // working beacon on every `/verify` load — and it shipped into `dist` with
+    // all 133 guard tests green. Replacing the honest fetch trips an unrelated
+    // assertion; adding one tripped nothing. A guard that only fires when the
+    // attacker also removes the honest behaviour is not a guard.
     for (const [file, source] of distScripts()) {
-      expect(source, `${file} makes a third-party request`).not.toMatch(/https?:\/\//);
+      expect(source, `${file} makes a third-party request`).not.toMatch(OFF_ORIGIN);
     }
   });
 
-  it('no stylesheet any built page loads references an absolute http(s) url', () => {
+  it('no stylesheet any built page loads references an absolute or protocol-relative url', () => {
     for (const [page, css] of cssPerPage()) {
-      expect(css, `css loaded by ${page} makes a third-party request`).not.toMatch(/https?:\/\//);
+      expect(css, `css loaded by ${page} makes a third-party request`).not.toMatch(OFF_ORIGIN);
     }
   });
 

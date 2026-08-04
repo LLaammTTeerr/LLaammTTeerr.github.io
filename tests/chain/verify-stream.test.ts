@@ -86,7 +86,10 @@ describe('verifyChainStream', () => {
     await stream.next();
     expect(read).toEqual([0, 1]);
     await stream.return(undefined as never);
-    expect(read, 'abandoning the stream still verified the rest of the chain').toEqual([0, 1]);
+    // The message states what a *failure* here would mean, because that is the
+    // sentence someone reads at 2am: a third index in `read` says the abandoned
+    // stream went on hashing block #2 anyway.
+    expect(read, 'abandoning the stream went on verifying the rest of the chain').toEqual([0, 1]);
   });
 
   it('catches a forged title, which a merkle-only check would not', async () => {

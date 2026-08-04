@@ -230,6 +230,57 @@ export function cssPerPage(): Map<string, string> {
 }
 
 /**
+ * §9 — a request that leaves this origin, however it is spelled.
+ *
+ * One definition, shared by every §9 guard in the suite (`dist-output`,
+ * `verify-page`, `tx-verify`), because these guards were four copies of
+ * `/https?:\/\//` and a reviewer walked a working third-party beacon past all
+ * four at once. A pattern that lives in one place gets widened once.
+ *
+ * Two spellings, and the second is the finding:
+ *
+ *  - `https://host/…` and `http://host/…` — the original check, unchanged, so
+ *    this cannot be weaker than what it replaces;
+ *  - `//host.tld/…` — **protocol-relative**. The browser supplies the page's
+ *    own scheme, so this is a genuine cross-origin request, and it needs no
+ *    trick at all to write. `fetch('//example.com/beacon.js')` added *beside*
+ *    the honest fetch shipped into the bundle with all 133 guard tests green;
+ *    it matched neither `https?://` nor the "same-origin" predicate, because
+ *    `'//example.com/…'.startsWith('/')` is `true`.
+ *
+ * The host must contain a dot, and that is a deliberate limit rather than an
+ * oversight. Every emitted stylesheet carries base64 font payloads, whose
+ * alphabet includes `/` and so contains `//xyz` by the hundred; the base64
+ * alphabet does **not** include `.`, so requiring a dotted host separates a
+ * real host from font bytes without excusing anything a browser would resolve
+ * off-origin. The cost is that a dotless host — `//localhost/x`, `//intranet/x`
+ * — is not matched here; such a host is unreachable from a reader's machine on
+ * the public web, and pattern-matching it would turn every font into a failure.
+ *
+ * What a substring scan cannot reach, stated so nobody mistakes this for a
+ * proof: a host assembled at runtime from values the scanner never sees as one
+ * string — `atob('...')`, an array of char codes joined in a loop, a host read
+ * out of fetched JSON. esbuild constant-folds the easy versions of this back
+ * into a literal (a split string, a template with a constant tag, and
+ * `String.fromCharCode(...)` on constants were each measured being folded and
+ * caught), but a genuinely computed host is out of reach of any scanner and
+ * would need a runtime check — Chromium request interception, which is what
+ * this branch's review used and what a scan stands in for.
+ */
+export const OFF_ORIGIN = /https?:\/\/|\/\/[a-z0-9-]+(?:\.[a-z0-9-]+)+/i;
+
+/**
+ * Whether a fetch target stays on this origin.
+ *
+ * `startsWith('/')` alone was the whole predicate, and it accepts
+ * `//example.com/chain.json` — the same hole as `OFF_ORIGIN`, in the shape a
+ * loop over fetch literals sees it.
+ */
+export function sameOriginPath(target: string): boolean {
+  return target.startsWith('/') && !target.startsWith('//');
+}
+
+/**
  * Strips XML namespace identifiers, which look like URLs and are not requests.
  *
  * KaTeX emits `xmlns="http://www.w3.org/1998/Math/MathML"` on every formula
