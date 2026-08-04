@@ -299,14 +299,14 @@
       "height": 5,
       "period": "2026-07",
       "prevHash": "0x000006343ac6c6bec2f23f6624a8584dd117ee030a29ffa59378399647b9d53c",
-      "merkleRoot": "0x9e9ca150539d592377e793e82aa8517adf2103c61b2ef697b4ec77c3b5e6e669",
-      "timestamp": "2026-07-26T00:00:00Z",
-      "txCount": 3,
-      "gasUsed": 255,
-      "value": 13.5,
+      "merkleRoot": "0x642fa55a9e1d1a016de860ff50fc9d862456752986f5694b377524086b9363a9",
+      "timestamp": "2026-07-30T00:00:00Z",
+      "txCount": 4,
+      "gasUsed": 675,
+      "value": 18.5,
       "difficulty": 5,
-      "nonce": 1224043,
-      "hash": "0x00000121fe985abc12a8232432acd4da28f35959008da332482b83f8be553224",
+      "nonce": 726083,
+      "hash": "0x00000b0e40f6c70df4b897f90dad891ab6824ade4b63f7d58d858310550660cc",
       "transactions": [
         {
           "hash": "0x062c4f5a10ffafc118d8ffe8c0b069a411f9f1732dd8165c1d8eb602c9f78fbf",
@@ -373,6 +373,29 @@
           "assets": [],
           "gasUsed": 76,
           "value": 0,
+          "amends": null
+        },
+        {
+          "hash": "0x54ce20515ff67407114ea0985c6b0889e36b214a85325fb7cd8e23111d70760a",
+          "type": "post",
+          "slug": "2026-07-30-tong-tien-to",
+          "title": "Tổng tiền tố, và khi nào thì cần hơn thế",
+          "date": "2026-07-30",
+          "tags": [
+            "cp",
+            "algorithm"
+          ],
+          "series": "ghi-chu-thuat-toan",
+          "from": "0x017b046a17056ce94749f1d0cf26dfa3e33abc7b",
+          "to": [
+            "0x5e6abdbce628ff0853ca5d2a987785fd3243831b",
+            "0x936973fe3ac981cde4c6c026894ea6cf985ecc45",
+            "0x97f28539f3dcb91809767ac8404ab5b502689a36"
+          ],
+          "contentHash": "0xc572f11cc878e0e71969fe519314acebdc305a5fd33532468b5e021666650be0",
+          "assets": [],
+          "gasUsed": 420,
+          "value": 5,
           "amends": null
         }
       ]
