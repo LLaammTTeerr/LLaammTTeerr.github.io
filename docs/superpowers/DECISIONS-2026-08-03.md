@@ -449,3 +449,44 @@ broken page. A push that appears to do nothing means: check Actions.
    `checkout@v4`, `setup-node@v4`, `upload-pages-artifact@v3`. The runner currently forces them
    onto Node 24 and warns. Not urgent and not broken. Bump the majors on the next CI change, and
    verify rather than assuming the newer majors are drop-in.
+
+---
+
+## D23 — the verifier, and the Critical it took two rounds to close
+
+`/verify` recomputes the whole chain in the reader's browser; each post page verifies itself from
+raw text. 958 tests. Merged to main; `git reset --hard af8b134` to undo.
+
+**The Critical, found by review and reproduced by me.** `gasUsed` is per-transaction data that is
+**not in the canonical form**, so no transaction hash covers it — only the block-level sum is
+checked. Moving gas between two transactions in one block left every recorded hash valid:
+
+```
+before  mo-algorithm=104   sqrt-decomposition=108
+after   mo-algorithm=604   sqrt-decomposition=-392    (block sum unchanged)
+verifyChain -> ok: true
+```
+
+A **negative word count of −392** verified clean while the page showed `604 từ` for a 104-word
+body and stamped VERIFIED. That is the worst thing this feature can do: manufacture confidence in
+the exact claim a reader came to test.
+
+**Fixed at two layers, deliberately not one.** A structural check rejects a negative or
+non-integer count chain-wide. Re-derivation catches the plausible ±5 version, but only where the
+data exists to do it: the per-post control fetches `body.txt`, so it re-derives the word count
+with the engine's own function and compares it against both the ledger and the number the page
+prints.
+
+**And the third part, which matters as much as the fix:** `/verify` has no bodies, so it cannot
+re-derive per-transaction gas — it now *says* it checks only the block-level sum and points at the
+post control for the stronger check. The same discipline that made pending posts report `Partial`
+rather than `Verified`.
+
+**Also closed:** the §9 script guard I added earlier this session missed protocol-relative URLs
+(`//example.com/beacon.js` shipped into the bundle with all 133 guard tests green), and the
+`txCount === transactions.length` clause — the only defence against the Bitcoin duplicate-
+transaction forgery, CVE-2012-2459 shape — had no test at all.
+
+**Accepted, not fixed:** `period` and asset `file`/`mime`/`bytes` are outside every canonical
+form. They cannot be verified without changing the hash format, and `/verify` now discloses that
+by name rather than passing over it.
