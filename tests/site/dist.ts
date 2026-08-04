@@ -282,3 +282,29 @@ export function rowFor(html: string, slug: string): string | null {
   }
   return null;
 }
+
+/**
+ * Every JavaScript file the build emits, by path, with its source.
+ *
+ * The §9 guard scanned pages and stylesheets and **not scripts**, which was
+ * harmless only while the site shipped no JavaScript. The verifier island
+ * changed that, and the hole was measured: pointing its `fetch` at
+ * `https://example.com` left every test green, because nothing read the
+ * bundle. A script is the *easiest* place to reach a third party, not the
+ * hardest — it is the one that can do it conditionally, after load.
+ */
+export function distScripts(distRoot: string = DIST): Map<string, string> {
+  const out = new Map<string, string>();
+  const walk = (dir: string): void => {
+    if (!existsSync(dir)) return;
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) walk(path);
+      else if (entry.name.endsWith('.js') || entry.name.endsWith('.mjs')) {
+        out.set(relative(distRoot, path).split(sep).join('/'), readFileSync(path, 'utf8'));
+      }
+    }
+  };
+  walk(distRoot);
+  return out;
+}

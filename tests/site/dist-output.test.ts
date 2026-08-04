@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { cssPerPage, distPages, readDist, readDistCss, withoutAnchorHrefs, withoutNamespaceUris } from './dist';
+import { cssPerPage, distPages, distScripts, readDist, readDistCss, withoutAnchorHrefs, withoutNamespaceUris } from './dist';
 import { parseRules, selectorParts, declaredValue, stripComments } from './css';
 import { METERS, DEFAULTS } from '../../src/site/themes';
 import { getBlocks, splitHashWork } from '../../src/site/chain-data';
@@ -36,6 +36,23 @@ describe('no external requests', () => {
         withoutNamespaceUris(withoutAnchorHrefs(readDist(page))),
         `${page} makes a third-party request`,
       ).not.toMatch(/https?:\/\//);
+    }
+  });
+
+  it('finds the scripts the build emits, so the next assertion is not vacuous', () => {
+    // Anti-vacuity, and it earns its place: this guard was blind to scripts
+    // entirely until the site shipped one, and a loop over an empty map would
+    // go on passing the moment a bundle stopped being emitted.
+    expect(distScripts().size).toBeGreaterThan(0);
+  });
+
+  it('no script the build emits references an absolute http(s) url', () => {
+    // The hole this closes was measured, not imagined: the verifier island's
+    // `fetch` was pointed at `https://example.com` and every test stayed green,
+    // because nothing read the bundle. A script is the easiest place to reach a
+    // third party, not the hardest — it can do it conditionally, after load.
+    for (const [file, source] of distScripts()) {
+      expect(source, `${file} makes a third-party request`).not.toMatch(/https?:\/\//);
     }
   });
 

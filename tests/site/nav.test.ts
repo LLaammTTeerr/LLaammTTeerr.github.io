@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { DIST, distPages, internalHrefs, internalSrcs, readDist, resolvesIn } from './dist';
+import { join } from 'node:path';
+import { sandboxRepo, buildSandbox } from './sandbox';
 import { ROUTES } from '../../src/site/routes';
 import { getAddresses } from '../../src/site/addresses';
 
@@ -49,7 +51,14 @@ describe('nav entries for routes that do not exist yet', () => {
   });
 
   for (const page of PAGES) {
-    it(`renders unbuilt nav entries as plain text, not links, on ${page}`, () => {
+    // Every route in ROUTES is now built, so `NOT_BUILT` is empty and this
+    // body iterates nothing. Left in place rather than deleted, because the
+    // mechanism it guards is not dead — the next route to be planned lands as
+    // `built: false` and needs exactly this. `it.skipIf` states that in the
+    // test report instead of showing a green tick for nothing checked; the
+    // assertion below it proves the flag still works, from a fixture, so the
+    // rendering path is not untested in the meantime.
+    it.skipIf(NOT_BUILT.length === 0)(`renders unbuilt nav entries as plain text, not links, on ${page}`, () => {
       const nav = navOf(readDist(page));
       for (const entry of NOT_BUILT) {
         expect(
@@ -210,4 +219,35 @@ describe('link integrity across the whole page', () => {
       }
     }
   });
+});
+
+describe('the built flag itself', () => {
+  /**
+   * The branch above has nothing to iterate now that every route is built, so
+   * this covers the mechanism directly: flip a real route to `built: false`,
+   * rebuild, and the nav must name it without linking it.
+   *
+   * Worth the cost of a build. The site has shipped a dead nav link twice —
+   * once when `/tx` had no index page and once when `/address` gained a nav
+   * entry before its index existed — and both times the reader met a 404 that
+   * looked like the site was broken.
+   */
+  it('renders a route as plain text when it is marked unbuilt', () => {
+    const dir = sandboxRepo();
+    const routes = join(dir, 'src/site/routes.ts');
+    const src = readFileSync(routes, 'utf8');
+    const flipped = src.replace(
+      "{ id: 'assets', href: '/assets', label: 'Assets', built: true }",
+      "{ id: 'assets', href: '/assets', label: 'Assets', built: false }",
+    );
+    expect(flipped, 'the Assets entry moved — update this fixture').not.toBe(src);
+    writeFileSync(routes, flipped);
+
+    const built = buildSandbox(dir);
+    expect(built.status, built.output).toBe(0);
+
+    const nav = navOf(readFileSync(join(dir, 'dist/index.html'), 'utf8'));
+    expect(nav, 'the unbuilt entry lost its label').toContain('Assets');
+    expect(nav, 'the unbuilt entry is still a link').not.toContain('href="/assets"');
+  }, 120_000);
 });
