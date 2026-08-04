@@ -1,4 +1,4 @@
-import { canonicalBlockHeader, canonicalRecordedTx } from './canonical';
+import { canonicalBlockHeader, canonicalRecordedTx, wordCount } from './canonical';
 import { sha256Hex } from './hash';
 import { merkleRootHex } from './merkle';
 import type { Block, Chain, Hex, Transaction } from './types';
@@ -68,11 +68,28 @@ export function transactionStructuralProblem(tx: unknown, index: number): string
   for (const field of ['slug', 'title', 'series', 'amends']) {
     if (!isStringOrNull(tx[field])) return `${at} field "${field}" is not a string or null`;
   }
-  for (const field of ['gasUsed', 'value']) {
-    if (!isFiniteNumber(tx[field])) return `${at} field "${field}" is not a finite number`;
+  // §3.8 — `gasUsed` is the word count of a body and `value` is declared hours
+  // of research. Neither can run backwards, and a word count cannot be
+  // fractional.
+  //
+  // This is the cheap half of the defence, and it is worth being exact about
+  // what it does and does not do. A transaction's `gasUsed` is in **no**
+  // canonical form (§3.2), so no transaction hash covers it; only the
+  // block-level sum is checked (`transactionsOk`). That leaves a forgery that
+  // moves word count between two transactions of one block invisible to every
+  // recorded hash — and until this check existed, `gasUsed: -392` displayed as
+  // a word count and verified clean. A balanced pair of *plausible* positive
+  // numbers still passes here; what this removes is the absurd half, chain-wide
+  // and without a body to hand. The rest is closed in `verifyTransaction`,
+  // which has the body and re-derives the count from it.
+  if (!isFiniteNumber(tx.gasUsed) || !Number.isInteger(tx.gasUsed) || (tx.gasUsed as number) < 0) {
+    return `${at} field "gasUsed" is not a non-negative integer`;
   }
-  if (tx.research != null && !isFiniteNumber(tx.research)) {
-    return `${at} field "research" is not a finite number or null`;
+  if (!isFiniteNumber(tx.value) || (tx.value as number) < 0) {
+    return `${at} field "value" is not a non-negative finite number`;
+  }
+  if (tx.research != null && (!isFiniteNumber(tx.research) || (tx.research as number) < 0)) {
+    return `${at} field "research" is not a non-negative finite number or null`;
   }
   if (!Array.isArray(tx.tags) || tx.tags.some((t) => typeof t !== 'string')) {
     return `${at} field "tags" is not an array of strings`;
@@ -106,6 +123,40 @@ export function blockStructuralProblem(block: unknown): string | null {
   for (const [index, tx] of block.transactions.entries()) {
     const problem = transactionStructuralProblem(tx, index);
     if (problem !== null) return problem;
+  }
+  return null;
+}
+
+/**
+ * §7 — the chain **document's** own shape, above any individual block.
+ *
+ * Two things live here and nothing else. The first is that it is a chain at
+ * all. The second is the difficulty floor, and that one is a finding: §7 checks
+ * proof of work "against each block's own committed `difficulty`, with the
+ * chain-level `difficulty` as a floor", and the floor used to be read as
+ * `isFiniteNumber(chain.difficulty) ? chain.difficulty : 0` — so a ledger with
+ * the field **deleted** verified clean, having silently swapped the floor for
+ * no floor. A missing floor is not a floor of zero; it is a document that
+ * cannot say what it is claiming, and it is now said out loud.
+ *
+ * What this does **not** fix, and `/verify` says so in its own words: a floor
+ * of `0`, spelled out, is spec-faithful and still verifies. The floor lives in
+ * the very document under test, so it constrains an attacker who is already
+ * editing that document not at all — the anchor for that is `chain.lock.json`
+ * in the repository, which is what the page points a reader at.
+ */
+export function chainStructuralProblem(chain: unknown): string | null {
+  if (!isRecord(chain) || !Array.isArray(chain.blocks)) {
+    return 'chain is not an object with a "blocks" array';
+  }
+  const difficulty = chain.difficulty;
+  if (
+    !isFiniteNumber(difficulty) ||
+    !Number.isInteger(difficulty) ||
+    (difficulty as number) < 0 ||
+    (difficulty as number) > MAX_DIFFICULTY
+  ) {
+    return `chain field "difficulty" is not an integer in 0..${MAX_DIFFICULTY} — the chain declares no floor to check proof of work against`;
   }
   return null;
 }
@@ -301,6 +352,15 @@ export interface ChainVerification {
    * premise is legible verification.
    */
   registry?: string;
+  /**
+   * Set only when the chain **document** is malformed above the block level —
+   * today, when it declares no usable difficulty floor. Separate from
+   * `registry` because the two are different accusations and the CLI prints
+   * them under different headings; a floor problem reported as "asset
+   * registry: …" is the confidently-wrong diagnosis this branch already fixed
+   * once, on `/verify`.
+   */
+  chain?: string;
 }
 
 /**
@@ -318,8 +378,11 @@ export interface ChainVerification {
  * of them was edited, and the whole point of §7 is that the build and the
  * reader's tab prove the same thing.
  *
- * The **return value** is the asset registry's problem, or null — chain-level
- * and not per-block, so it cannot be yielded as one. `for await` discards it,
+ * The **return value** is the chain-level problem, or null — chain-level and
+ * not per-block, so it cannot be yielded as one. Three kinds reach it: the
+ * document is not a chain, it declares no difficulty floor
+ * (`chainStructuralProblem`), or its asset registry disagrees with its
+ * transactions (`registryProblem`). `for await` discards it,
  * which is exactly right for a caller that only wants blocks; a caller that
  * wants the whole verdict (`verifyChain`, and the `/verify` island) drives
  * `.next()` and reads the final `value`. Without it the browser check would be
@@ -331,10 +394,9 @@ export interface ChainVerification {
  * verdict, never an exception.
  */
 export async function* verifyChainStream(chain: Chain): AsyncGenerator<BlockVerification, string | null> {
-  if (!isRecord(chain) || !Array.isArray(chain.blocks)) {
-    return 'chain is not an object with a "blocks" array';
-  }
-  const difficulty = isFiniteNumber(chain.difficulty) ? chain.difficulty : 0;
+  const structural = chainStructuralProblem(chain);
+  if (structural !== null) return structural;
+  const difficulty = chain.difficulty;
 
   let prev: Block | null = null;
   for (const block of chain.blocks) {
@@ -365,6 +427,19 @@ export interface TxVerification {
   /** That record's own hash recomputes from its fields, including `contentHash`. */
   txOk: boolean;
   /**
+   * §3.8 — the gas figure the page displays is the word count of the body just
+   * hashed, and the ledger record agrees with the rule for its own type.
+   *
+   * The one field on a post page that no hash covers. `gasUsed` is in neither
+   * canonical form (§3.2, §3.9), so `txOk` says nothing about it, and
+   * `verifyBlock` constrains only the block's **sum** — which is preserved
+   * exactly by moving word count from one transaction to its sibling. That
+   * forgery displayed `604 từ` over a 104-word body and passed every other
+   * check here. It is caught only because this check has the body in hand and
+   * §3.8 defines the number as a function of it.
+   */
+  gasOk: boolean;
+  /**
    * The block's Merkle root rebuilds from its transaction hashes, this one
    * among them.
    *
@@ -388,6 +463,7 @@ function unverifiable(reason: string): TxVerification {
     recordOk: false,
     bodyOk: false,
     txOk: false,
+    gasOk: false,
     merkleOk: null,
     blockOk: null,
     ok: false,
@@ -416,8 +492,22 @@ function unverifiable(reason: string): TxVerification {
  *  3. `txOk`     — that record's hash recomputes from its own fields, the
  *     `contentHash` among them. Without this a forged title passes everything
  *     else, which is the same reason `transactionsOk` exists;
- *  4. `merkleOk` / `blockOk` — the block's Merkle root rebuilds from its
+ *  4. `gasOk`    — the word count the page prints is the word count of the
+ *     body just hashed (§3.8). The one displayed figure no hash covers, and
+ *     the only place on the site where it can be re-derived rather than
+ *     believed: `/verify` has no bodies and so checks only the block sum,
+ *     which two transactions can balance between them;
+ *  5. `merkleOk` / `blockOk` — the block's Merkle root rebuilds from its
  *     transaction hashes, and its header rehashes to the hash it was mined to.
+ *
+ * `claimedGas` is the figure the page displays, and it is a **parameter for
+ * exactly the reason `claimedHash` is**: it is the page's claim, and a claim
+ * has to enter the verifier before the verifier can contradict it. Re-deriving
+ * the count and comparing it only with the ledger would catch a forged ledger
+ * and obey a forged page. `null` says the page printed no figure at all (an em
+ * dash), which is what it shows when the build could not re-derive one — and a
+ * page that declines to claim a number cannot be caught claiming a false one,
+ * so the ledger half is checked and this half has nothing to compare.
  *
  * `pendingTxs` is the open block's recorded transactions, or `null`. Taken as a
  * bare array and **not** as a `PendingLock`: that type lives in `pending.ts`,
@@ -428,10 +518,17 @@ function unverifiable(reason: string): TxVerification {
  * import walk. It caught this sentence's first draft.
  *
  * What this does NOT prove, and the caller must not imply: that the block sits
- * on the chain the rest of the ledger describes. `prevHash` links, the chain's
- * difficulty floor and the asset registry are `verifyChain`'s job — `/verify`
- * runs it over every block. This is one transaction, checked to the depth one
- * transaction can be checked.
+ * on the chain the rest of the ledger describes. The chain's difficulty floor
+ * and the asset registry are `verifyChain`'s job — `/verify` runs it over every
+ * block. This is one transaction, checked to the depth one transaction can be
+ * checked.
+ *
+ * Note which side of that line `prevHash` falls on, because an earlier draft of
+ * this comment put it on the wrong one: `prevHash` is *in the mined header*, so
+ * forging it changes the block hash and `blockOk` catches it here. What is not
+ * checked is whether the parent it names exists and is itself valid — the
+ * *linkage*, which needs the whole ledger. Better to state the boundary exactly
+ * than to undersell a check a reader may be relying on.
  *
  * Total over untrusted input, like everything else here: every byte arrives
  * over a network, and a mangled document must produce a verdict, never a throw.
@@ -442,6 +539,7 @@ export async function verifyTransaction(
   claimedHash: Hex,
   chain: Chain,
   pendingTxs: readonly Transaction[] | null,
+  claimedGas: number | null,
 ): Promise<TxVerification> {
   if (!isRecord(chain) || !Array.isArray(chain.blocks)) {
     return unverifiable('chain is not an object with a "blocks" array');
@@ -515,6 +613,24 @@ export async function verifyTransaction(
   const expected = await expectedTxHash(governing);
   const txOk = expected !== null && expected === governing.hash;
 
+  // §3.8 — gas is the word count of the normalized body, and `body` is that
+  // body: `bodyOk` above has just held it to the committed `contentHash`, so
+  // the count derived here is the chain's own number or `bodyOk` is false.
+  // `wordCount` is imported from `canonical.ts` — the same function
+  // `toTransaction` charged the gas with — rather than re-spelled here, because
+  // a second word-count rule is a second answer the day one of them is edited.
+  //
+  // Which recorded number that count must equal depends on the record's type,
+  // and both halves are checked:
+  //   - a **post** carries its own count in `gasUsed` (§3.8);
+  //   - an **amendment** carries the accounting zero (§3.9), so block
+  //     aggregation cannot re-charge words already counted in the block that
+  //     sealed the original. Its real count is what the page re-derives, which
+  //     is why the page's own figure is the other half of this check.
+  const derivedGas = wordCount(body);
+  const ledgerGasOk = governing.type === 'post' ? governing.gasUsed === derivedGas : governing.gasUsed === 0;
+  const gasOk = ledgerGasOk && (claimedGas === null || claimedGas === derivedGas);
+
   let merkleOk: boolean | null = null;
   let blockOk: boolean | null = null;
   if (block !== null) {
@@ -539,9 +655,10 @@ export async function verifyTransaction(
     recordOk,
     bodyOk,
     txOk,
+    gasOk,
     merkleOk,
     blockOk,
-    ok: recordOk && bodyOk && txOk && merkleOk !== false && blockOk !== false,
+    ok: recordOk && bodyOk && txOk && gasOk && merkleOk !== false && blockOk !== false,
   };
 }
 
@@ -552,6 +669,14 @@ export async function verifyChain(chain: Chain): Promise<ChainVerification> {
   if (!isRecord(chain) || !Array.isArray(chain.blocks)) {
     return { ok: false, blocks: [] };
   }
+  // The remaining document-level problem — no usable difficulty floor — is
+  // named under its own key rather than under `registry`. The stream reports
+  // both through one channel because a generator has one return value; the
+  // batch caller can tell them apart, and `chainStructuralProblem` is a pure
+  // function of the same document, so asking it directly cannot disagree with
+  // the stream's answer.
+  const structural = chainStructuralProblem(chain);
+  if (structural !== null) return { ok: false, blocks: [], chain: structural };
 
   const blocks: BlockVerification[] = [];
   const stream = verifyChainStream(chain);

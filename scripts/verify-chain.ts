@@ -71,6 +71,12 @@ if (!result.ok) {
   if (result.registry !== undefined) {
     console.error(`  registry    ${result.registry}`);
   }
+  // Same reason as the registry line, one level up: a document-level fault has
+  // no failing block to print either, and it must not be reported under the
+  // registry's heading — the two are different accusations.
+  if (result.chain !== undefined) {
+    console.error(`  chain       ${result.chain}`);
+  }
   for (const b of result.blocks.filter((b) => !b.ok)) {
     console.error(
       `  block #${b.height}  hash:${b.hashOk} merkle:${b.merkleOk} link:${b.linkOk} pow:${b.powOk} tx:${b.txOk}` +

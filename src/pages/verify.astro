@@ -42,9 +42,9 @@ import '../styles/verify.css';
       trên máy bạn. Không có máy chủ nào trả lời hộ, và không có bên thứ ba nào được gọi.
     </p>
     <p>
-      Nói cách khác: bạn không cần tin chữ <em>đã kiểm</em> in ở bất cứ đâu trên site này. Nếu một con
-      số, một tiêu đề hay một dòng nội dung từng bị sửa sau khi khối được niêm phong, phép tính dưới đây
-      sẽ lệch — và trang sẽ chỉ đúng khối, đúng phép kiểm đã hỏng.
+      Nói cách khác: bạn không cần tin chữ <em>đã kiểm</em> in ở bất cứ đâu trên site này. Nếu một tiêu
+      đề, một ngày, một tag hay một dòng nội dung từng bị sửa sau khi khối được niêm phong, phép tính
+      dưới đây sẽ lệch — và trang sẽ chỉ đúng khối, đúng phép kiểm đã hỏng.
     </p>
   </div>
 
@@ -86,5 +86,43 @@ import '../styles/verify.css';
       hash nào cả — chỉ nội dung tệp là có. Phép kiểm ở đây xác nhận sổ tài sản khớp với các giao dịch,
       chứ không xác nhận được ba trường đó.
     </p>
+    {/*
+      §14 asks that every displayed field be committed or re-derived. The
+      honest response to the ones that are neither is to name them here, in the
+      same paragraph as the asset limits, rather than to leave a reader with a
+      green stamp and a wider impression of it than the computation supports.
+      Each line below was proved forgeable against this verifier.
+    */}
+    <p>
+      Và những gì trang này <strong>không</strong> chứng minh được, cũng nói thẳng — vì mỗi thứ dưới
+      đây đều đã được thử sửa và vẫn qua sạch:
+    </p>
+    <ul class="vfy-limits">
+      <li>
+        <strong>gasUsed và value của từng giao dịch.</strong> Dạng chuẩn của giao dịch không chứa hai
+        trường này, nên không hash nào bảo chứng cho chúng; khối chỉ cam kết <em>tổng</em>. Chuyển 500
+        từ từ giao dịch này sang giao dịch khác trong cùng một khối thì tổng không đổi và mọi hash vẫn
+        đúng. Ở đây chỉ kiểm được tổng ấy. Con số của một bài cụ thể chỉ kiểm được ở nơi có thân bài để
+        đếm lại — nút <em>Verify this transaction</em> trên chính trang bài — và đó là một phép kiểm
+        mạnh hơn phép kiểm này, chứ không phải cùng một phép kiểm ở quy mô nhỏ hơn.
+      </li>
+      <li>
+        <strong>Độ khó sàn của cả chuỗi.</strong> Nó đọc từ chính <code>chain.json</code> đang bị kiểm,
+        nên với người đã sửa được tài liệu ấy thì nó không ràng buộc gì. Sổ cái khai thiếu hẳn trường
+        này sẽ bị báo hỏng; khai thẳng <code>0</code> thì vẫn qua. Neo thật là
+        <code>chain.lock.json</code> trong kho mã.
+      </li>
+      <li>
+        <strong>slug, chữ hoa/thường và thứ tự tag, và trường <code>to</code>.</strong> Dạng chuẩn hạ
+        tag về chữ thường rồi sắp xếp, nên đổi kiểu chữ hay thứ tự vẫn ra đúng hash cũ; slug và
+        <code>to</code> không nằm trong dạng chuẩn nào cả. <em>Nội dung</em> tag thì có được bảo chứng,
+        và <code>to</code> không được trang nào đọc — địa chỉ trên site này suy ra từ tag, không bao giờ
+        từ <code>to</code>.
+      </li>
+      <li>
+        <strong>Khối mới nhất bị cắt bỏ.</strong> Một chuỗi ngắn hơn vẫn là một chuỗi hợp lệ. Không có
+        mốc neo bên ngoài nào để phát hiện, ngoài chính <code>chain.lock.json</code> trong kho mã.
+      </li>
+    </ul>
   </div>
 </Base>

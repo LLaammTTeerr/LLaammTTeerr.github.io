@@ -33,6 +33,9 @@ function failureDetail(result: ChainVerification): string {
   const bad = result.blocks.filter((b) => !b.ok).map((b) => `#${b.height}`);
   if (bad.length > 0) parts.push(`block ${bad.join(', ')}`);
   if (result.registry !== undefined) parts.push(`asset registry: ${result.registry}`);
+  // A document-level fault leaves the block list empty too, for the same
+  // reason and with the same consequence if it goes unnamed.
+  if (result.chain !== undefined) parts.push(result.chain);
   return parts.length > 0 ? parts.join('; ') : 'an unreported fault';
 }
 

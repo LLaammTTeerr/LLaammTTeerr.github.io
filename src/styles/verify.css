@@ -14,6 +14,15 @@
 .vfy-intro a { color: var(--acc); text-underline-offset: 3px; }
 .vfy-intro code { font-family: var(--mono); font-size: 0.86em; color: var(--c-hash); }
 
+/* What the page cannot prove, listed beside what it can (§14). Set in the
+   dimmed prose colour rather than a warning one: these are stated limits of an
+   honest check, not failures, and painting them as alarms would misread the
+   page as broken. Same tokens as `.vfy-intro`, so it reads as one voice. */
+.vfy-limits { margin: 0 0 0.8rem; padding: 0 0 0 1.1rem; display: grid; gap: 0.5rem; }
+.vfy-limits li { color: var(--dim); }
+.vfy-limits strong { color: var(--txt); font-weight: 600; }
+.vfy-limits code { font-family: var(--mono); font-size: 0.86em; color: var(--c-hash); }
+
 /* The check catalogue, rendered on the server so the page explains itself
    before — and without — any JavaScript. */
 .vfy-h2 {
@@ -100,6 +109,10 @@
 }
 .vfy-verdict[data-ok='true'] { color: var(--good); }
 .vfy-verdict[data-ok='false'] { color: var(--bad); }
+/* A partial run is not a pass. The words already said so and the stamp was
+   already amber; the paragraph under it was green, which is the part a hurried
+   reader takes in. Same token as the stamp, so the two agree. */
+.vfy-verdict[data-ok='partial'] { color: var(--warn); }
 .vfy-verdict .vfy-sum { display: block; margin-top: 0.3rem; color: var(--dim); font-family: var(--mono); font-size: 0.72rem; }
 
 @media (max-width: 34rem) {

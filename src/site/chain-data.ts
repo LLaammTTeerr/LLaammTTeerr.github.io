@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { CHAIN_CONFIG } from '../../chain.config';
 import { referencedAssets } from '../chain/asset';
-import { normalizeBody, wordCount } from '../chain/canonical';
+import { formatResearch, normalizeBody, wordCount } from '../chain/canonical';
 import { sha256Hex } from '../chain/hash';
 import { sha256HexSync } from '../chain/hash-node';
 import { readLock } from '../chain/lock';
@@ -359,7 +359,22 @@ function latestAmendment(txHash: Hex): (AmendedIn & { tx: RecordedTx }) | null {
  * rule once between them.
  */
 function valueGiven(tx: RecordedTx, amendment: { tx: RecordedTx } | null): number {
-  return amendment === null ? tx.value : (amendment.tx.research ?? 0);
+  const declared = amendment === null ? tx.value : (amendment.tx.research ?? 0);
+  // …and rounded to the precision the chain actually committed to.
+  //
+  // §3.2 serializes the hours through `toFixed(1)`, so `8.5` and `8.54`
+  // produce a byte-identical canonical form and the same transaction hash. The
+  // ledger's extra digits are therefore uncommitted: a recorded `8.54` is a
+  // number no hash vouches for, and printing or summing it displays a figure
+  // §14 does not allow. The per-transaction display went through
+  // `researchHours`, which rounds — but the address totals summed the raw
+  // values first and rounded afterwards, so enough sub-0.05 lies shift a
+  // displayed total by a tenth of an hour.
+  //
+  // One `Number(formatResearch(...))` here, at the single point every surface
+  // reads the figure from, rather than a rounding call at each of them: the
+  // same function that built the canonical form decides what the number is.
+  return Number(formatResearch(declared));
 }
 
 /**

@@ -10,7 +10,7 @@
  *
  * `field` is the `TxVerification` key each step reports, so the control cannot
  * invent a check `verifyTransaction` does not run nor quietly drop one it does.
- * The five here are exactly `TxVerification`'s five verdict fields, and
+ * The six here are exactly `TxVerification`'s six verdict fields, and
  * `tests/site/tx-verify.test.ts` holds the two lists to each other.
  *
  * Explorer chrome is English and author-facing prose is Vietnamese (§9), so
@@ -22,7 +22,7 @@
 
 export interface TxCheckSpec {
   /** The `TxVerification` field this step reports. */
-  field: 'recordOk' | 'bodyOk' | 'txOk' | 'merkleOk' | 'blockOk';
+  field: 'recordOk' | 'bodyOk' | 'txOk' | 'gasOk' | 'merkleOk' | 'blockOk';
   label: string;
   note: string;
   /**
@@ -67,6 +67,18 @@ export const TX_CHECKS: TxCheckSpec[] = [
       'giờ nghiên cứu, địa chỉ gửi, danh sách tài sản và contentHash ở trên — rồi băm lại. Thiếu ' +
       'bước này thì một tiêu đề bị sửa vẫn qua sạch sẽ, vì cây Merkle chỉ bảo chứng các hash đã ghi ' +
       'khớp với nhau chứ không khớp với nội dung bên cạnh.',
+    sealedOnly: false,
+  },
+  {
+    field: 'gasOk',
+    label: 'Gas used',
+    note:
+      'Đếm lại số từ của chính văn bản gốc vừa tải, rồi so với con số "Gas used" in trên trang này ' +
+      'và với con số sổ cái ghi cho giao dịch (§3.8 định nghĩa gas đúng là số từ của thân bài đã ' +
+      'chuẩn hoá). Đây là trường duy nhất hiện trên trang mà không hash nào bảo chứng: dạng chuẩn ' +
+      'của giao dịch không chứa gasUsed, và khối chỉ cam kết tổng gas — nên chuyển bớt số từ từ giao ' +
+      'dịch này sang giao dịch khác cùng khối vẫn giữ nguyên mọi hash đã ghi. Chỉ ở đây, nơi có thân ' +
+      'bài trong tay, con số ấy mới được tính lại thay vì được tin.',
     sealedOnly: false,
   },
   {

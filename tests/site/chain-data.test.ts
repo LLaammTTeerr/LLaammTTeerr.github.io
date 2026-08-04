@@ -3,7 +3,7 @@ import { CHAIN_CONFIG } from '../../chain.config';
 import { shortHash, splitHashWork, txMetaLine, type RecordedTx } from '../../src/site/chain-data';
 import {
   getChain, getBlocks, getBlock, getPosts, getAssets, getStats,
-  workRatio, expectedAttempts, getPendingBlock, researchHours,
+  workRatio, expectedAttempts, getPendingBlock, researchHours, resolvePost,
 } from '../../src/site/chain-data';
 import { readPending, type PendingLock } from '../../src/chain/pending';
 import type { Transaction } from '../../src/chain/types';
@@ -151,6 +151,36 @@ describe('researchHours', () => {
         expect(hours, `${post.slug} declared nothing and was formatted anyway`).toBeNull();
       }
     }
+  });
+
+  it('resolves a ledger figure to the precision the chain committed, not the one it records', () => {
+    // §3.2 serializes `research` through `toFixed(1)`, so `8.5` and `8.54`
+    // produce a byte-identical canonical form and the same transaction hash:
+    // the extra digits are uncommitted, and §14 does not let the site display
+    // or aggregate a number no hash vouches for. Rounded once in `valueGiven`,
+    // where every surface reads the figure, so that a total summed over many
+    // transactions cannot accumulate sub-0.05 lies into a visible tenth.
+    const recorded: RecordedTx = {
+      hash: '0x' + '11'.repeat(32),
+      type: 'post',
+      slug: 'gia-lap',
+      title: 'Giả lập',
+      date: '2026-07-01',
+      tags: [],
+      series: null,
+      from: '0x' + 'aa'.repeat(20),
+      to: [],
+      contentHash: '0x' + '22'.repeat(32),
+      assets: [],
+      gasUsed: 10,
+      value: 8.54,
+      research: null,
+      amends: null,
+    };
+    expect(resolvePost(recorded, false).value).toBe(8.5);
+    expect(researchHours(resolvePost(recorded, false).value)).toBe('8.5');
+    // Anti-vacuity: an honest figure is not moved.
+    expect(resolvePost({ ...recorded, value: 12.5 }, false).value).toBe(12.5);
   });
 });
 

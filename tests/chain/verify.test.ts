@@ -290,6 +290,123 @@ describe('difficulty', () => {
   });
 });
 
+/**
+ * §3.8 — the impossible half of the uncommitted-field hole.
+ *
+ * A transaction's `gasUsed` and `value` are in no canonical form (§3.2, §3.9),
+ * so no transaction hash covers them; only the block's sums are checked. A
+ * forgery that moves word count between two transactions of one block preserves
+ * both sums and leaves every recorded hash valid — and until this check existed
+ * it could leave one of them at **-392**, which the post page rendered as a word
+ * count while `/verify` reported the whole chain clean.
+ *
+ * This does not close the hole; two plausible positive numbers still balance,
+ * and closing it needs the body, which only `verifyTransaction` has. What it
+ * removes is the half where the ledger states something no body could produce,
+ * chain-wide and without fetching anything.
+ */
+describe('gas and value cannot be impossible numbers', () => {
+  async function chainWith(patch: Partial<Transaction>): Promise<Chain> {
+    const a = await tx('a');
+    const b = { ...(await tx('b')), ...patch };
+    const b0 = await makeBlock(0, ZERO, [a, b]);
+    // Re-state the block's own sums over the patched list, so the block total
+    // agrees and the *only* thing wrong is the individual figure.
+    const sealed: Block = {
+      ...b0,
+      gasUsed: b0.transactions.reduce((s, t) => s + t.gasUsed, 0),
+      value: Number(b0.transactions.reduce((s, t) => s + t.value, 0).toFixed(1)),
+    };
+    return { version: 1, difficulty: DIFFICULTY, blocks: [sealed], assets: [] };
+  }
+
+  it('accepts an honest chain, so the rejections below are not vacuous', async () => {
+    const result = await verifyChain(await chainWith({}));
+    expect(result.blocks[0]!.reason).toBeUndefined();
+  });
+
+  it('rejects a negative gasUsed — the -392 word count that verified clean', async () => {
+    const result = await verifyChain(await chainWith({ gasUsed: -392 }));
+    expect(result.ok).toBe(false);
+    expect(result.blocks[0]!.reason).toMatch(/transaction #1.*"gasUsed".*non-negative integer/);
+  });
+
+  it('rejects a fractional gasUsed — a word count is a count', async () => {
+    const result = await verifyChain(await chainWith({ gasUsed: 10.5 }));
+    expect(result.ok).toBe(false);
+    expect(result.blocks[0]!.reason).toMatch(/transaction #1.*"gasUsed"/);
+  });
+
+  it('rejects a negative value — research hours cannot run backwards', async () => {
+    const result = await verifyChain(await chainWith({ value: -8.5 }));
+    expect(result.ok).toBe(false);
+    expect(result.blocks[0]!.reason).toMatch(/transaction #1.*"value".*non-negative/);
+  });
+
+  it('rejects a negative research figure on an amendment', async () => {
+    // An amendment's declared hours live in `research`, not `value` (§3.9), so
+    // the rule has to be stated for both or one of them is unguarded.
+    const post = await tx('a');
+    const amendment = { ...(await amendmentTx(post.hash, 'Tiêu đề mới')), research: -2 };
+    const b0 = await makeBlock(0, ZERO, [post]);
+    const b1 = await makeBlock(1, b0.hash, [amendment]);
+    const result = await verifyChain({ version: 1, difficulty: DIFFICULTY, blocks: [b0, b1], assets: [] });
+    expect(result.ok).toBe(false);
+    expect(result.blocks[1]!.reason).toMatch(/transaction #0.*"research".*non-negative/);
+  });
+
+  it('still accepts the balanced forgery, which is why verifyTransaction exists', async () => {
+    // Stated rather than left implied, because the gap is the point: two
+    // plausible positive numbers that sum to the committed total pass every
+    // check `/verify` can run. `/verify` says so in its own limits paragraph,
+    // and the per-post control — which has the body — is what closes it.
+    const a = await tx('a');
+    const b = await tx('b');
+    const b0 = await makeBlock(0, ZERO, [a, b]);
+    const forged = {
+      ...b0,
+      transactions: [
+        { ...b0.transactions[0]!, gasUsed: b0.transactions[0]!.gasUsed + 5 },
+        { ...b0.transactions[1]!, gasUsed: b0.transactions[1]!.gasUsed - 5 },
+      ],
+    };
+    const result = await verifyChain({ version: 1, difficulty: DIFFICULTY, blocks: [forged], assets: [] });
+    expect(result.ok, 'the block sum is unchanged, so nothing chain-level can see this').toBe(true);
+  });
+});
+
+describe('the chain-level difficulty floor', () => {
+  it('reports a chain with the difficulty field deleted, rather than swapping in 0', async () => {
+    // §7 makes the chain-level `difficulty` the floor. Read as
+    // `isFiniteNumber(chain.difficulty) ? chain.difficulty : 0`, a ledger with
+    // the field deleted verified clean — the floor silently became no floor.
+    const chain = await validChain();
+    delete (chain as { difficulty?: unknown }).difficulty;
+    const result = await verifyChain(chain);
+    expect(result.ok).toBe(false);
+    expect(result.chain).toMatch(/difficulty/);
+    expect(result.blocks, 'a document with no floor is not checked block by block').toEqual([]);
+  });
+
+  it('reports a non-integer or out-of-range floor the same way', async () => {
+    for (const bad of [-1, 1.5, 65, 'five', null]) {
+      const chain = { ...(await validChain()), difficulty: bad } as unknown as Chain;
+      const result = await verifyChain(chain);
+      expect(result.ok, `difficulty ${String(bad)} was accepted as a floor`).toBe(false);
+      expect(result.chain).toMatch(/difficulty/);
+    }
+  });
+
+  it('still accepts a floor of 0, spelled out — that is spec-faithful and disclosed', async () => {
+    // The limit this does *not* fix, pinned so nobody mistakes the check above
+    // for one: the floor lives in the document under test, so an attacker
+    // already editing it can simply declare 0. `/verify` says so in its limits,
+    // and the real anchor is `chain.lock.json` in the repository.
+    const chain = { ...(await validChain()), difficulty: 0 };
+    expect((await verifyChain(chain)).ok).toBe(true);
+  });
+});
+
 describe('structurally invalid input', () => {
   it('reports a block with no transactions array instead of throwing', async () => {
     const chain = await validChain();

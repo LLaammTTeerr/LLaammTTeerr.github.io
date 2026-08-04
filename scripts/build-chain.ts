@@ -77,6 +77,9 @@ if (!result.ok) {
   if (result.registry !== undefined) {
     console.error(`  registry    ${result.registry}`);
   }
+  if (result.chain !== undefined) {
+    console.error(`  chain       ${result.chain}`);
+  }
   for (const b of result.blocks.filter((b) => !b.ok)) {
     console.error(
       `  block #${b.height}  hash:${b.hashOk} merkle:${b.merkleOk} link:${b.linkOk} pow:${b.powOk} tx:${b.txOk}` +

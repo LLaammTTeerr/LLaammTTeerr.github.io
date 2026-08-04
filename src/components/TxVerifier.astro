@@ -25,10 +25,18 @@ import '../styles/verify.css';
  * (§3.9); handing it a raw ledger entry is a type error, for the reasons
  * `chain-data.ts` sets out at length.
  *
- * Only `slug` and `hash` reach the script, through data attributes, and neither
- * is trusted: `verifyTransaction` resolves the governing record from the
+ * Only `slug`, `hash` and `gas` reach the script, through data attributes, and
+ * none is trusted: `verifyTransaction` resolves the governing record from the
  * fetched documents itself and reports `recordOk: false` if the page named a
  * different one. Everything else on screen is recomputed.
+ *
+ * `gas` is the same `post.gasUsed` the panel above prints (§3.8), handed in so
+ * the check can contradict it. It is the one displayed field no hash covers —
+ * the canonical form omits `gasUsed` and the block commits only the sum — so a
+ * forgery that moves word count between two transactions of one block leaves
+ * every recorded hash intact. Re-deriving the count from the fetched body and
+ * comparing it with the ledger alone would catch a forged ledger and obey a
+ * forged page; the number on screen has to be the number under test.
  *
  * A **button**, not an on-load fetch, and the difference is not cosmetic: the
  * ledger is a document a reader here to *read* has no reason to download. §7
@@ -57,7 +65,14 @@ const digest = post.contentHash.slice(2);
 const source = `/tx/${slug}/body.txt`;
 ---
 
-<section class="card vfy txv" id="txv" aria-labelledby="txv-heading" data-slug={slug} data-hash={post.hash}>
+<section
+  class="card vfy txv"
+  id="txv"
+  aria-labelledby="txv-heading"
+  data-slug={slug}
+  data-hash={post.hash}
+  data-gas={post.gasUsed === null ? '' : String(post.gasUsed)}
+>
   <h2 id="txv-heading" class="sr-only">Kiểm chứng giao dịch này</h2>
   <div class="card-top">
     <span class="per">Transaction check</span>
@@ -153,10 +168,16 @@ const source = `/tx/${slug}/body.txt`;
     if (status !== null) status.textContent = text;
   }
 
-  function finish(ok: boolean, text: string, summary: string): void {
+  /**
+   * `state` and not a boolean, because there are three verdicts and only two
+   * colours were being used: a pending post's verdict is a *partial* pass, and
+   * it was painted in `--good` under an amber `Partial` stamp. The words were
+   * unambiguous; green prose is the part a hurried reader takes in.
+   */
+  function finish(state: 'true' | 'false' | 'partial', text: string, summary: string): void {
     if (verdict === null) return;
     verdict.textContent = '';
-    verdict.dataset.ok = String(ok);
+    verdict.dataset.ok = state;
     verdict.appendChild(document.createTextNode(text));
     if (summary !== '') {
       const line = document.createElement('span');
@@ -169,7 +190,7 @@ const source = `/tx/${slug}/body.txt`;
 
   function fail(text: string): void {
     setStamp('fail', 'Failed');
-    finish(false, text, '');
+    finish('false', text, '');
   }
 
   /**
@@ -217,6 +238,10 @@ const source = `/tx/${slug}/body.txt`;
   async function run(): Promise<void> {
     const slug = root?.dataset.slug ?? '';
     const claimed = root?.dataset.hash ?? '';
+    // The word count the panel above prints, or null when it prints an em dash
+    // — a page that claims no figure cannot be caught claiming a false one.
+    const gasAttr = root?.dataset.gas ?? '';
+    const claimedGas = gasAttr === '' ? null : Number(gasAttr);
     if (button instanceof HTMLButtonElement) button.disabled = true;
     setStamp('running', 'Đang chạy');
     say('Đang tải văn bản gốc và sổ cái…');
@@ -275,7 +300,7 @@ const source = `/tx/${slug}/body.txt`;
     const bytes = new TextEncoder().encode(body).length;
     say(`Đã tải ${String(bytes)} byte văn bản gốc. Đang băm lại, ngay trong trình duyệt này.`);
 
-    const result = await verifyTransaction(slug, body, claimed, chain as Chain, pending);
+    const result = await verifyTransaction(slug, body, claimed, chain as Chain, pending, claimedGas);
     for (const check of TX_CHECKS) paintStep(check.field, result[check.field]);
 
     if (result.reason !== undefined) {
@@ -291,7 +316,7 @@ const source = `/tx/${slug}/body.txt`;
       setStamp('fail', 'Failed');
       say('Xong. Có mắt xích không khớp — xem bước được đánh dấu ở trên.');
       finish(
-        false,
+        'false',
         `Không khớp: ${reasonFor(result)}. Nội dung hiển thị trên trang này không phải thứ chuỗi ` +
           'đã cam kết — đừng tin trang, hãy tin phép tính bạn vừa chạy.',
         summary,
@@ -307,11 +332,11 @@ const source = `/tx/${slug}/body.txt`;
       setStamp('partial', 'Partial');
       say('Xong, trong phạm vi kiểm được.');
       finish(
-        true,
-        'Hai mắt xích đầu khớp: văn bản gốc băm ra đúng contentHash mà giao dịch cam kết, và hash ' +
-          'giao dịch tính lại đúng từ chính các trường của nó. Hai mắt xích sau không tồn tại — ' +
-          'giao dịch còn trong khối đang mở, chưa được đào — nên chúng không được kiểm, chứ không ' +
-          'phải đã kiểm và đạt.',
+        'partial',
+        'Những mắt xích đầu khớp: văn bản gốc băm ra đúng contentHash mà giao dịch cam kết, hash ' +
+          'giao dịch tính lại đúng từ chính các trường của nó, và số từ in trên trang đúng bằng số ' +
+          'từ đếm lại được từ thân bài. Hai mắt xích sau không tồn tại — giao dịch còn trong khối ' +
+          'đang mở, chưa được đào — nên chúng không được kiểm, chứ không phải đã kiểm và đạt.',
         summary,
       );
       return;
@@ -319,10 +344,11 @@ const source = `/tx/${slug}/body.txt`;
     setStamp('ok', 'Verified');
     say('Xong. Mỗi hash ở trên do chính máy bạn tính lại, từ văn bản thô.');
     finish(
-      true,
-      `Khớp hết. Văn bản gốc băm ra đúng contentHash; hash giao dịch tính lại đúng; hash ấy nằm ` +
-        `trong gốc Merkle của khối #${String(result.height)}; và header khối băm lại đúng hash đã ` +
-        'đào, với đủ số chữ số 0 khối tự cam kết. Vòng đã khép: từ chữ thô đến hash khối.',
+      'true',
+      `Khớp hết. Văn bản gốc băm ra đúng contentHash; hash giao dịch tính lại đúng; số từ in trên ` +
+        `trang đúng bằng số từ đếm lại được từ chính thân bài ấy; hash giao dịch nằm trong gốc ` +
+        `Merkle của khối #${String(result.height)}; và header khối băm lại đúng hash đã đào, với đủ ` +
+        'số chữ số 0 khối tự cam kết. Vòng đã khép: từ chữ thô đến hash khối.',
       summary,
     );
   }

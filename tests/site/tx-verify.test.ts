@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { DIST, cssPerPage, distPages, readDist, rendered, resolvesIn, scriptClosure } from './dist';
+import { DIST, OFF_ORIGIN, cssPerPage, distPages, readDist, rendered, resolvesIn, sameOriginPath, scriptClosure } from './dist';
 import { parseRules, selectorParts } from './css';
-import { canonicalAmendmentTx, canonicalPostTx, normalizeBody } from '../../src/chain/canonical';
+import { canonicalAmendmentTx, canonicalPostTx, normalizeBody, wordCount } from '../../src/chain/canonical';
 import { sha256Hex } from '../../src/chain/hash';
 import { merkleRootHex } from '../../src/chain/merkle';
 import { mine } from '../../src/chain/mine';
@@ -88,12 +88,21 @@ async function postTx(slug: string, body: string, title = `Bài ${slug}`): Promi
     to: [],
     contentHash: fields.contentHash,
     assets: [],
-    gasUsed: 10,
+    // §3.8 — the word count of the body this transaction commits to, not a
+    // round number. A fixture that charged 10 gas for a four-word body would
+    // make every `gasOk` assertion below a fact about the fixture.
+    gasUsed: wordCount(body),
     value: 1,
     research: null,
     amends: null,
   };
 }
+
+/**
+ * The figure a post page prints for a body (§3.8), and so the figure the
+ * control hands `verifyTransaction` as the page's claim.
+ */
+const gasOf = (body: string): number => wordCount(body);
 
 async function amendmentTx(amends: string, body: string, title: string): Promise<Transaction> {
   const fields = {
@@ -230,7 +239,7 @@ describe('the canonical source is published', () => {
 describe('verifyTransaction, on a chain that is genuinely mined', () => {
   it('passes every link for a sealed post', async () => {
     const { chain, tx } = await sealedFixture();
-    const result = await verifyTransaction('bai-viet', BODY, tx.hash, chain, null);
+    const result = await verifyTransaction('bai-viet', BODY, tx.hash, chain, null, gasOf(BODY));
     expect(result.reason).toBeUndefined();
     expect(result).toMatchObject({
       recordOk: true,
@@ -245,7 +254,14 @@ describe('verifyTransaction, on a chain that is genuinely mined', () => {
 
   it('reports a tampered body as a mismatch, not silently accepted', async () => {
     const { chain, tx } = await sealedFixture();
-    const result = await verifyTransaction('bai-viet', `${BODY}một câu thêm vào\n`, tx.hash, chain, null);
+    const result = await verifyTransaction(
+      'bai-viet',
+      `${BODY}một câu thêm vào\n`,
+      tx.hash,
+      chain,
+      null,
+      gasOf(BODY),
+    );
     expect(result.bodyOk, 'a forged body was accepted').toBe(false);
     expect(result.ok).toBe(false);
     // The other links are untouched by the forgery, and must still say so —
@@ -259,7 +275,7 @@ describe('verifyTransaction, on a chain that is genuinely mined', () => {
     const { chain, tx } = await sealedFixture();
     const forged = clone(chain);
     forged.blocks[1]!.transactions[0]!.title = 'Một tiêu đề khác hẳn';
-    const result = await verifyTransaction('bai-viet', BODY, tx.hash, forged, null);
+    const result = await verifyTransaction('bai-viet', BODY, tx.hash, forged, null, gasOf(BODY));
     expect(result.txOk, 'the recorded fields no longer produce the recorded hash').toBe(false);
     expect(result.ok).toBe(false);
     // The body still hashes to what the (unchanged) contentHash committed —
@@ -271,7 +287,7 @@ describe('verifyTransaction, on a chain that is genuinely mined', () => {
     const { chain, tx } = await sealedFixture();
     const forged = clone(chain);
     forged.blocks[1]!.merkleRoot = '0x' + 'ab'.repeat(32);
-    const result = await verifyTransaction('bai-viet', BODY, tx.hash, forged, null);
+    const result = await verifyTransaction('bai-viet', BODY, tx.hash, forged, null, gasOf(BODY));
     expect(result.merkleOk).toBe(false);
     expect(result.ok).toBe(false);
   });
@@ -280,7 +296,7 @@ describe('verifyTransaction, on a chain that is genuinely mined', () => {
     const { chain, tx } = await sealedFixture();
     const forged = clone(chain);
     forged.blocks[1]!.nonce += 1;
-    const result = await verifyTransaction('bai-viet', BODY, tx.hash, forged, null);
+    const result = await verifyTransaction('bai-viet', BODY, tx.hash, forged, null, gasOf(BODY));
     expect(result.blockOk).toBe(false);
     expect(result.ok).toBe(false);
   });
@@ -288,7 +304,7 @@ describe('verifyTransaction, on a chain that is genuinely mined', () => {
   it('catches a page that names a transaction other than the chain\'s newest record', async () => {
     const { chain } = await sealedFixture();
     const other = chain.blocks[0]!.transactions[0]!;
-    const result = await verifyTransaction('bai-viet', BODY, other.hash, chain, null);
+    const result = await verifyTransaction('bai-viet', BODY, other.hash, chain, null, gasOf(BODY));
     expect(result.recordOk, 'the page pointed at another transaction and was believed').toBe(false);
     expect(result.ok).toBe(false);
   });
@@ -306,13 +322,13 @@ describe('verifyTransaction, on a chain that is genuinely mined', () => {
     const b2 = await makeBlock(2, b1.hash, [newest]);
     const chain: Chain = { version: 1, difficulty: DIFFICULTY, blocks: [b0, b1, b2], assets: [] };
 
-    const result = await verifyTransaction('bai-viet', amended, newest.hash, chain, null);
+    const result = await verifyTransaction('bai-viet', amended, newest.hash, chain, null, gasOf(amended));
     expect(result.hash).toBe(newest.hash);
     expect(result.height).toBe(2);
     expect(result.ok).toBe(true);
 
     // …and the superseded body is no longer what the chain vouches for.
-    const stale = await verifyTransaction('bai-viet', 'Bản đầu.\n', newest.hash, chain, null);
+    const stale = await verifyTransaction('bai-viet', 'Bản đầu.\n', newest.hash, chain, null, gasOf(amended));
     expect(stale.bodyOk).toBe(false);
   });
 
@@ -330,10 +346,120 @@ describe('verifyTransaction, on a chain that is genuinely mined', () => {
       pendingAmendment.hash,
       chain,
       [pendingAmendment],
+      gasOf('Bản mới nhất.\n'),
     );
     expect(result.hash).toBe(pendingAmendment.hash);
     expect(result.sealed).toBe(false);
     expect(result.merkleOk).toBeNull();
+  });
+});
+
+/**
+ * C1 — the one figure a post page prints that no hash covers.
+ *
+ * `gasUsed` is in neither canonical form (§3.2, §3.9), so no transaction hash
+ * commits to it; `verifyBlock` checks only the block's **sum**. Move word count
+ * from one transaction to a sibling in the same block and the sum is unchanged,
+ * every recorded hash still recomputes, and `verifyChain` reports `ok: true`.
+ * Reproduced on the real ledger before this was written: block #0's two posts
+ * went from `104 / 108` to `604 / -392`, the page rendered `604 từ` over a
+ * 104-word body, and the control stamped VERIFIED.
+ *
+ * §3.8 defines the number as a function of the body, and the control is the one
+ * place on the site that has the body. So it derives it rather than believing
+ * it, and it compares the derivation against **both** the ledger's figure and
+ * the page's — a check against the ledger alone would catch a forged ledger and
+ * obey a forged page.
+ */
+describe('gasUsed, the displayed figure no hash covers', () => {
+  it('passes when the page, the ledger and the body all agree', async () => {
+    // Anti-vacuity for everything below: without this, a `gasOk` wired to
+    // `false` would satisfy every failure assertion in this block.
+    const { chain, tx } = await sealedFixture();
+    const result = await verifyTransaction('bai-viet', BODY, tx.hash, chain, null, tx.gasUsed);
+    expect(result.gasOk).toBe(true);
+    expect(result.ok).toBe(true);
+    expect(tx.gasUsed, 'the fixture body has no words to count').toBeGreaterThan(0);
+  });
+
+  it('catches word count moved between two transactions of one block', async () => {
+    // The forgery itself, in the shape that leaves every hash valid, and with
+    // both figures kept **plausible**: the structural check in `verify.ts`
+    // already rejects a negative word count, so a forgery that drove the
+    // sibling to -392 would be caught one layer earlier and would prove nothing
+    // about this one. Five words move, and both transactions still look like
+    // ordinary posts.
+    const subject = await postTx('bai-viet', BODY);
+    const sibling = await postTx('khac', 'Một thân bài khác, dài hơn hẳn, đủ chữ để nhường bớt đi năm từ.\n');
+    const b0 = await makeBlock(0, ZERO, [subject, sibling]);
+    const chain: Chain = { version: 1, difficulty: DIFFICULTY, blocks: [b0], assets: [] };
+
+    const forged = clone(chain);
+    const [a, b] = forged.blocks[0]!.transactions as [Transaction, Transaction];
+    a.gasUsed += 5;
+    b.gasUsed -= 5;
+    expect(b.gasUsed, 'the sibling went negative, so the structural check catches this first').toBeGreaterThan(0);
+    expect(
+      forged.blocks[0]!.transactions.reduce((s, t) => s + t.gasUsed, 0),
+      'the forgery did not preserve the block sum, so it is not the compensated one',
+    ).toBe(b0.gasUsed);
+
+    // The page shows what the forged ledger says — that is the whole point of
+    // the forgery, and it is what a reader is looking at.
+    const result = await verifyTransaction('bai-viet', BODY, subject.hash, forged, null, a.gasUsed);
+    expect(result.gasOk, 'a forged word count was displayed and stamped Verified').toBe(false);
+    expect(result.ok).toBe(false);
+    // …and every other link still passes, which is exactly why nothing else
+    // could catch it. A verifier that reddens everything cannot say what broke.
+    expect(result.recordOk).toBe(true);
+    expect(result.bodyOk).toBe(true);
+    expect(result.txOk).toBe(true);
+    expect(result.merkleOk).toBe(true);
+    expect(result.blockOk).toBe(true);
+  });
+
+  it('catches a page that prints a figure the ledger does not claim', async () => {
+    // The other half, and the reason the page's figure is a parameter rather
+    // than something re-derived and compared only with the ledger: an attacker
+    // who edits `dist/tx/<slug>/index.html` and leaves `chain.json` alone
+    // changes nothing the ledger-only check can see.
+    const { chain, tx } = await sealedFixture();
+    const result = await verifyTransaction('bai-viet', BODY, tx.hash, chain, null, tx.gasUsed + 500);
+    expect(result.gasOk, 'the page claimed a word count nobody counted').toBe(false);
+    expect(result.ok).toBe(false);
+  });
+
+  it('holds a pending record to the same rule, where no block sum exists at all', async () => {
+    const pending = await postTx('dang-cho', BODY);
+    const chain: Chain = { version: 1, difficulty: DIFFICULTY, blocks: [], assets: [] };
+    const forged = { ...pending, gasUsed: pending.gasUsed + 7 };
+    const result = await verifyTransaction('dang-cho', BODY, pending.hash, chain, [forged], forged.gasUsed);
+    expect(result.gasOk).toBe(false);
+    expect(result.ok).toBe(false);
+  });
+
+  it('accepts an amendment carrying the §3.9 accounting zero, and re-derives the shown figure', async () => {
+    // An amendment's own `gasUsed` is 0 so block aggregation cannot re-charge
+    // words already counted in the block that sealed the original. The number
+    // the page shows is therefore never the record's — it is re-derived from
+    // the amendment's body, which is precisely what this check recomputes.
+    const original = await postTx('bai-viet', 'Bản đầu.\n');
+    const amended = 'Bản đã sửa lại cho rõ ràng hơn.\n';
+    const newest = await amendmentTx(original.hash, amended, 'Tiêu đề mới');
+    const b0 = await makeBlock(0, ZERO, [original]);
+    const b1 = await makeBlock(1, b0.hash, [newest]);
+    const chain: Chain = { version: 1, difficulty: DIFFICULTY, blocks: [b0, b1], assets: [] };
+
+    const good = await verifyTransaction('bai-viet', amended, newest.hash, chain, null, gasOf(amended));
+    expect(good.gasOk).toBe(true);
+    expect(good.ok).toBe(true);
+
+    // …and the amendment may not smuggle gas back in, which would double-charge
+    // the block and is what the zero exists to prevent.
+    const forged = clone(chain);
+    forged.blocks[1]!.transactions[0]!.gasUsed = gasOf(amended);
+    const bad = await verifyTransaction('bai-viet', amended, newest.hash, forged, null, gasOf(amended));
+    expect(bad.gasOk).toBe(false);
   });
 });
 
@@ -344,7 +470,7 @@ describe('a record with no mined block behind it', () => {
     // must not be `true`, which would claim a check that never ran.
     const pending = await postTx('dang-cho', BODY);
     const chain: Chain = { version: 1, difficulty: DIFFICULTY, blocks: [], assets: [] };
-    const result = await verifyTransaction('dang-cho', BODY, pending.hash, chain, [pending]);
+    const result = await verifyTransaction('dang-cho', BODY, pending.hash, chain, [pending], gasOf(BODY));
     expect(result.bodyOk).toBe(true);
     expect(result.txOk).toBe(true);
     expect(result.merkleOk, 'a pending post was told its Merkle root checked out').toBeNull();
@@ -357,7 +483,7 @@ describe('a record with no mined block behind it', () => {
   it('still fails a pending record whose body was tampered with', async () => {
     const pending = await postTx('dang-cho', BODY);
     const chain: Chain = { version: 1, difficulty: DIFFICULTY, blocks: [], assets: [] };
-    const result = await verifyTransaction('dang-cho', 'khác\n', pending.hash, chain, [pending]);
+    const result = await verifyTransaction('dang-cho', 'khác\n', pending.hash, chain, [pending], gasOf(BODY));
     expect(result.bodyOk).toBe(false);
     expect(result.ok).toBe(false);
   });
@@ -365,14 +491,14 @@ describe('a record with no mined block behind it', () => {
 
 describe('verifyTransaction is total over untrusted input', () => {
   it('describes a document that is not a chain instead of throwing', async () => {
-    const result = await verifyTransaction('x', '', ZERO, null as unknown as Chain, null);
+    const result = await verifyTransaction('x', '', ZERO, null as unknown as Chain, null, null);
     expect(result.ok).toBe(false);
     expect(result.reason).toBeTruthy();
   });
 
   it('says so when the chain holds no record for the slug', async () => {
     const { chain, tx } = await sealedFixture();
-    const result = await verifyTransaction('khong-co', BODY, tx.hash, chain, null);
+    const result = await verifyTransaction('khong-co', BODY, tx.hash, chain, null, gasOf(BODY));
     expect(result.ok).toBe(false);
     expect(result.reason).toMatch(/khong-co/);
   });
@@ -381,7 +507,7 @@ describe('verifyTransaction is total over untrusted input', () => {
     const { chain, tx } = await sealedFixture();
     const broken = clone(chain) as unknown as { blocks: unknown[] };
     broken.blocks[0] = null;
-    const result = await verifyTransaction('bai-viet', BODY, tx.hash, broken as unknown as Chain, null);
+    const result = await verifyTransaction('bai-viet', BODY, tx.hash, broken as unknown as Chain, null, gasOf(BODY));
     expect(result.bodyOk).toBe(true);
     expect(result.txOk).toBe(true);
   });
@@ -472,12 +598,16 @@ describe('what actually reaches the browser', () => {
     expect(code, 'the control does not fetch the ledger at all').toMatch(/fetch\(\s*["'`]\/chain\.json/);
     expect(code, 'the control does not fetch the canonical source at all').toMatch(/body\.txt/);
     let seen = 0;
+    // `sameOriginPath`, not `startsWith('/')` — see the note on the same loop
+    // in `verify-page.test.ts`: a protocol-relative target passes the bare
+    // prefix test and is a cross-origin request.
     for (const m of code.matchAll(/fetch\(\s*(["'`])([^"'`]*)\1/g)) {
       seen += 1;
-      expect(m[2]!.startsWith('/'), `the control fetches ${m[2]!}, which is not same-origin`).toBe(true);
+      expect(sameOriginPath(m[2]!), `the control fetches ${m[2]!}, which is not same-origin`).toBe(true);
     }
     expect(seen, 'no fetch target was found to check').toBeGreaterThan(0);
-    expect(code, 'the bundle names an absolute url').not.toMatch(/https?:\/\//);
+    expect(sameOriginPath('//example.com/body.txt'), 'the predicate accepts a protocol-relative url').toBe(false);
+    expect(code, 'the bundle names an off-origin url').not.toMatch(OFF_ORIGIN);
   });
 
   it('carries a stamp for a partial run that is not the one for a complete one', () => {
@@ -487,6 +617,16 @@ describe('what actually reaches the browser', () => {
     const { code } = scriptClosure(page());
     expect(code).toContain('Verified');
     expect(code, 'a partial check wears the same stamp as a complete one').toContain('Partial');
+    // …and the verdict paragraph under it carries its own state, so it is not
+    // painted in the pass colour. The stamp was already amber and the words
+    // were already unambiguous; green prose beneath both is what a hurried
+    // reader takes in, and `--good` under `Partial` is a contradiction.
+    expect(code, 'the partial verdict is painted as a full pass').toMatch(/["'`]partial["'`]/);
+    const css = cssPerPage().get(page());
+    expect(
+      parseRules(css!).some((r) => selectorParts(r).some((p) => /\[data-ok=['"]?partial/.test(p))),
+      'no stylesheet distinguishes a partial verdict from a passing one',
+    ).toBe(true);
   });
 
   it('carries each step label and the field it reports', () => {
