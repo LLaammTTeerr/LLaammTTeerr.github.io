@@ -490,3 +490,36 @@ transaction forgery, CVE-2012-2459 shape — had no test at all.
 **Accepted, not fixed:** `period` and asset `file`/`mime`/`bytes` are outside every canonical
 form. They cannot be verified without changing the hash format, and `/verify` now discloses that
 by name rather than passing over it.
+
+---
+
+## D24 — search, and a cascade bug no unit test could have caught
+
+`/search-index.json` (4.4KB for 14 posts, ~318 bytes each) plus the nav search box, fetched on
+first focus. 1052 tests. Merged; `git reset --hard ec232c7` to undo.
+
+**The finding worth remembering.** The results list rendered as a **horizontal row of chips
+across three lines**, with ArrowDown moving the highlight sideways. `<Search />` sits inside
+`<nav class="nav">`, and `.nav ul { display: flex; flex-wrap: wrap }` beat `.search-list`, which
+never declared `display` at all.
+
+No test that asks "does the stylesheet contain this rule?" could have caught it — the bug was a
+*cascade outcome* across several stylesheets loaded together. The fix narrowed the base rule to
+`.nav > ul` rather than escalating specificity in the component: the selector said more than it
+meant, having been written when the nav held one list, and escalating would have relocated the
+collision rather than closed it.
+
+What now guards it is a `resolveProperty` helper that resolves one property over the **built**
+stylesheets by specificity then source order, and **refuses** any selector it cannot model rather
+than skipping it. Restoring `.nav ul` turns it red.
+
+**Also fixed:** the error note told the reader to click the box again, but the box was already
+focused and clicking a focused input fires no `focus` event — the stated gesture now works rather
+than being reworded. And the ARIA implementation was correct but unheld: deleting every attribute
+the script set left the suite green at 1024 while the browser showed an unusable combobox. The
+adapter moved to a testable module; that same deletion now kills 7 tests.
+
+**Verified under attack and held:** zero index requests on page load in build *and* dev, exactly
+one on first focus, still one after six focus cycles during a held in-flight request, retries
+after failure, never re-fetches after success. All 15 transaction hashes and their middle-
+truncated spellings resolve correctly, zero mismatches, ambiguity never silent.
