@@ -1,0 +1,90 @@
+---
+import Base from '../layouts/Base.astro';
+import ChainVerifier from '../components/ChainVerifier.astro';
+import { CHECKS } from '../site/verify-checks';
+// `.page-head` lives in base.css, which Base.astro always loads; the panel and
+// this page's own prose are styled by verify.css, imported here for the same
+// reason every route imports the styles it renders (see WorkMeter.astro).
+import '../styles/verify.css';
+
+/**
+ * §7 — the page this whole project exists to make possible.
+ *
+ * Every other route *displays* the chain. This one lets a reader check it:
+ * `/chain.json` is fetched and every block is hashed again, in their browser,
+ * from the raw document — no server, no third party, and nothing here asking
+ * to be believed. It is the payoff for refusing cosmetic hashes at the very
+ * start: had the hashes been decorative, there would be nothing to recompute.
+ *
+ * Static, like every other page. The prose and the catalogue below are
+ * rendered at build time and say what is about to be checked; only the
+ * recomputation itself needs JavaScript, and `ChainVerifier.astro` says so in
+ * as many words when it is off.
+ *
+ * No clock (§14): nothing here reads one, and two builds are byte-identical.
+ */
+---
+
+<Base
+  title="Verify — Blogchain"
+  description="Tự kiểm chuỗi: tải chain.json và băm lại mọi khối ngay trong trình duyệt của bạn."
+>
+  <div class="page-head">
+    <h1>Verify</h1>
+    <span class="sub">tự kiểm · chạy trong trình duyệt của bạn</span>
+  </div>
+
+  <div class="vfy-intro">
+    <p>
+      Mọi trang khác ở đây <strong>hiển thị</strong> chuỗi. Trang này để bạn <strong>kiểm</strong> nó.
+      Trình duyệt tải tài liệu thô <a href="/chain.json"><code>/chain.json</code></a> — đúng từng byte
+      với tệp <code>chain.lock.json</code> trong kho mã — rồi tính lại toàn bộ bằng SHA-256 thật, ngay
+      trên máy bạn. Không có máy chủ nào trả lời hộ, và không có bên thứ ba nào được gọi.
+    </p>
+    <p>
+      Nói cách khác: bạn không cần tin chữ <em>đã kiểm</em> in ở bất cứ đâu trên site này. Nếu một con
+      số, một tiêu đề hay một dòng nội dung từng bị sửa sau khi khối được niêm phong, phép tính dưới đây
+      sẽ lệch — và trang sẽ chỉ đúng khối, đúng phép kiểm đã hỏng.
+    </p>
+  </div>
+
+  {/*
+    The panel comes before the catalogue, not after it: the results are what
+    the reader came for and they start landing immediately, so five cards of
+    reference material ahead of them would put the one thing this page does
+    below the fold. The catalogue is what you read when a line has already
+    gone red and you want to know what it was checking.
+  */}
+  <ChainVerifier />
+
+  <h2 class="vfy-h2">Từng phép kiểm nghĩa là gì</h2>
+  <ul class="vfy-what">
+    {CHECKS.map((check) => (
+      <li>
+        <span class="vfy-k">{check.label}</span>
+        <p>{check.note}</p>
+      </li>
+    ))}
+  </ul>
+
+  <div class="vfy-intro">
+    <p>
+      Mã chạy ở đây là <em>chính</em> mô-đun mà bản dựng và lệnh <code>chain:verify</code> dùng, không
+      phải một bản chép lại cho trình duyệt. Một chuỗi được chứng minh bởi hai cách cài đặt khác nhau
+      là hai câu trả lời chờ ngày mâu thuẫn.
+    </p>
+    <p>
+      <strong>Khối đang mở không nằm trong phép kiểm này.</strong> Giao dịch đang chờ
+      (<code>/chain.pending.json</code>) có hash thật của riêng nó, nhưng chưa có khối nào được đào cho
+      chúng: không có nonce, không có bằng chứng công việc, không có gốc Merkle để dựng lại. Kiểm chúng
+      ở đây sẽ là một phép kiểm khác và yếu hơn hẳn, đứng cạnh phép kiểm này thì dễ bị đọc nhầm thành
+      cùng một mức bảo đảm. Khối đang mở nằm trên trang <a href="/blocks">Blocks</a>, ghi rõ là chưa
+      niêm phong.
+    </p>
+    <p>
+      Một giới hạn nữa, nói thẳng: tên tệp, kiểu MIME và kích thước của tài sản không được cam kết vào
+      hash nào cả — chỉ nội dung tệp là có. Phép kiểm ở đây xác nhận sổ tài sản khớp với các giao dịch,
+      chứ không xác nhận được ba trường đó.
+    </p>
+  </div>
+</Base>

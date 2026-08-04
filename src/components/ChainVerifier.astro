@@ -1,0 +1,277 @@
+---
+// The panel's styles travel with the panel — see the note in WorkMeter.astro —
+// and `.card`/`.card-top`/`.per` come from chain.css, which this is the first
+// route to render without a block card beside it.
+import '../styles/chain.css';
+import '../styles/verify.css';
+
+/**
+ * §7 — the one island on this site: the chain, recomputed in the reader's own
+ * browser.
+ *
+ * What is served here is the *static* half — a heading, a state stamp and a
+ * status line that, with scripts off, says so. Everything below it is appended
+ * by the script, one block at a time, as each block finishes hashing. That is
+ * the whole point of the streaming entry point: `verifyChain` answers when the
+ * entire chain is done, which in a tab means a reader staring at nothing and
+ * then being handed a verdict they have even less reason to believe than the
+ * word "verified" printed on any other page.
+ *
+ * The script imports `src/chain/verify.ts` — the same module `chain:verify`
+ * and the build run, not a browser copy of it. `verify.ts` and its closure
+ * (`canonical.ts`, `hash.ts`, `merkle.ts`, `types.ts`) have been kept free of
+ * Node built-ins and bare specifiers since the engine was written, guarded by
+ * an import-graph test in `tests/chain/verify.test.ts`, precisely so this
+ * import could exist. If that guard ever fails, the fix is upstream of here.
+ *
+ * Deliberately not `define:vars`: it would force the script inline, and an
+ * inline script cannot import anything — which would mean re-implementing the
+ * verifier in the template. Shared values come in through a module import
+ * (`src/site/verify-checks.ts`) instead.
+ */
+---
+
+<section class="card vfy" aria-labelledby="vfy-heading">
+  <h2 id="vfy-heading" class="sr-only">Kết quả kiểm chứng</h2>
+  <div class="card-top">
+    <span class="per">Chain check</span>
+    <span class="vfy-stamp" id="vfy-stamp" data-state="idle">Chưa chạy</span>
+  </div>
+
+  {/*
+    The no-JavaScript state, and the honest one for the moment before the
+    module script runs: nothing has been checked yet, and this says so rather
+    than showing an empty panel that looks like a page that failed to load.
+  */}
+  <p class="vfy-status" id="vfy-status" role="status">
+    Phần kiểm chứng này <strong>cần JavaScript</strong>: nó tải <code>/chain.json</code> rồi băm lại
+    toàn bộ chuỗi ngay trong trình duyệt của bạn, chứ không hỏi máy chủ nào cả. Mọi trang khác trên
+    site này đọc được khi tắt JavaScript; riêng trang này thì không, vì phép tính phải chạy ở phía
+    bạn thì kết quả mới có nghĩa. Bật JavaScript rồi tải lại trang để chạy.
+  </p>
+
+  <ol class="vfy-blocks" id="vfy-blocks"></ol>
+  <p class="vfy-verdict" id="vfy-verdict" hidden></p>
+</section>
+
+<script>
+  import { verifyChainStream } from '../chain/verify';
+  import type { BlockVerification } from '../chain/verify';
+  import type { Chain } from '../chain/types';
+  import { CHECKS } from '../site/verify-checks';
+
+  const stamp = document.getElementById('vfy-stamp');
+  const status = document.getElementById('vfy-status');
+  const list = document.getElementById('vfy-blocks');
+  const verdict = document.getElementById('vfy-verdict');
+
+  function setStamp(state: string, label: string): void {
+    if (stamp === null) return;
+    stamp.dataset.state = state;
+    stamp.textContent = label;
+  }
+
+  function say(text: string): void {
+    if (status !== null) status.textContent = text;
+  }
+
+  function finish(ok: boolean, text: string, summary: string): void {
+    if (verdict === null) return;
+    verdict.textContent = '';
+    verdict.dataset.ok = String(ok);
+    verdict.appendChild(document.createTextNode(text));
+    if (summary !== '') {
+      const line = document.createElement('span');
+      line.className = 'vfy-sum';
+      line.textContent = summary;
+      verdict.appendChild(line);
+    }
+    verdict.hidden = false;
+  }
+
+  function fail(text: string): void {
+    setStamp('fail', 'Failed');
+    finish(false, text, '');
+  }
+
+  /** A field of the untrusted document, as a short display string. */
+  function shownString(value: unknown, fallback: string): string {
+    return typeof value === 'string' && value !== '' ? value.slice(0, 32) : fallback;
+  }
+
+  function blockAt(chain: unknown, index: number): Record<string, unknown> {
+    const blocks = (chain as { blocks?: unknown }).blocks;
+    const block = Array.isArray(blocks) ? blocks[index] : null;
+    return typeof block === 'object' && block !== null ? (block as Record<string, unknown>) : {};
+  }
+
+  /**
+   * One block's verdict, check by check. Built with `textContent` throughout:
+   * every string here came out of a document fetched over a network, and the
+   * page that displays it must not be able to be talked into running it.
+   */
+  function renderBlock(result: BlockVerification, source: Record<string, unknown>): HTMLLIElement {
+    const row = document.createElement('li');
+    row.className = 'vfy-block';
+    row.dataset.ok = String(result.ok);
+
+    const top = document.createElement('div');
+    top.className = 'vfy-b-top';
+
+    const height = document.createElement('span');
+    height.className = 'vfy-n';
+    height.textContent = `#${String(result.height)}`;
+    top.appendChild(height);
+
+    const period = document.createElement('span');
+    period.className = 'vfy-per';
+    // Not committed to any hash — the mined header covers height, prevHash,
+    // merkleRoot, timestamp, txCount, gasUsed, difficulty and nonce, and not
+    // this. Shown because it is how every other page names a block, never as
+    // something this check vouches for; the catalogue above says as much.
+    period.textContent = shownString(source.period, '—');
+    top.appendChild(period);
+
+    const txs = document.createElement('span');
+    txs.className = 'vfy-c';
+    const count = Array.isArray(source.transactions) ? source.transactions.length : 0;
+    txs.textContent = `${String(count)} tx`;
+    top.appendChild(txs);
+
+    const mark = document.createElement('span');
+    mark.className = 'vfy-mark';
+    mark.dataset.ok = String(result.ok);
+    mark.textContent = result.ok ? 'Passed' : 'Failed';
+    top.appendChild(mark);
+
+    row.appendChild(top);
+
+    const checks = document.createElement('ul');
+    checks.className = 'vfy-checks';
+    for (const check of CHECKS) {
+      const item = document.createElement('li');
+      item.className = 'vfy-check';
+      const ok = result[check.field];
+      item.dataset.ok = String(ok);
+      const glyph = document.createElement('span');
+      glyph.className = 'vfy-g';
+      // Not colour alone: the pass/fail difference has to survive a printout
+      // and a reader who cannot tell --good from --bad apart.
+      glyph.textContent = ok ? '✓' : '✗';
+      const label = document.createElement('span');
+      label.className = 'vfy-l';
+      label.textContent = check.label;
+      item.appendChild(glyph);
+      item.appendChild(label);
+      checks.appendChild(item);
+    }
+    row.appendChild(checks);
+
+    if (result.reason !== undefined) {
+      const reason = document.createElement('p');
+      reason.className = 'vfy-reason';
+      reason.textContent = `Khối hỏng cấu trúc, không kiểm được: ${result.reason}`;
+      row.appendChild(reason);
+    }
+    return row;
+  }
+
+  /** Hand the browser back the thread, so each row paints as it lands. */
+  function paint(): Promise<void> {
+    return new Promise((resolve) => {
+      setTimeout(resolve, 0);
+    });
+  }
+
+  async function run(results: HTMLElement): Promise<void> {
+    setStamp('running', 'Đang chạy');
+    say('Đang tải /chain.json…');
+
+    let chain: unknown;
+    try {
+      // The path is written out here, at the call, rather than held in a
+      // constant: a constant is what a minifier renames, and the guard that
+      // this island fetches one same-origin path and nothing else (§9 — a page
+      // load touches no third party) reads the built bundle, where a renamed
+      // variable would leave it nothing to check.
+      //
+      // `no-store` because a cached ledger is a stale answer to the one
+      // question this page exists to ask.
+      const response = await fetch('/chain.json', { cache: 'no-store' });
+      if (!response.ok) {
+        fail(`Không tải được /chain.json (HTTP ${String(response.status)}). Chưa kiểm được gì cả.`);
+        return;
+      }
+      // `text()` then `JSON.parse`, so a truncated or non-JSON body fails here
+      // with a message about the document rather than somewhere inside the
+      // verifier.
+      chain = JSON.parse(await response.text());
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      fail(
+        `Không đọc được /chain.json: ${detail}. Tài liệu có thể bị cắt cụt hoặc không phải JSON — ` +
+          'chưa kiểm được gì cả.',
+      );
+      return;
+    }
+
+    const blocks = (chain as { blocks?: unknown }).blocks;
+    const total = Array.isArray(blocks) ? blocks.length : 0;
+    say(
+      total === 0
+        ? 'Đã tải /chain.json.'
+        : `Đang băm lại ${String(total)} khối, ngay trong trình duyệt này. Không hỏi máy chủ nào.`,
+    );
+
+    const stream = verifyChainStream(chain as Chain);
+    let index = 0;
+    let failed = 0;
+    let transactions = 0;
+    let step = await stream.next();
+    while (step.done !== true) {
+      const source = blockAt(chain, index);
+      results.appendChild(renderBlock(step.value, source));
+      if (!step.value.ok) failed += 1;
+      if (Array.isArray(source.transactions)) transactions += source.transactions.length;
+      index += 1;
+      await paint();
+      step = await stream.next();
+    }
+    // The generator's return value: the asset registry's problem, or null.
+    // Chain-level rather than per-block, and part of what `verifyChain` proves
+    // — without it this page would be a weaker check than the build's.
+    const registry = step.value;
+
+    const summary = `${String(index)} khối · ${String(transactions)} giao dịch · băm lại tại chỗ`;
+    if (index === 0) {
+      setStamp('idle', 'Trống');
+      finish(false, 'Chuỗi chưa có khối nào để kiểm.', summary);
+      return;
+    }
+    if (failed === 0 && registry === null) {
+      setStamp('ok', 'Verified');
+      say('Xong. Mỗi hash dưới đây do chính máy bạn tính lại, từ dữ liệu thô.');
+      finish(
+        true,
+        'Chuỗi hợp lệ. Mọi hash khối, gốc Merkle, hash giao dịch, tổng gas/value, liên kết prevHash ' +
+          'và bằng chứng công việc đều tính lại khớp — bạn không phải tin trang này, bạn vừa tự kiểm.',
+        summary,
+      );
+      return;
+    }
+    setStamp('fail', 'Failed');
+    say('Xong. Có thứ không khớp — xem khối được đánh dấu bên dưới.');
+    const registryNote = registry === null ? '' : ` Sổ tài sản: ${registry}.`;
+    finish(
+      false,
+      failed === 0
+        ? `Mọi khối đều khớp, nhưng chuỗi vẫn không hợp lệ.${registryNote}`
+        : `${String(failed)}/${String(index)} khối không khớp: dữ liệu bên dưới không phải thứ đã được băm.${registryNote}`,
+      summary,
+    );
+  }
+
+  if (list !== null) {
+    void run(list);
+  }
+</script>

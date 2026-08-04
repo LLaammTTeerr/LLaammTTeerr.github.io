@@ -33,7 +33,7 @@ export const ROUTES: RouteEntry[] = [
   // provenance.
   { id: 'contracts', href: '/contracts', label: 'Contracts', built: true },
   { id: 'mempool', href: '/mempool', label: 'Mempool', built: true },
-  { id: 'verify', href: '/verify', label: 'Verify', built: false },
+  { id: 'verify', href: '/verify', label: 'Verify', built: true },
 ];
 
 /** A single route by id. Throws on a typo'd id rather than rendering nothing. */

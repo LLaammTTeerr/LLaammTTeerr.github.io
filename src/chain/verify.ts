@@ -303,22 +303,66 @@ export interface ChainVerification {
   registry?: string;
 }
 
-export async function verifyChain(chain: Chain): Promise<ChainVerification> {
+/**
+ * §7 — the same verification, one block at a time.
+ *
+ * The browser's entry point, and the reason it exists: `verifyChain` answers
+ * only when the whole chain is done, which is right for a build and wrong for
+ * a tab. A reader who fetched `/chain.json` and got nothing on screen until
+ * every block had been hashed would be watching a page that looks broken, and
+ * on a long chain would be watching it for a while. This yields a verdict per
+ * block as it lands.
+ *
+ * `verifyChain` is expressed through this rather than beside it: two
+ * implementations of "is this chain valid" would be two answers the moment one
+ * of them was edited, and the whole point of §7 is that the build and the
+ * reader's tab prove the same thing.
+ *
+ * The **return value** is the asset registry's problem, or null — chain-level
+ * and not per-block, so it cannot be yielded as one. `for await` discards it,
+ * which is exactly right for a caller that only wants blocks; a caller that
+ * wants the whole verdict (`verifyChain`, and the `/verify` island) drives
+ * `.next()` and reads the final `value`. Without it the browser check would be
+ * strictly weaker than the build's, and a chain whose registry disagrees with
+ * its transactions would report clean in the one place a reader looks.
+ *
+ * Total over untrusted input, like the rest of this module: every byte of
+ * `chain.json` arrives over a network, and a mangled document must produce a
+ * verdict, never an exception.
+ */
+export async function* verifyChainStream(chain: Chain): AsyncGenerator<BlockVerification, string | null> {
   if (!isRecord(chain) || !Array.isArray(chain.blocks)) {
-    return { ok: false, blocks: [] };
+    return 'chain is not an object with a "blocks" array';
   }
   const difficulty = isFiniteNumber(chain.difficulty) ? chain.difficulty : 0;
 
-  const blocks: BlockVerification[] = [];
   let prev: Block | null = null;
   for (const block of chain.blocks) {
     const result = await verifyBlock(block, prev, difficulty);
-    blocks.push(result);
     // A structurally broken block cannot be a parent: leave `prev` in place so
     // the next block reports a link failure rather than crashing on it.
     if (result.reason === undefined) prev = block;
+    yield result;
   }
-  const registry = registryProblem(chain);
+  return registryProblem(chain);
+}
+
+export async function verifyChain(chain: Chain): Promise<ChainVerification> {
+  // Kept ahead of the stream, not folded into it: this is the one input shape
+  // for which `verifyChain` answers a bare `{ ok: false, blocks: [] }` with no
+  // `registry` key at all, and that is behaviour callers already depend on.
+  if (!isRecord(chain) || !Array.isArray(chain.blocks)) {
+    return { ok: false, blocks: [] };
+  }
+
+  const blocks: BlockVerification[] = [];
+  const stream = verifyChainStream(chain);
+  let step = await stream.next();
+  while (step.done !== true) {
+    blocks.push(step.value);
+    step = await stream.next();
+  }
+  const registry = step.value;
   const ok = blocks.every((b) => b.ok) && registry === null;
   return registry === null ? { ok, blocks } : { ok, blocks, registry };
 }

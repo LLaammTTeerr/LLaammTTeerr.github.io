@@ -1,0 +1,102 @@
+/* §7 — `/verify`.
+   Every colour comes from a token: eleven reader-selectable palettes redefine
+   --good, --bad, --warn, --dim and the rest, so a literal here would be wrong
+   under ten of them (tests/site/verify-page.test.ts scans this whole file).
+   The three states a check can be in — waiting, passed, failed — must also be
+   distinguishable without colour, so each carries a glyph of its own as well:
+   a reader with a red/green deficiency, or one who prints the page, still sees
+   which line failed. */
+
+.vfy-intro { max-width: 44rem; margin: 0 0 1.3rem; line-height: 1.7; }
+.vfy-intro p { margin: 0 0 0.8rem; }
+.vfy-intro p:last-child { margin-bottom: 0; }
+.vfy-intro strong { font-weight: 600; }
+.vfy-intro a { color: var(--acc); text-underline-offset: 3px; }
+.vfy-intro code { font-family: var(--mono); font-size: 0.86em; color: var(--c-hash); }
+
+/* The check catalogue, rendered on the server so the page explains itself
+   before — and without — any JavaScript. */
+.vfy-h2 {
+  font-family: var(--mono); font-size: 0.68rem; letter-spacing: 0.11em;
+  text-transform: uppercase; color: var(--dim); font-weight: 500;
+  margin: 1.6rem 0 0.7rem;
+}
+.vfy-what { list-style: none; margin: 0 0 1.4rem; padding: 0; display: grid; gap: 0.55rem; }
+.vfy-what li {
+  padding: 0.6rem 0.75rem;
+  background: var(--surf); border: 1px solid var(--line); border-left: 2px solid var(--line2);
+  border-radius: 4px;
+}
+.vfy-what .vfy-k { display: block; }
+.vfy-what p { margin: 0.3rem 0 0; font-size: 0.88rem; color: var(--dim); line-height: 1.6; }
+
+.vfy-k {
+  font-family: var(--mono); font-size: 0.68rem; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--txt);
+}
+
+.vfy-status {
+  margin: 0.85rem 0 0; font-size: 0.92rem; line-height: 1.6; color: var(--dim);
+}
+.vfy-status a { color: var(--acc); text-underline-offset: 3px; }
+
+.vfy-stamp {
+  margin-left: auto;
+  font-family: var(--mono); font-size: 0.6rem; letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--dim);
+  border: 1px solid var(--line2); border-radius: 3px; padding: 0.15rem 0.45rem;
+}
+.vfy-stamp[data-state='running'] { color: var(--warn); border-color: var(--warn); border-style: dashed; }
+.vfy-stamp[data-state='ok'] { color: var(--good); border-color: var(--good); }
+.vfy-stamp[data-state='fail'] { color: var(--bad); border-color: var(--bad); }
+
+/* One block's result, appended as it lands. */
+.vfy-blocks { list-style: none; margin: 1rem 0 0; padding: 0; display: grid; gap: 0.5rem; }
+.vfy-blocks:empty { margin: 0; }
+.vfy-block {
+  padding: 0.6rem 0.75rem;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 4px;
+}
+.vfy-block[data-ok='false'] { border-color: var(--bad); }
+.vfy-b-top {
+  display: flex; flex-wrap: wrap; gap: 0.3rem 0.8rem; align-items: baseline;
+  font-family: var(--mono); font-size: 0.7rem; color: var(--dim);
+}
+.vfy-b-top .vfy-n { color: var(--txt); font-size: 0.8rem; }
+.vfy-b-top .vfy-n a { color: inherit; text-decoration: none; }
+.vfy-b-top .vfy-n a:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+.vfy-mark { margin-left: auto; font-size: 0.62rem; letter-spacing: 0.14em; text-transform: uppercase; }
+.vfy-mark[data-ok='true'] { color: var(--good); }
+.vfy-mark[data-ok='false'] { color: var(--bad); }
+
+.vfy-checks {
+  list-style: none; margin: 0.5rem 0 0; padding: 0;
+  display: flex; flex-wrap: wrap; gap: 0.3rem 1rem;
+}
+.vfy-check {
+  display: inline-flex; align-items: baseline; gap: 0.35rem;
+  font-family: var(--mono); font-size: 0.66rem; letter-spacing: 0.07em;
+  text-transform: uppercase; color: var(--dim);
+}
+.vfy-check[data-ok='true'] { color: var(--good); }
+.vfy-check[data-ok='false'] { color: var(--bad); }
+/* The glyph, so the pass/fail distinction survives without colour. */
+.vfy-check .vfy-g { font-weight: 700; }
+
+.vfy-reason {
+  margin: 0.45rem 0 0; font-family: var(--mono); font-size: 0.72rem;
+  color: var(--bad); word-break: break-word;
+}
+
+.vfy-verdict {
+  margin: 1rem 0 0; padding-top: 0.8rem; border-top: 1px solid var(--line);
+  font-size: 0.95rem; line-height: 1.6;
+}
+.vfy-verdict[data-ok='true'] { color: var(--good); }
+.vfy-verdict[data-ok='false'] { color: var(--bad); }
+.vfy-verdict .vfy-sum { display: block; margin-top: 0.3rem; color: var(--dim); font-family: var(--mono); font-size: 0.72rem; }
+
+@media (max-width: 34rem) {
+  .vfy-checks { gap: 0.25rem 0.7rem; }
+}
