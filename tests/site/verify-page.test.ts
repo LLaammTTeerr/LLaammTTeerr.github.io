@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { DIST, cssPerPage, distPages, internalSrcs, readDist, rendered, resolvesIn } from './dist';
+import { DIST, cssPerPage, distPages, readDist, rendered, resolvesIn, scriptClosure } from './dist';
 import { parseRules, selectorParts } from './css';
 import { ROUTES, routeById } from '../../src/site/routes';
 import { CHECKS } from '../../src/site/verify-checks';
@@ -26,36 +26,6 @@ function mainOf(html: string): string {
 /** Visible text, tags stripped — so a class name can never satisfy a prose assertion. */
 function text(html: string): string {
   return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-}
-
-/**
- * Every byte of JavaScript one built page loads: the module scripts it names,
- * plus every chunk they import, transitively.
- *
- * Reading only the entry file would be reading whatever Vite happened not to
- * split out. `src/chain/verify.ts` and its closure are exactly the code most
- * likely to land in a shared chunk, and they are the code this page exists to
- * run.
- */
-function scriptClosure(page: string): { files: string[]; code: string } {
-  const entries = internalSrcs(readDist(page)).filter((src) => src.endsWith('.js'));
-  const seen = new Set<string>();
-  const stack = [...entries];
-  const parts: string[] = [];
-  while (stack.length > 0) {
-    const url = stack.pop()!;
-    if (seen.has(url)) continue;
-    seen.add(url);
-    const source = readFileSync(join(DIST, url.replace(/^\//, '')), 'utf8');
-    parts.push(source);
-    // Relative specifiers inside `_astro/` — `import"./chunk.abc.js"` and
-    // `from"./chunk.abc.js"` — resolved against the importing file's directory.
-    const dir = url.slice(0, url.lastIndexOf('/'));
-    for (const m of source.matchAll(/(?:from|import)\s*["'](\.[^"']+)["']/g)) {
-      stack.push(`${dir}/${m[1]!.replace(/^\.\//, '')}`);
-    }
-  }
-  return { files: [...seen], code: parts.join('\n') };
 }
 
 describe('/verify is built, linked and reachable', () => {

@@ -347,6 +347,204 @@ export async function* verifyChainStream(chain: Chain): AsyncGenerator<BlockVeri
   return registryProblem(chain);
 }
 
+export interface TxVerification {
+  /**
+   * The hash of the record the chain's newest word on this post *is* — the
+   * newest amendment's, or the original post transaction's (§3.9). `null` when
+   * no such record could be found at all.
+   */
+  hash: Hex | null;
+  /** The height of the block that sealed it, or `null` while it is unsealed. */
+  height: number | null;
+  /** False while the governing record is still in the open block (§3.6). */
+  sealed: boolean;
+  /** The record the page names is the one the chain currently governs this post with. */
+  recordOk: boolean;
+  /** The served canonical source hashes to that record's committed `contentHash`. */
+  bodyOk: boolean;
+  /** That record's own hash recomputes from its fields, including `contentHash`. */
+  txOk: boolean;
+  /**
+   * The block's Merkle root rebuilds from its transaction hashes, this one
+   * among them.
+   *
+   * **`null` is not `true`.** A pending record has no mined block, so there is
+   * no root to rebuild and no check was run — reporting `false` would accuse an
+   * honest chain, and reporting `true` would claim a check that never happened.
+   */
+  merkleOk: boolean | null;
+  /** The block header rehashes to its recorded hash and meets its own difficulty. `null` as above. */
+  blockOk: boolean | null;
+  ok: boolean;
+  /** Set only when no verdict could be reached — nothing below it was checked. */
+  reason?: string;
+}
+
+function unverifiable(reason: string): TxVerification {
+  return {
+    hash: null,
+    height: null,
+    sealed: false,
+    recordOk: false,
+    bodyOk: false,
+    txOk: false,
+    merkleOk: null,
+    blockOk: null,
+    ok: false,
+    reason,
+  };
+}
+
+/**
+ * §7 — one transaction, from the raw text it was written in through to the
+ * hash of the block that sealed it.
+ *
+ * `verifyChain` proves the ledger is internally consistent. It cannot prove
+ * that the words a reader just read are the words that were hashed: the ledger
+ * stores a `contentHash` and no body at all (§3.1), so the text and the chain
+ * only meet when someone hashes the text. That is the one link this adds, and
+ * it is the reason the site publishes each post's canonical source.
+ *
+ * Four links, in order, and each is a separate field because a reader is owed
+ * the answer to *which* one broke:
+ *
+ *  1. `recordOk` — the transaction the page names is the chain's newest record
+ *     for this slug. Resolved here from the documents rather than believed from
+ *     the page, so a page printing some other transaction's hash is caught
+ *     rather than obeyed;
+ *  2. `bodyOk`   — the body handed in hashes to that record's `contentHash`;
+ *  3. `txOk`     — that record's hash recomputes from its own fields, the
+ *     `contentHash` among them. Without this a forged title passes everything
+ *     else, which is the same reason `transactionsOk` exists;
+ *  4. `merkleOk` / `blockOk` — the block's Merkle root rebuilds from its
+ *     transaction hashes, and its header rehashes to the hash it was mined to.
+ *
+ * `pendingTxs` is the open block's recorded transactions, or `null`. Taken as a
+ * bare array and **not** as a `PendingLock`: that type lives in `pending.ts`,
+ * which imports the filesystem module, and this file ships to browsers. Even
+ * the specifier is unspellable here — the browser-safety guard in
+ * `tests/chain/verify.test.ts` is a substring check over this whole file, on
+ * purpose, so that a `require` or a runtime-built string cannot slip past the
+ * import walk. It caught this sentence's first draft.
+ *
+ * What this does NOT prove, and the caller must not imply: that the block sits
+ * on the chain the rest of the ledger describes. `prevHash` links, the chain's
+ * difficulty floor and the asset registry are `verifyChain`'s job — `/verify`
+ * runs it over every block. This is one transaction, checked to the depth one
+ * transaction can be checked.
+ *
+ * Total over untrusted input, like everything else here: every byte arrives
+ * over a network, and a mangled document must produce a verdict, never a throw.
+ */
+export async function verifyTransaction(
+  slug: string,
+  body: string,
+  claimedHash: Hex,
+  chain: Chain,
+  pendingTxs: readonly Transaction[] | null,
+): Promise<TxVerification> {
+  if (!isRecord(chain) || !Array.isArray(chain.blocks)) {
+    return unverifiable('chain is not an object with a "blocks" array');
+  }
+
+  // Structurally broken blocks are walked past rather than crashed on, and
+  // sorted by height rather than trusted in array order — `latestAmendment` in
+  // `src/site/chain-data.ts` documents why nothing may assume the ledger is
+  // height-ordered, and this is the browser's copy of that same §3.9 walk.
+  const blocks: Block[] = [];
+  for (const block of chain.blocks) {
+    if (blockStructuralProblem(block) === null) blocks.push(block as Block);
+  }
+  blocks.sort((a, b) => a.height - b.height);
+
+  const pending: Transaction[] = [];
+  if (Array.isArray(pendingTxs)) {
+    for (const [index, tx] of pendingTxs.entries()) {
+      if (transactionStructuralProblem(tx, index) === null) pending.push(tx as Transaction);
+    }
+  }
+
+  // The original post transaction. Sealed history first, then the open block:
+  // a slug cannot be in both, because `buildChain` represents a later edit to a
+  // sealed post as an amendment rather than as a second post (§3.9).
+  let original: Transaction | null = null;
+  let block: Block | null = null;
+  for (const b of blocks) {
+    for (const tx of b.transactions) {
+      if (tx.type === 'post' && tx.slug === slug) {
+        original = tx;
+        block = b;
+      }
+    }
+  }
+  if (original === null) {
+    for (const tx of pending) {
+      if (tx.type === 'post' && tx.slug === slug) original = tx;
+    }
+  }
+  if (original === null) {
+    return unverifiable(`no post transaction on the chain carries the slug "${slug}"`);
+  }
+
+  // §3.9 — the newest amendment governs. Everything in the open block is newer
+  // than everything sealed, so it is searched first; the sealed blocks are then
+  // walked in ascending height keeping the last match, because walking them the
+  // other way settles on the *oldest* amendment and would report a mismatch on
+  // a post that is perfectly in order.
+  let governing = original;
+  let newestPending: Transaction | null = null;
+  for (const tx of pending) {
+    if (tx.type === 'amendment' && tx.amends === original.hash) newestPending = tx;
+  }
+  if (newestPending !== null) {
+    governing = newestPending;
+    block = null;
+  } else {
+    for (const b of blocks) {
+      for (const tx of b.transactions) {
+        if (tx.type === 'amendment' && tx.amends === original.hash) {
+          governing = tx;
+          block = b;
+        }
+      }
+    }
+  }
+
+  const recordOk = governing.hash === claimedHash;
+  const bodyOk = (await sha256Hex(body)) === governing.contentHash;
+  const expected = await expectedTxHash(governing);
+  const txOk = expected !== null && expected === governing.hash;
+
+  let merkleOk: boolean | null = null;
+  let blockOk: boolean | null = null;
+  if (block !== null) {
+    // `verifyBlock` and not a second header recomputation here: two definitions
+    // of "this block is what it says it is" would be two answers the moment one
+    // was edited, which is the whole reason §7 insists on one module.
+    const sealedIn = block;
+    const prev = blocks.find((b) => b.height === sealedIn.height - 1) ?? null;
+    const difficulty = isFiniteNumber(chain.difficulty) ? chain.difficulty : 0;
+    const result = await verifyBlock(sealedIn, prev, difficulty);
+    // The inclusion half is stated rather than assumed. It is true by
+    // construction today — `governing` was found inside `block.transactions` —
+    // and the label promises it, so it is checked where the label is answered.
+    merkleOk = result.merkleOk && sealedIn.transactions.some((t) => t.hash === governing.hash);
+    blockOk = result.hashOk && result.powOk;
+  }
+
+  return {
+    hash: governing.hash,
+    height: block === null ? null : block.height,
+    sealed: block !== null,
+    recordOk,
+    bodyOk,
+    txOk,
+    merkleOk,
+    blockOk,
+    ok: recordOk && bodyOk && txOk && merkleOk !== false && blockOk !== false,
+  };
+}
+
 export async function verifyChain(chain: Chain): Promise<ChainVerification> {
   // Kept ahead of the stream, not folded into it: this is the one input shape
   // for which `verifyChain` answers a bare `{ ok: false, blocks: [] }` with no

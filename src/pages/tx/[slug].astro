@@ -1,6 +1,7 @@
 ---
 import Base from '../../layouts/Base.astro';
 import TxPanel from '../../components/TxPanel.astro';
+import TxVerifier from '../../components/TxVerifier.astro';
 import { getPendingPosts, getPostContent, getPosts } from '../../site/chain-data';
 import { renderMarkdown } from '../../site/markdown';
 import '../../styles/post.css';
@@ -52,4 +53,11 @@ const post = content.post;
     <p class="byline">{post.date} · {post.tags.map((t) => `#${t}`).join(' ')}</p>
     <Fragment set:html={html} />
   </article>
+  {/*
+    §7 — after the text, not before it. The reader came to read; the offer to
+    check what they just read only means anything once they have. The control
+    verifies `post` — the resolution — because that is the record the panel and
+    the body above it describe (§3.9).
+  */}
+  <TxVerifier post={post} />
 </Base>

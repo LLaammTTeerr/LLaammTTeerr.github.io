@@ -1,0 +1,342 @@
+---
+import type { ResolvedPost } from '../site/chain-data';
+import { TX_CHECKS } from '../site/tx-checks';
+// The panel's styles travel with the panel — see the note in WorkMeter.astro.
+// `.card`/`.card-top`/`.per` come from chain.css and the `.vfy-*` chrome from
+// verify.css, deliberately shared with `/verify`: this is the same feature at a
+// different scale, and a reader who has seen one must recognise the other.
+import '../styles/chain.css';
+import '../styles/verify.css';
+
+/**
+ * §7 — **"Verify this transaction"**: this post, from the raw text it was
+ * written in through to the hash of the block that sealed it.
+ *
+ * `/verify` proves the ledger is internally consistent. It cannot prove that
+ * the words above this control are the words that were hashed, because the
+ * ledger stores a `contentHash` and no body at all (§3.1). This closes that
+ * gap, and it is the only place on the site where text and chain actually meet:
+ * the canonical source is fetched from `/tx/<slug>/body.txt` — the normalized
+ * Markdown, byte for byte what was hashed — and hashed in the reader's own
+ * browser.
+ *
+ * One prop, and it is the resolution (`ResolvedPost`). The control must verify
+ * the record the page *displays*, which after an amendment is the amendment
+ * (§3.9); handing it a raw ledger entry is a type error, for the reasons
+ * `chain-data.ts` sets out at length.
+ *
+ * Only `slug` and `hash` reach the script, through data attributes, and neither
+ * is trusted: `verifyTransaction` resolves the governing record from the
+ * fetched documents itself and reports `recordOk: false` if the page named a
+ * different one. Everything else on screen is recomputed.
+ *
+ * A **button**, not an on-load fetch, and the difference is not cosmetic: the
+ * ledger is a document a reader here to *read* has no reason to download. §7
+ * says a post page "offers" this, and an offer is something you accept.
+ *
+ * With JavaScript off there is still something worth having: the two commands
+ * that reach the same verdict without running any of this. That is the property
+ * the sibling-file design was chosen for — see `src/pages/tx/[slug]/body.txt.ts`
+ * — and printing them here is what makes it a real offer rather than a claim.
+ *
+ * Deliberately not `define:vars`: it would force the script inline, and an
+ * inline script cannot import anything — which would mean re-implementing the
+ * verifier in the template.
+ *
+ * No clock (§14).
+ */
+interface Props {
+  post: ResolvedPost;
+}
+const { post } = Astro.props;
+const { slug, pending } = post;
+// `sha256sum` prints 64 bare hex characters; the chain writes `0x` in front of
+// them. Showing the chain's spelling alone would leave a reader comparing two
+// strings that differ, in the one place this site cannot afford a false alarm.
+const digest = post.contentHash.slice(2);
+const source = `/tx/${slug}/body.txt`;
+---
+
+<section class="card vfy txv" id="txv" aria-labelledby="txv-heading" data-slug={slug} data-hash={post.hash}>
+  <h2 id="txv-heading" class="sr-only">Kiểm chứng giao dịch này</h2>
+  <div class="card-top">
+    <span class="per">Transaction check</span>
+    <span class="vfy-stamp" id="txv-stamp" data-state="idle">Chưa chạy</span>
+  </div>
+
+  {/*
+    The no-JavaScript state, and the honest one for the moment before the module
+    script runs: nothing has been checked yet, and this says so rather than
+    showing a panel of ticks that were never earned.
+  */}
+  <p class="vfy-status" id="txv-status" role="status">
+    Nút dưới đây <strong>cần JavaScript</strong>: nó tải văn bản gốc của chính bài này
+    (<a href={source}><code>body.txt</code></a>) cùng <a href="/chain.json"><code>/chain.json</code></a>,
+    rồi băm lại tất cả ngay trong trình duyệt của bạn. Không có JavaScript thì vẫn kiểm được —
+    bằng hai câu lệnh ở cuối khối này.
+  </p>
+
+  {/*
+    `disabled` in the markup and enabled by the script, so a reader with scripts
+    off is not offered a button that does nothing when pressed.
+  */}
+  <button type="button" class="txv-run" id="txv-run" disabled>Verify this transaction</button>
+
+  <ol class="txv-steps" id="txv-steps">
+    {TX_CHECKS.map((check) => (
+      <li
+        class="txv-step"
+        data-field={check.field}
+        data-ok={pending && check.sealedOnly ? 'skip' : 'idle'}
+      >
+        <span class="txv-g">{pending && check.sealedOnly ? '—' : '·'}</span>
+        <span class="vfy-k txv-l">{check.label}</span>
+        <p>{check.note}</p>
+      </li>
+    ))}
+  </ol>
+
+  {pending ? (
+    /*
+      §3.6 — a pending transaction has a real hash and no mined block: no nonce,
+      no proof of work, no Merkle root. Saying so here, at build time, rather
+      than leaving it to the script: a reader who never presses the button must
+      not be able to read the two greyed steps as "checked".
+    */
+    <p class="txv-note">
+      Giao dịch này còn nằm trong <a href="/blocks">khối đang mở</a> — chưa được đào. Hai phép kiểm
+      cuối vì thế <strong>không kiểm được</strong>, không phải vì có gì sai: chưa có gốc Merkle,
+      chưa có hash khối, chưa có bằng chứng công việc nào để tính lại. Phép kiểm ở đây dừng sau hai
+      mắt xích đầu, và nó yếu hơn hẳn phép kiểm trên một bài đã niêm phong.
+    </p>
+  ) : null}
+
+  <p class="vfy-verdict" id="txv-verdict" hidden></p>
+
+  <details class="txv-cmd">
+    <summary>Tự kiểm bằng tay, không chạy JavaScript của trang này</summary>
+    <p>
+      Văn bản gốc được phục vụ như một tệp riêng đúng vì lý do này: bạn không phải tin đoạn mã ở
+      trên, chỉ cần hai lệnh có sẵn trên mọi máy. Đặt <code>$SITE</code> là địa chỉ của trang bạn
+      đang đọc.
+    </p>
+    <pre><code>curl -s "$SITE{source}" | sha256sum
+{digest}  -</code></pre>
+    <p>
+      Dòng thứ hai là kết quả phải ra: đúng <code>contentHash</code> mà giao dịch này cam kết
+      (sổ cái ghi thêm tiền tố <code>0x</code>). Muốn xem chính bản ghi ấy thì tải{' '}
+      <a href="/chain.json"><code>/chain.json</code></a> rồi tìm hash giao dịch in ở đầu trang.
+    </p>
+  </details>
+</section>
+
+<script>
+  import { verifyTransaction } from '../chain/verify';
+  import type { TxVerification } from '../chain/verify';
+  import type { Chain, Transaction } from '../chain/types';
+  import { TX_CHECKS } from '../site/tx-checks';
+
+  const root = document.getElementById('txv');
+  const stamp = document.getElementById('txv-stamp');
+  const status = document.getElementById('txv-status');
+  const steps = document.getElementById('txv-steps');
+  const verdict = document.getElementById('txv-verdict');
+  const button = document.getElementById('txv-run');
+
+  function setStamp(state: string, label: string): void {
+    if (stamp === null) return;
+    stamp.dataset.state = state;
+    stamp.textContent = label;
+  }
+
+  function say(text: string): void {
+    if (status !== null) status.textContent = text;
+  }
+
+  function finish(ok: boolean, text: string, summary: string): void {
+    if (verdict === null) return;
+    verdict.textContent = '';
+    verdict.dataset.ok = String(ok);
+    verdict.appendChild(document.createTextNode(text));
+    if (summary !== '') {
+      const line = document.createElement('span');
+      line.className = 'vfy-sum';
+      line.textContent = summary;
+      verdict.appendChild(line);
+    }
+    verdict.hidden = false;
+  }
+
+  function fail(text: string): void {
+    setStamp('fail', 'Failed');
+    finish(false, text, '');
+  }
+
+  /**
+   * One step's verdict. Three states, not two: `null` means the check could not
+   * run at all, which on a pending transaction is the truth and must never be
+   * painted as a pass. Built with `textContent` throughout — every string here
+   * came out of a document fetched over a network.
+   */
+  function paintStep(field: string, state: boolean | null): void {
+    const row = steps?.querySelector(`[data-field="${field}"]`);
+    if (!(row instanceof HTMLElement)) return;
+    row.dataset.ok = state === null ? 'skip' : String(state);
+    const glyph = row.querySelector('.txv-g');
+    // Not colour alone: the difference has to survive a printout and a reader
+    // who cannot tell --good from --bad apart.
+    if (glyph !== null) glyph.textContent = state === null ? '—' : state ? '✓' : '✗';
+  }
+
+  /** A fetched document, or a message saying why there is none. */
+  interface Fetched {
+    text: string | null;
+    missing: boolean;
+    error: string | null;
+  }
+
+  async function read(response: Response): Promise<Fetched> {
+    if (response.status === 404) return { text: null, missing: true, error: null };
+    if (!response.ok) {
+      return { text: null, missing: false, error: `HTTP ${String(response.status)}` };
+    }
+    return { text: await response.text(), missing: false, error: null };
+  }
+
+  /** The open block's recorded transactions, or null when there is no open block. */
+  function pendingTransactions(document_: unknown): readonly Transaction[] | null {
+    const txs = (document_ as { transactions?: unknown }).transactions;
+    return Array.isArray(txs) ? (txs as Transaction[]) : null;
+  }
+
+  function reasonFor(result: TxVerification): string {
+    const broken = TX_CHECKS.filter((check) => result[check.field] === false).map((c) => c.label);
+    return broken.join(' · ');
+  }
+
+  async function run(): Promise<void> {
+    const slug = root?.dataset.slug ?? '';
+    const claimed = root?.dataset.hash ?? '';
+    if (button instanceof HTMLButtonElement) button.disabled = true;
+    setStamp('running', 'Đang chạy');
+    say('Đang tải văn bản gốc và sổ cái…');
+    for (const check of TX_CHECKS) paintStep(check.field, null);
+
+    let body: string;
+    let chain: unknown;
+    let pending: readonly Transaction[] | null = null;
+    try {
+      // Each path is written out here, at its call, rather than held in a
+      // constant: a constant is what a minifier renames, and the guard that
+      // this control fetches same-origin paths and nothing else (§9 — a page
+      // load touches no third party) reads the built bundle, where a renamed
+      // variable would leave it nothing to check.
+      //
+      // `no-store` throughout: a cached ledger is a stale answer to the one
+      // question this control exists to ask.
+      const sourceDoc = await read(await fetch(`/tx/${slug}/body.txt`, { cache: 'no-store' }));
+      if (sourceDoc.text === null) {
+        fail(
+          `Không tải được văn bản gốc của bài này (${sourceDoc.missing ? '404' : (sourceDoc.error ?? 'lỗi')}). ` +
+            'Chưa kiểm được gì cả.',
+        );
+        return;
+      }
+      body = sourceDoc.text;
+
+      const ledger = await read(await fetch('/chain.json', { cache: 'no-store' }));
+      if (ledger.text === null) {
+        fail(
+          `Không tải được /chain.json (${ledger.missing ? '404' : (ledger.error ?? 'lỗi')}). ` +
+            'Chưa kiểm được gì cả.',
+        );
+        return;
+      }
+      // `text()` then `JSON.parse`, so a truncated or non-JSON body fails here
+      // with a message about the document rather than inside the verifier.
+      chain = JSON.parse(ledger.text);
+
+      // The open block, when there is one. A 404 is the correct answer for a
+      // chain with nothing unsealed and must not be an error — but any other
+      // failure must be, because a missing open block would silently resolve a
+      // pending amendment back to the sealed record it supersedes.
+      const open = await read(await fetch('/chain.pending.json', { cache: 'no-store' }));
+      if (open.error !== null) {
+        fail(`Không tải được /chain.pending.json (${open.error}). Chưa kiểm được gì cả.`);
+        return;
+      }
+      if (open.text !== null) pending = pendingTransactions(JSON.parse(open.text));
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      fail(`Không đọc được tài liệu chuỗi: ${detail}. Chưa kiểm được gì cả.`);
+      return;
+    }
+
+    const bytes = new TextEncoder().encode(body).length;
+    say(`Đã tải ${String(bytes)} byte văn bản gốc. Đang băm lại, ngay trong trình duyệt này.`);
+
+    const result = await verifyTransaction(slug, body, claimed, chain as Chain, pending);
+    for (const check of TX_CHECKS) paintStep(check.field, result[check.field]);
+
+    if (result.reason !== undefined) {
+      fail(`Không kiểm được: ${result.reason}.`);
+      return;
+    }
+
+    const summary = `${String(bytes)} byte · SHA-256 tính tại chỗ${
+      result.height === null ? ' · chưa niêm phong' : ` · khối #${String(result.height)}`
+    }`;
+
+    if (!result.ok) {
+      setStamp('fail', 'Failed');
+      say('Xong. Có mắt xích không khớp — xem bước được đánh dấu ở trên.');
+      finish(
+        false,
+        `Không khớp: ${reasonFor(result)}. Nội dung hiển thị trên trang này không phải thứ chuỗi ` +
+          'đã cam kết — đừng tin trang, hãy tin phép tính bạn vừa chạy.',
+        summary,
+      );
+      return;
+    }
+
+    if (!result.sealed) {
+      // Not `Verified`, and the distinction is the whole point of §3.6 here: a
+      // green stamp beside two dashes is read as "checked", and three of five
+      // links passing is a materially weaker statement than five of five. The
+      // stamp is the part a reader takes in without reading anything.
+      setStamp('partial', 'Partial');
+      say('Xong, trong phạm vi kiểm được.');
+      finish(
+        true,
+        'Hai mắt xích đầu khớp: văn bản gốc băm ra đúng contentHash mà giao dịch cam kết, và hash ' +
+          'giao dịch tính lại đúng từ chính các trường của nó. Hai mắt xích sau không tồn tại — ' +
+          'giao dịch còn trong khối đang mở, chưa được đào — nên chúng không được kiểm, chứ không ' +
+          'phải đã kiểm và đạt.',
+        summary,
+      );
+      return;
+    }
+    setStamp('ok', 'Verified');
+    say('Xong. Mỗi hash ở trên do chính máy bạn tính lại, từ văn bản thô.');
+    finish(
+      true,
+      `Khớp hết. Văn bản gốc băm ra đúng contentHash; hash giao dịch tính lại đúng; hash ấy nằm ` +
+        `trong gốc Merkle của khối #${String(result.height)}; và header khối băm lại đúng hash đã ` +
+        'đào, với đủ số chữ số 0 khối tự cam kết. Vòng đã khép: từ chữ thô đến hash khối.',
+      summary,
+    );
+  }
+
+  if (button instanceof HTMLButtonElement) {
+    const control = button;
+    // Enabled here and not in the markup: with scripts off there is nothing to
+    // press, and offering a button that does nothing is worse than offering
+    // none — the two commands below it still work.
+    control.disabled = false;
+    control.addEventListener('click', () => {
+      void run().finally(() => {
+        control.disabled = false;
+      });
+    });
+  }
+</script>

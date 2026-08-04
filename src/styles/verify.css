@@ -49,6 +49,11 @@
 .vfy-stamp[data-state='running'] { color: var(--warn); border-color: var(--warn); border-style: dashed; }
 .vfy-stamp[data-state='ok'] { color: var(--good); border-color: var(--good); }
 .vfy-stamp[data-state='fail'] { color: var(--bad); border-color: var(--bad); }
+/* §3.6 — a check that passed as far as it *could* go, on a transaction with no
+   mined block behind it. Deliberately not the `ok` green: a reader takes in the
+   stamp without reading anything else, and three of five links is a weaker
+   statement than five of five. */
+.vfy-stamp[data-state='partial'] { color: var(--warn); border-color: var(--warn); }
 
 /* One block's result, appended as it lands. */
 .vfy-blocks { list-style: none; margin: 1rem 0 0; padding: 0; display: grid; gap: 0.5rem; }
@@ -100,3 +105,73 @@
 @media (max-width: 34rem) {
   .vfy-checks { gap: 0.25rem 0.7rem; }
 }
+
+/* §7 — "Verify this transaction", the same feature at the scale of one post.
+   Shares the card, the stamp, the status line and the verdict with /verify
+   above; what is new is a button, a step list that carries its own explanation
+   (there is no catalogue elsewhere on a post page to point at), and the two
+   commands that reach the same verdict without running any of this. */
+
+.txv { margin: 2.2rem 0 0; }
+
+.txv-run {
+  margin: 0.9rem 0 0;
+  font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--acc);
+  background: var(--surf); border: 1px solid var(--acc); border-radius: 3px;
+  padding: 0.45rem 0.9rem; cursor: pointer;
+}
+.txv-run:hover:not(:disabled) { background: var(--acc); color: var(--bg); }
+/* Focus is not styled away: this is the one interactive control on the page. */
+.txv-run:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+.txv-run:disabled { color: var(--dim); border-color: var(--line2); cursor: default; }
+
+/* One step: the glyph, the label, and what the step actually proves. The three
+   states — waiting, passed, failed — and the fourth, "could not run", are told
+   apart by the glyph as well as by colour. */
+.txv-steps { list-style: none; margin: 1rem 0 0; padding: 0; display: grid; gap: 0.5rem; }
+.txv-step {
+  display: grid; grid-template-columns: 1.1rem 1fr; gap: 0.15rem 0.5rem;
+  padding: 0.55rem 0.7rem;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 4px;
+}
+.txv-step p {
+  grid-column: 2; margin: 0.25rem 0 0;
+  font-size: 0.85rem; line-height: 1.6; color: var(--dim);
+}
+.txv-step[data-ok='true'] { border-color: var(--good); }
+.txv-step[data-ok='false'] { border-color: var(--bad); }
+.txv-step[data-ok='skip'] { opacity: 0.72; border-style: dashed; }
+
+.txv-g {
+  font-family: var(--mono); font-weight: 700; font-size: 0.8rem;
+  line-height: 1.3; color: var(--dim); text-align: center;
+}
+.txv-step[data-ok='true'] .txv-g { color: var(--good); }
+.txv-step[data-ok='false'] .txv-g { color: var(--bad); }
+.txv-l { line-height: 1.35; }
+
+/* §3.6 — what a pending transaction cannot be checked for, said in the page
+   itself rather than left to the script. */
+.txv-note {
+  margin: 0.9rem 0 0; padding: 0.6rem 0.75rem;
+  background: var(--surf); border: 1px solid var(--line); border-left: 2px solid var(--warn);
+  border-radius: 4px; font-size: 0.88rem; line-height: 1.65; color: var(--dim);
+}
+.txv-note strong { color: var(--txt); font-weight: 600; }
+.txv-note a { color: var(--acc); text-underline-offset: 3px; }
+
+/* The manual check. Not a footnote: it is the reason the canonical source is a
+   file of its own, and the only part of this panel that needs nothing from us. */
+.txv-cmd { margin: 1rem 0 0; font-size: 0.88rem; color: var(--dim); }
+.txv-cmd summary {
+  font-family: var(--mono); font-size: 0.66rem; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--acc); cursor: pointer;
+}
+.txv-cmd p { margin: 0.6rem 0 0; line-height: 1.65; }
+.txv-cmd code { font-family: var(--mono); font-size: 0.86em; color: var(--c-hash); }
+.txv-cmd pre {
+  margin: 0.6rem 0 0; padding: 0.6rem 0.75rem; overflow-x: auto;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 4px;
+}
+.txv-cmd pre code { color: var(--txt); font-size: 0.78rem; line-height: 1.7; }

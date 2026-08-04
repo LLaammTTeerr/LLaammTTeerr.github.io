@@ -284,6 +284,42 @@ export function rowFor(html: string, slug: string): string | null {
 }
 
 /**
+ * Every byte of JavaScript one built page loads: the module scripts it names,
+ * plus every chunk they import, transitively.
+ *
+ * Reading only the entry file reads whatever Vite happened not to split out,
+ * and that is not a stable thing to assert against — `src/chain/verify.ts` is
+ * now imported by two islands, so Vite hoists it into a shared chunk that no
+ * page names directly. Every assertion about "the verifier reaches the browser"
+ * would have gone green against an entry file that no longer contains a line of
+ * it.
+ *
+ * One definition, used by both `verify-page.test.ts` and `tx-verify.test.ts`.
+ * They had a copy each for one commit, which is one commit longer than two
+ * copies of a walk like this survive agreeing.
+ */
+export function scriptClosure(page: string): { files: string[]; code: string } {
+  const entries = internalSrcs(readDist(page)).filter((src) => src.endsWith('.js'));
+  const seen = new Set<string>();
+  const stack = [...entries];
+  const parts: string[] = [];
+  while (stack.length > 0) {
+    const url = stack.pop()!;
+    if (seen.has(url)) continue;
+    seen.add(url);
+    const source = readFileSync(join(DIST, url.replace(/^\//, '')), 'utf8');
+    parts.push(source);
+    // Relative specifiers inside `_astro/` — `import"./chunk.abc.js"` and
+    // `from"./chunk.abc.js"` — resolved against the importing file's directory.
+    const dir = url.slice(0, url.lastIndexOf('/'));
+    for (const m of source.matchAll(/(?:from|import)\s*["'](\.[^"']+)["']/g)) {
+      stack.push(`${dir}/${m[1]!.replace(/^\.\//, '')}`);
+    }
+  }
+  return { files: [...seen], code: parts.join('\n') };
+}
+
+/**
  * Every JavaScript file the build emits, by path, with its source.
  *
  * The §9 guard scanned pages and stylesheets and **not scripts**, which was
